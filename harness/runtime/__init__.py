@@ -1,24 +1,16 @@
 """
 Runtime — the execution environment for Functions.
 
-Like Python's interpreter: it runs Functions and returns typed results.
+Executes Functions according to their Scope settings:
 
-Two context modes (set per-Function via function.scope):
+    Scope.isolated()  → fresh Session, no context
+    Scope.chained()   → sees sibling I/O summaries (separate Sessions)
+    Scope.full()      → shares Session with siblings (full reasoning visible)
+    Custom Scope(...)  → any combination of depth/detail/peer
 
-    isolated    Fresh Session each time. No prior context. Clean slate.
-                Like calling a pure function — no side effects visible.
-
-    chained     Shares a Session with prior chained calls in the same sequence.
-                Each Function sees the call stack (who called whom) and
-                prior Functions' I/O summaries (not their full reasoning).
-                Like sequential statements in a function body — earlier
-                results are visible, but internals are not.
-
-How chained mode preserves KV cache:
-    The Session is reused across chained calls. Prior Function results
-    are appended (not inserted/modified), so the prefix stays intact
-    and KV cache hits are maximized. When a chained sequence ends,
-    the Session is discarded and only I/O summaries survive.
+Session lifecycle is determined by scope.shares_session:
+    - True  → siblings share a Session (peer="full")
+    - False → each Function gets its own Session
 """
 
 from __future__ import annotations
@@ -30,6 +22,7 @@ from pydantic import BaseModel
 
 from harness.function import Function
 from harness.session import Session
+from harness.scope import Scope
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -39,26 +32,23 @@ class Runtime:
     The execution environment for Functions.
 
     Args:
-        session_factory:  Creates a new Session for each isolated execution
-                          (or for each new chained sequence).
+        session_factory:  Creates a new Session when needed.
     """
 
     def __init__(self, session_factory: Callable[[], Session]):
         self._session_factory = session_factory
 
     # ------------------------------------------------------------------
-    # Single execution
+    # Single execution (always isolated)
     # ------------------------------------------------------------------
 
     def execute(self, function: Function, context: dict) -> T:
-        """
-        Execute a single Function. Always uses a fresh Session (isolated).
-        """
+        """Execute a single Function in a fresh Session."""
         session = self._session_factory()
         return function.call(session=session, context=context)
 
     # ------------------------------------------------------------------
-    # Chained execution
+    # Chain execution (respects Scope)
     # ------------------------------------------------------------------
 
     def execute_chain(
@@ -67,76 +57,123 @@ class Runtime:
         context: dict,
     ) -> list:
         """
-        Execute a sequence of Functions with shared context.
+        Execute a sequence of Functions, respecting each Function's Scope.
 
-        For each Function in the chain:
-            - If scope == "isolated": new Session, only sees its own params
-            - If scope == "chained": reuses the chain Session, sees prior I/O
+        How Scope affects execution:
 
-        After the entire chain completes, the shared Session is discarded.
-        Only the structured I/O summaries survive in the returned results.
+        scope.shares_session (peer="full"):
+            → Shares a Session with other "full" peers
+            → Can see complete reasoning of prior siblings
+            → KV cache prefix preserved (append-only)
 
-        This maximizes KV cache hits within a chain (prefix-append only)
-        while keeping the overall context bounded.
+        scope.needs_peers and not shares_session (peer="io"):
+            → Gets its own Session
+            → Receives I/O summaries of prior siblings as context
+
+        not scope.needs_peers (peer="none"):
+            → Gets its own Session
+            → No information from siblings
+
+        scope.needs_call_stack (depth > 0):
+            → Receives call stack info in context
 
         Args:
-            functions:  Ordered list of Functions to execute
+            functions:  Ordered list of Functions
             context:    Initial context
 
         Returns:
-            List of results (Pydantic models) in order.
-            If a Function fails, returns FunctionError for that position
-            and stops the chain.
+            List of results in order. FunctionError on failure (stops chain).
         """
         from harness.function import FunctionError
 
-        chain_session = None  # lazy-created for chained Functions
-        chain_history = []    # I/O summaries for chained Functions
+        shared_session = None       # for peer="full" Functions
+        peer_summaries = []         # I/O summaries for peer="io" Functions
         results = []
 
         for fn in functions:
-            if fn.scope == Function.SCOPE_CHAINED:
-                # Chained: reuse Session, append prior I/O
-                if chain_session is None:
-                    chain_session = self._session_factory()
+            scope = fn.scope
 
-                # Build context with call stack info + prior I/O summaries
-                chain_context = dict(context)
-                if chain_history:
-                    chain_context["_prior_results"] = chain_history
+            # Build the context this Function will see
+            fn_context = self._build_scoped_context(fn, context, peer_summaries)
 
-                try:
-                    result = fn.call(session=chain_session, context=chain_context)
-                    result_dict = result.model_dump()
+            try:
+                if scope.shares_session:
+                    # peer="full" → share Session (append-only, prefix preserved)
+                    if shared_session is None:
+                        shared_session = self._session_factory()
+                    result = fn.call(session=shared_session, context=fn_context)
 
-                    # Record I/O summary for next chained Function
-                    chain_history.append({
-                        "function": fn.name,
-                        "input_params": fn.params,
-                        "output": result_dict,
-                    })
+                else:
+                    # peer="io" or peer="none" → own Session
+                    session = self._session_factory()
+                    result = fn.call(session=session, context=fn_context)
 
-                    # Also store in main context
-                    context[fn.name] = result_dict
-                    results.append(result)
+                result_dict = result.model_dump()
+                context[fn.name] = result_dict
+                results.append(result)
 
-                except FunctionError as e:
-                    results.append(e)
-                    break
+                # Record I/O summary for subsequent peers
+                peer_summaries.append({
+                    "function": fn.name,
+                    "input_params": fn.params,
+                    "output": result_dict,
+                })
 
-            else:
-                # Isolated: fresh Session, no shared state
-                try:
-                    result = self.execute(fn, context)
-                    context[fn.name] = result.model_dump()
-                    results.append(result)
-                except FunctionError as e:
-                    results.append(e)
-                    break
+            except FunctionError as e:
+                results.append(e)
+                break
 
-        # Chain ends → shared Session discarded (GC)
-        # Only context[fn.name] (structured results) survive
         return results
+
+    # ------------------------------------------------------------------
+    # Context building based on Scope
+    # ------------------------------------------------------------------
+
+    def _build_scoped_context(
+        self,
+        function: Function,
+        context: dict,
+        peer_summaries: list,
+    ) -> dict:
+        """
+        Build the context a Function sees, based on its Scope.
+
+        Extracts:
+            - The Function's declared params from context
+            - Call stack info (if scope.depth > 0)
+            - Peer summaries (if scope.peer != "none")
+        """
+        scope = function.scope
+
+        # Start with the Function's declared params
+        if function.params is not None:
+            fn_context = {k: context[k] for k in function.params if k in context}
+        else:
+            fn_context = dict(context)
+
+        # Always include task
+        if "task" in context:
+            fn_context["task"] = context["task"]
+
+        # Add call stack (depth)
+        if scope.needs_call_stack and "_call_stack" in context:
+            stack = context["_call_stack"]
+            if scope.depth == -1:
+                fn_context["_call_stack"] = stack
+            else:
+                fn_context["_call_stack"] = stack[-scope.depth:]
+
+        # Add peer info (injected regardless of params — framework-level context)
+        if scope.needs_peers and peer_summaries:
+            if scope.peer == "io":
+                fn_context["_prior_results"] = peer_summaries
+            # peer="full" doesn't need explicit summaries —
+            # the shared Session already has the full conversation
+
+        # Add call stack (injected regardless of params)
+        # Already handled above
+
+        return fn_context
 
     # ------------------------------------------------------------------
     # Async
@@ -148,11 +185,7 @@ class Runtime:
         return await loop.run_in_executor(None, self.execute, function, context)
 
     async def execute_parallel(self, calls: list[tuple[Function, dict]]) -> list:
-        """
-        Execute multiple Functions concurrently, each in its own Session.
-
-        Like multiprocessing — each call is fully isolated.
-        """
+        """Execute multiple Functions concurrently, each isolated."""
         tasks = [self.execute_async(fn, ctx) for fn, ctx in calls]
         return await asyncio.gather(*tasks, return_exceptions=True)
 

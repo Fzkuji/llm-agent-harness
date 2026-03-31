@@ -1,5 +1,6 @@
 from harness.function import Function, FunctionError
 from harness.session import Session
+from harness.scope import Scope
 from harness.runtime import Runtime
 from harness.context import Context, Frame, LogEntry
 from harness.programmer import Programmer, ProgrammerDecision, ProgrammerResult
@@ -9,6 +10,7 @@ __all__ = [
     "Function",
     "FunctionError",
     "Session",
+    "Scope",
     "Runtime",
     "Context",
     "Frame",

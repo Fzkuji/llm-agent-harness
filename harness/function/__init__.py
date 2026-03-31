@@ -33,8 +33,10 @@ Execution flow:
 from __future__ import annotations
 
 import json
-from typing import Type, TypeVar, Optional
+from typing import Type, TypeVar, Optional, Union
 from pydantic import BaseModel
+
+from harness.scope import Scope
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -73,13 +75,11 @@ class Function:
         return_type Pydantic model this function MUST return
         examples    Optional list of {"input": ..., "output": ...} dicts
         max_retries How many times to retry if output is invalid
-        scope       Context mode for this Function:
-                    - "isolated": fresh Session, no prior context (default)
-                    - "chained":  receives call stack + prior I/O summaries
+        scope       Scope object defining what this Function can see.
+                    Controls call stack visibility, detail level, and peer access.
+                    Use Scope presets: Scope.isolated(), Scope.chained(),
+                    Scope.aware(), Scope.full(), or custom Scope(depth, detail, peer).
     """
-
-    SCOPE_ISOLATED = "isolated"
-    SCOPE_CHAINED = "chained"
 
     def __init__(
         self,
@@ -90,7 +90,7 @@ class Function:
         params: Optional[list[str]] = None,
         examples: Optional[list[dict]] = None,
         max_retries: int = 3,
-        scope: str = "isolated",
+        scope: Union[Scope, None] = None,
     ):
         self.name = name
         self.docstring = docstring
@@ -99,7 +99,7 @@ class Function:
         self.params = params
         self.examples = examples or []
         self.max_retries = max_retries
-        self.scope = scope
+        self.scope = scope or Scope.isolated()
 
     def call(self, session: "Session", context: dict) -> T:
         """
@@ -148,10 +148,23 @@ class Function:
     # ------------------------------------------------------------------
 
     def _extract_arguments(self, context: dict) -> dict:
-        """Extract declared params from context to use as function arguments."""
+        """Extract declared params from context to use as function arguments.
+
+        Framework-injected keys (prefixed with _) are always included
+        regardless of params, since they are Scope-level context
+        (call stack, prior results, etc.), not user-level data.
+        """
         if self.params is None:
             return context
-        return {k: context[k] for k in self.params if k in context}
+
+        result = {k: context[k] for k in self.params if k in context}
+
+        # Always include framework-injected context
+        for k, v in context.items():
+            if k.startswith("_"):
+                result[k] = v
+
+        return result
 
     def _assemble_call_message(self, arguments: dict) -> str:
         """Assemble the call message to send to the session."""

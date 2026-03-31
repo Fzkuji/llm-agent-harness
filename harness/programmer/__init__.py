@@ -22,6 +22,7 @@ from harness.function import Function, FunctionError
 from harness.session import Session
 from harness.runtime import Runtime
 from harness.context import Context
+from harness.scope import Scope
 
 
 # ------------------------------------------------------------------
@@ -206,13 +207,13 @@ class Programmer:
             call_context.update(decision.function_args)
 
         try:
-            if fn.scope == Function.SCOPE_CHAINED:
-                # Chained: use persistent chain session
+            if fn.scope.shares_session:
+                # Shared session: peer="full", reuse chain session
                 if self._chain_session is None:
                     self._chain_session = self.runtime._session_factory()
                 result = fn.call(session=self._chain_session, context=call_context)
             else:
-                # Isolated: fresh session via Runtime
+                # Own session: isolated or peer="io"
                 result = self.runtime.execute(fn, call_context)
 
             result_dict = result.model_dump()
