@@ -400,9 +400,9 @@ class ClaudeCodeSession(Session):
         self._timeout = timeout
         self._turn_count = 0
 
-        # Session persistence
+        # Session persistence — Claude Code requires UUID format
         if session_id == "auto":
-            self._session_id = f"harness-{uuid.uuid4().hex[:12]}"
+            self._session_id = str(uuid.uuid4())
         else:
             self._session_id = session_id  # None = stateless
 
@@ -418,7 +418,7 @@ class ClaudeCodeSession(Session):
     def post_execution(self, scope: "Scope"):
         """Handle compact: fork to a new session (old one abandoned)."""
         if scope.needs_compact and self._session_id:
-            self._session_id = f"harness-{uuid.uuid4().hex[:12]}"
+            self._session_id = str(uuid.uuid4())
             self._turn_count = 0
 
     def send(self, message: Message) -> str:
