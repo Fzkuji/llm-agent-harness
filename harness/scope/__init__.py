@@ -1,34 +1,37 @@
 """
 Scope — defines what a Function can see when it executes.
 
-Modeled after Python's variable scoping (LEGB rule), but for LLM context:
+Scope is an *intent declaration*. It tells the Runtime what context a Function
+wants, but the Session decides how to fulfill that intent based on its own
+capabilities.
 
-    Python                          Agentic Programming
-    ─────                           ────────────────────
-    Local variables                 Function's own params
-    Enclosing scope                 Call stack (who called whom)
-    Module-level / neighbors        Peer Functions at the same level
+    API Sessions (no memory):   read depth/detail/peer → inject context manually
+    CLI Sessions (have memory): read compact → compress after execution
 
-Three dimensions:
+All parameters are Optional. None means "I don't care, use default behavior."
+Each Session type reads the parameters it understands and ignores the rest.
 
+Parameters for API Sessions (context injection):
     depth   How many layers up the call stack are visible.
-            0 = only own input. 1 = direct caller. -1 = unlimited.
+    detail  How much of each stack layer is shown ("io" or "full").
+    peer    Sibling visibility ("none", "io", "full").
 
-    detail  How much of each call stack layer is visible.
-            "io" = input + output only. "full" = complete reasoning.
+Parameters for CLI Sessions (context management):
+    compact Whether to compress the conversation after execution.
 
-    peer    How much of same-level (sibling) Functions is visible.
-            "none" = nothing. "io" = their input + output. "full" = full reasoning.
+Parameters for all Sessions:
+    (future parameters can be added here)
 
 Common presets:
-    Scope.ISOLATED  depth=0, detail="io", peer="none"   — pure function, sees nothing
-    Scope.CHAINED   depth=0, detail="io", peer="io"     — sees sibling I/O
-    Scope.AWARE     depth=1, detail="io", peer="io"     — sees caller + sibling I/O
-    Scope.FULL      depth=-1, detail="full", peer="full" — sees everything
+    Scope.isolated()  — pure function, no context
+    Scope.chained()   — sees sibling I/O
+    Scope.aware()     — sees caller + sibling I/O
+    Scope.full()      — sees everything, shared session
 """
 
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Optional
 
 
 @dataclass
@@ -36,80 +39,91 @@ class Scope:
     """
     Defines what a Function can see when it executes.
 
-    Args:
+    All parameters are Optional. None = "no opinion, use Session default."
+    Each Session type reads the parameters it understands.
+
+    API Session parameters:
         depth:   Call stack visibility.
-                 0  = only own input (no caller info)
-                 1  = sees direct caller
-                 2  = sees caller's caller
-                 -1 = unlimited (full stack)
+                 0 = only own input. 1 = caller. -1 = unlimited. None = don't inject.
+        detail:  Per-layer detail. "io" or "full". None = default to "io".
+        peer:    Sibling visibility. "none", "io", "full". None = default to "none".
 
-        detail:  How much of each stack layer is shown.
-                 "io"   = input params + return value only
-                 "full" = complete conversation (including reasoning)
-
-        peer:    Visibility of sibling Functions (same level, executed before this one).
-                 "none" = sees nothing from siblings
-                 "io"   = sees siblings' input + output
-                 "full" = sees siblings' complete conversation
+    CLI Session parameters:
+        compact: Compress conversation after execution.
+                 True = summarize, False = keep full, None = Session decides.
     """
-    depth: int = 0
-    detail: str = "io"
-    peer: str = "none"
+    # --- API Session parameters (context injection) ---
+    depth: Optional[int] = None
+    detail: Optional[str] = None
+    peer: Optional[str] = None
+
+    # --- CLI Session parameters (context management) ---
+    compact: Optional[bool] = None
 
     def __post_init__(self):
-        if self.detail not in ("io", "full"):
-            raise ValueError(f"detail must be 'io' or 'full', got '{self.detail}'")
-        if self.peer not in ("none", "io", "full"):
-            raise ValueError(f"peer must be 'none', 'io', or 'full', got '{self.peer}'")
+        if self.detail is not None and self.detail not in ("io", "full"):
+            raise ValueError(f"detail must be 'io', 'full', or None, got '{self.detail}'")
+        if self.peer is not None and self.peer not in ("none", "io", "full"):
+            raise ValueError(f"peer must be 'none', 'io', 'full', or None, got '{self.peer}'")
 
     # --- Presets ---
 
     @classmethod
     def isolated(cls) -> "Scope":
-        """Pure function. Sees only its own params. No context."""
-        return cls(depth=0, detail="io", peer="none")
+        """Pure function. No context injection, no session sharing."""
+        return cls(depth=0, detail="io", peer="none", compact=None)
 
     @classmethod
     def chained(cls) -> "Scope":
-        """Sees sibling Functions' I/O. Good for sequential pipelines."""
-        return cls(depth=0, detail="io", peer="io")
+        """Sees sibling Functions' I/O summaries."""
+        return cls(depth=0, detail="io", peer="io", compact=None)
 
     @classmethod
     def aware(cls) -> "Scope":
-        """Sees caller info + sibling I/O. Knows where it is in the call chain."""
-        return cls(depth=1, detail="io", peer="io")
+        """Sees caller info + sibling I/O."""
+        return cls(depth=1, detail="io", peer="io", compact=None)
 
     @classmethod
     def full(cls) -> "Scope":
-        """Sees everything: full call stack, full sibling reasoning."""
-        return cls(depth=-1, detail="full", peer="full")
+        """Sees everything. Shared session, full reasoning visible."""
+        return cls(depth=-1, detail="full", peer="full", compact=None)
 
-    # --- Convenience ---
+    # --- Convenience properties ---
 
     @property
     def needs_call_stack(self) -> bool:
-        """Whether this scope requires call stack information."""
-        return self.depth != 0
+        """Whether this scope requests call stack information."""
+        return self.depth is not None and self.depth != 0
 
     @property
     def needs_peers(self) -> bool:
-        """Whether this scope requires information from sibling Functions."""
-        return self.peer != "none"
+        """Whether this scope requests information from sibling Functions."""
+        return self.peer is not None and self.peer != "none"
 
     @property
     def shares_session(self) -> bool:
         """
         Whether Functions with this scope should share a Session.
-
-        If peer == "full", siblings need to see each other's complete
-        conversation, which means they must share a Session.
-        If peer == "io", they only need structured summaries (no sharing needed).
-        If peer == "none", definitely no sharing.
+        peer="full" means siblings share a Session for full conversation visibility.
         """
         return self.peer == "full"
 
+    @property
+    def needs_compact(self) -> bool:
+        """Whether this scope requests post-execution compaction."""
+        return self.compact is True
+
     def __str__(self):
-        return f"Scope(depth={self.depth}, detail={self.detail}, peer={self.peer})"
+        parts = []
+        if self.depth is not None:
+            parts.append(f"depth={self.depth}")
+        if self.detail is not None:
+            parts.append(f"detail={self.detail}")
+        if self.peer is not None:
+            parts.append(f"peer={self.peer}")
+        if self.compact is not None:
+            parts.append(f"compact={self.compact}")
+        return f"Scope({', '.join(parts)})"
 
 
 # Convenient constants

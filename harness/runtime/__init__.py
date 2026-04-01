@@ -47,11 +47,16 @@ class Runtime:
     def execute(self, function: Function, context: dict) -> T:
         """Execute a single Function in a fresh Session."""
         session = self._session_factory()
+        scope = function.scope
+
+        # Let Session handle context based on Scope
+        if scope:
+            session.apply_scope(scope, context)
 
         if self.memory:
             import time
             start = time.time()
-            scope_str = str(function.scope) if function.scope else None
+            scope_str = str(scope) if scope else None
             session_type = type(session).__name__
             self.memory.log_function_call(
                 function.name,
@@ -62,6 +67,11 @@ class Runtime:
 
         try:
             result = function.call(session=session, context=context)
+
+            # Let Session do post-execution (e.g. compact)
+            if scope:
+                session.post_execution(scope)
+
             if self.memory:
                 self.memory.log_function_return(
                     function.name,

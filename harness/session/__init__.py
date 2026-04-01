@@ -18,9 +18,11 @@ Any class that implements send() is a valid Session.
 
 from __future__ import annotations
 from abc import ABC, abstractmethod
-from typing import Union
+from typing import Union, TYPE_CHECKING
 import uuid
 
+if TYPE_CHECKING:
+    from harness.scope import Scope
 
 # Message can be plain text, a structured dict, or a list of content parts
 Message = Union[str, dict, list]
@@ -33,13 +35,11 @@ class Session(ABC):
     A Session is anything that can:
         1. Receive a message (text, multimodal, or structured)
         2. Return a reply (string)
-        3. Maintain conversation history for reuse
+        3. Handle context based on Scope settings
 
-    The Session is responsible for:
-        - Interpreting the message format
-        - Maintaining its own conversation history
-        - Managing its own connection and authentication
-        - Returning complete (not streamed) replies
+    Each Session type reads the Scope parameters it understands:
+        - API Sessions: depth, detail, peer → inject/filter context
+        - CLI Sessions: compact → compress after execution
 
     The Session is NOT responsible for:
         - Parsing return values (Function handles that)
@@ -52,6 +52,30 @@ class Session(ABC):
         """Send a message and return the reply."""
         pass
 
+    def apply_scope(self, scope: "Scope", context: dict):
+        """
+        Apply Scope settings to this Session.
+
+        Called by Runtime before execution. Each Session type reads
+        the Scope parameters it cares about and ignores the rest.
+
+        Default: no-op. Override in subclasses.
+
+        Args:
+            scope:   The Function's Scope (may have None fields)
+            context: Prior results, call stack, etc.
+        """
+        pass
+
+    def post_execution(self, scope: "Scope"):
+        """
+        Called after Function execution completes.
+
+        Use for post-execution actions like compaction.
+        Default: no-op. Override in subclasses.
+        """
+        pass
+
     def reset(self):
         """Clear conversation history. Override in subclasses."""
         pass
@@ -60,6 +84,17 @@ class Session(ABC):
     def history_length(self) -> int:
         """Number of turns in conversation history. Override in subclasses."""
         return 0
+
+    @property
+    def has_memory(self) -> bool:
+        """Whether this Session maintains its own conversation memory.
+
+        CLI Sessions (Claude Code, Codex) have built-in memory.
+        API Sessions manage history explicitly via _history.
+
+        Returns True for Sessions where the backend remembers prior turns.
+        """
+        return False
 
 
 # ==================================================================
@@ -71,11 +106,7 @@ class AnthropicSession(Session):
     Direct Anthropic API session. Supports text and image input.
     Maintains full conversation history for KV cache reuse.
 
-    Args:
-        model:          Model name (default: claude-sonnet-4-6)
-        max_tokens:     Max reply tokens
-        system_prompt:  System prompt for the session
-        api_key:        Anthropic API key (default: ANTHROPIC_API_KEY env var)
+    Reads from Scope: depth, detail, peer (context injection).
     """
 
     def __init__(
@@ -111,13 +142,55 @@ class AnthropicSession(Session):
         self._history.append({"role": "assistant", "content": reply})
         return reply
 
+    def apply_scope(self, scope: "Scope", context: dict):
+        """Inject prior context based on Scope settings."""
+        import json as _json
+
+        # Inject peer summaries (API Session has no memory, needs explicit injection)
+        if scope.peer and scope.peer != "none" and "_prior_results" in context:
+            summary = _json.dumps(context["_prior_results"], ensure_ascii=False, indent=2)
+            self._history.append({
+                "role": "user",
+                "content": f"[Prior function results]\n{summary}",
+            })
+            self._history.append({
+                "role": "assistant",
+                "content": "Understood. I have the prior results.",
+            })
+
+        # Inject call stack
+        if scope.depth and scope.depth != 0 and "_call_stack" in context:
+            stack = context["_call_stack"]
+            if scope.depth > 0:
+                stack = stack[-scope.depth:]
+            stack_str = _json.dumps(stack, ensure_ascii=False, indent=2)
+            self._history.append({
+                "role": "user",
+                "content": f"[Call stack]\n{stack_str}",
+            })
+            self._history.append({
+                "role": "assistant",
+                "content": "Understood. I see the call context.",
+            })
+
+    def post_execution(self, scope: "Scope"):
+        """Compact history if requested (replace last exchange with summary)."""
+        if scope.needs_compact and len(self._history) >= 2:
+            # Replace last user+assistant pair with a summary
+            last_user = self._history[-2]
+            last_assistant = self._history[-1]
+            summary = f"[Compacted] Input: {str(last_user['content'])[:200]}... → Output: {str(last_assistant['content'])[:200]}..."
+            self._history[-2:] = [
+                {"role": "user", "content": summary},
+                {"role": "assistant", "content": "Noted."},
+            ]
+
     def reset(self):
-        """Clear conversation history."""
         self._history = []
 
     @property
     def history_length(self) -> int:
-        return len(self._history) // 2  # each turn = user + assistant
+        return len(self._history) // 2
 
     @staticmethod
     def _to_content(message: Message):
@@ -207,13 +280,52 @@ class OpenAISession(Session):
         self._history.append({"role": "assistant", "content": reply})
         return reply
 
+    def apply_scope(self, scope: "Scope", context: dict):
+        """Inject prior context based on Scope settings."""
+        import json as _json
+
+        if scope.peer and scope.peer != "none" and "_prior_results" in context:
+            summary = _json.dumps(context["_prior_results"], ensure_ascii=False, indent=2)
+            self._history.append({
+                "role": "user",
+                "content": f"[Prior function results]\n{summary}",
+            })
+            self._history.append({
+                "role": "assistant",
+                "content": "Understood. I have the prior results.",
+            })
+
+        if scope.depth and scope.depth != 0 and "_call_stack" in context:
+            stack = context["_call_stack"]
+            if scope.depth > 0:
+                stack = stack[-scope.depth:]
+            stack_str = _json.dumps(stack, ensure_ascii=False, indent=2)
+            self._history.append({
+                "role": "user",
+                "content": f"[Call stack]\n{stack_str}",
+            })
+            self._history.append({
+                "role": "assistant",
+                "content": "Understood. I see the call context.",
+            })
+
+    def post_execution(self, scope: "Scope"):
+        """Compact history if requested."""
+        if scope.needs_compact and len(self._history) >= 2:
+            last_user = self._history[-2]
+            last_assistant = self._history[-1]
+            summary = f"[Compacted] Input: {str(last_user['content'])[:200]}... → Output: {str(last_assistant['content'])[:200]}..."
+            self._history[-2:] = [
+                {"role": "user", "content": summary},
+                {"role": "assistant", "content": "Noted."},
+            ]
+
     def reset(self):
         self._history = []
 
     @property
     def history_length(self) -> int:
         return len(self._history) // 2
-
 
     @staticmethod
     def _to_content(message: Message):
@@ -293,6 +405,21 @@ class ClaudeCodeSession(Session):
             self._session_id = f"harness-{uuid.uuid4().hex[:12]}"
         else:
             self._session_id = session_id  # None = stateless
+
+    @property
+    def has_memory(self) -> bool:
+        """CLI Sessions have built-in conversation memory."""
+        return self._session_id is not None
+
+    def apply_scope(self, scope: "Scope", context: dict):
+        """CLI Session ignores depth/detail/peer — it has its own memory."""
+        pass
+
+    def post_execution(self, scope: "Scope"):
+        """Handle compact: fork to a new session (old one abandoned)."""
+        if scope.needs_compact and self._session_id:
+            self._session_id = f"harness-{uuid.uuid4().hex[:12]}"
+            self._turn_count = 0
 
     def send(self, message: Message) -> str:
         import subprocess
@@ -513,6 +640,18 @@ class CodexSession(Session):
             self._session_id = f"harness-{uuid.uuid4().hex[:12]}"
         else:
             self._session_id = session_id
+
+    @property
+    def has_memory(self) -> bool:
+        return self._session_id is not None
+
+    def apply_scope(self, scope: "Scope", context: dict):
+        pass  # CLI Session — has its own memory
+
+    def post_execution(self, scope: "Scope"):
+        if scope.needs_compact and self._session_id:
+            self._session_id = f"harness-{uuid.uuid4().hex[:12]}"
+            self._turn_count = 0
 
     def send(self, message: Message) -> str:
         import subprocess
