@@ -235,22 +235,16 @@ graph TD
     classDef dim fill:#f5f5f5,stroke:#ccc,color:#999
 
     root["🌳 root"]:::dim
-
-    subgraph nav0["root/navigate_0"]
-        obs0["observe_0"]:::dim
-        obs1["observe_1 ✓"]:::visible
-        ocr["run_ocr_0 ✓"]:::visible
-        det["detect_all_0 ✓"]:::visible
-        act0["⭐ act_0"]:::active
-        verify0["verify_0"]:::dim
-        obs1 --> ocr
-        obs1 --> det
-    end
-
-    subgraph nav1["root/navigate_1"]
-        obs1b["observe_0"]:::dim
-        act1b["act_0"]:::dim
-    end
+    nav0["navigate_0"]:::dim
+    nav1["navigate_1"]:::dim
+    obs0["observe_0"]:::dim
+    obs1["observe_1 ✓"]:::visible
+    ocr["run_ocr_0 ✓"]:::visible
+    det["detect_all_0 ✓"]:::visible
+    act0["⭐ act_0 当前"]:::active
+    verify0["verify_0"]:::dim
+    obs1b["observe_0"]:::dim
+    act1b["act_0"]:::dim
 
     root --> nav0
     root --> nav1
@@ -258,6 +252,8 @@ graph TD
     nav0 --> obs1
     nav0 --> act0
     nav0 --> verify0
+    obs1 --> ocr
+    obs1 --> det
     nav1 --> obs1b
     nav1 --> act1b
 ```
