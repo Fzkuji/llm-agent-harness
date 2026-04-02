@@ -73,54 +73,121 @@ class Context:
         level: Optional[str] = None,
         max_tokens: Optional[int] = None,
         max_siblings: Optional[int] = None,
-        include_parent: bool = True,
+        depth: int = -1,
+        siblings: int = -1,
+        include: Optional[list] = None,
+        exclude: Optional[list] = None,
+        branch: Optional[list] = None,
     ) -> str:
         """
         Generate a summary of context up to this point.
         
-        Includes:
-        - Parent info (who called me)
-        - Previous siblings' results (filtered by their expose level)
-        - Current function's prompt and params
+        The Context tree is a complete record. This method queries it flexibly.
         
         Args:
-            level:        Override granularity (ignore siblings' expose settings)
-            max_tokens:   Approximate token budget (truncates oldest siblings first)
-            max_siblings: Only include the most recent N siblings
-            include_parent: Whether to include parent info
+            level:        Override granularity (ignore nodes' expose settings)
+            max_tokens:   Approximate token budget (truncates oldest first)
+            max_siblings: Max siblings to include (shorthand for siblings=N)
+            depth:        How many ancestor levels to see (-1=all, 0=none, 1=parent only)
+            siblings:     How many siblings to see (-1=all, 0=none)
+            include:      Only show nodes matching these paths (supports * wildcard)
+            exclude:      Hide nodes matching these paths (supports * wildcard)
+            branch:       Show entire subtree under these node names
         """
+        # Effective max_siblings
+        effective_siblings = max_siblings if max_siblings is not None else (
+            None if siblings == -1 else siblings
+        )
+
         parts = []
 
-        # Parent info
-        if include_parent and self.parent and self.parent.name:
-            parts.append(f"[Caller: {self.parent.name}({_fmt_params(self.parent.params)})]")
+        # Parent / ancestor info
+        if depth != 0 and self.parent and self.parent.name:
+            ancestors = []
+            node = self.parent
+            while node and node.name:
+                ancestors.append(node)
+                node = node.parent
+                if depth > 0 and len(ancestors) >= depth:
+                    break
+            for a in reversed(ancestors):
+                if not self._path_allowed(a, include, exclude):
+                    continue
+                parts.append(f"[Ancestor: {a.name}({_fmt_params(a.params)})]")
 
         # Previous siblings
-        if self.parent:
-            siblings = []
+        if self.parent and (effective_siblings is None or effective_siblings > 0):
+            sibling_parts = []
             for c in self.parent.children:
                 if c is self:
                     break
                 if c.status == "running":
                     continue
+                if not self._path_allowed(c, include, exclude):
+                    continue
                 expose = level or c.expose
                 if expose == "silent":
                     continue
-                siblings.append(c._render(expose))
+                rendered = c._render(expose)
+                # If branch mode, also render children of matching nodes
+                if branch and c.name in branch:
+                    rendered += "\n" + c._render_branch(level)
+                sibling_parts.append(rendered)
 
-            if max_siblings is not None:
-                siblings = siblings[-max_siblings:]
+            if effective_siblings is not None:
+                sibling_parts = sibling_parts[-effective_siblings:]
 
             if max_tokens is not None:
-                # Simple truncation: drop oldest until under budget
-                total = sum(len(s) for s in siblings)
-                while siblings and total > max_tokens * 4:  # rough chars-to-tokens
-                    removed = siblings.pop(0)
+                total = sum(len(s) for s in sibling_parts)
+                while sibling_parts and total > max_tokens * 4:
+                    removed = sibling_parts.pop(0)
                     total -= len(removed)
 
-            parts.extend(siblings)
+            parts.extend(sibling_parts)
+
+        # Branch mode: include specific subtrees from anywhere in the tree
+        if branch and include:
+            root = self
+            while root.parent:
+                root = root.parent
+            for path_pattern in include:
+                for node in self._find_by_path(root, path_pattern):
+                    if node is not self and node not in (self.parent.children if self.parent else []):
+                        parts.append(node._render(level or node.expose))
 
         return "\n".join(parts)
+
+    def _path_allowed(self, node: "Context", include: Optional[list], exclude: Optional[list]) -> bool:
+        """Check if a node's path matches include/exclude filters."""
+        if include is not None:
+            return any(_path_matches(node.path, pattern) for pattern in include)
+        if exclude is not None:
+            return not any(_path_matches(node.path, pattern) for pattern in exclude)
+        return True
+
+    def _render_branch(self, level: Optional[str], indent: int = 1) -> str:
+        """Render all children recursively."""
+        lines = []
+        for c in self.children:
+            expose = level or c.expose
+            if expose != "silent":
+                prefix = "  " * indent
+                lines.append(f"{prefix}{c._render(expose)}")
+                if c.children:
+                    lines.append(c._render_branch(level, indent + 1))
+        return "\n".join(lines)
+
+    @staticmethod
+    def _find_by_path(root: "Context", pattern: str) -> list:
+        """Find nodes matching a path pattern (supports * wildcard)."""
+        results = []
+        stack = [root]
+        while stack:
+            node = stack.pop()
+            if _path_matches(node.path, pattern):
+                results.append(node)
+            stack.extend(node.children)
+        return results
 
     def _render(self, level: str) -> str:
         """Render this Context at the given level."""
@@ -264,6 +331,18 @@ def init_root(name: str = "root") -> Context:
 # ------------------------------------------------------------------
 # Internal helpers
 # ------------------------------------------------------------------
+
+def _path_matches(path: str, pattern: str) -> bool:
+    """Match a context path against a pattern. Supports * wildcard."""
+    if pattern.endswith("/*"):
+        # e.g. "root/navigate_0/*" matches anything under navigate_0
+        prefix = pattern[:-2]
+        return path.startswith(prefix + "/") or path == prefix
+    if "*" in pattern:
+        import fnmatch
+        return fnmatch.fnmatch(path, pattern)
+    return path == pattern
+
 
 def _fmt_params(params: dict) -> str:
     if not params:
