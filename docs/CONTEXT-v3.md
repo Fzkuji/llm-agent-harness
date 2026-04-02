@@ -37,12 +37,11 @@ class Context:
 def navigate(ctx: Context, target: str):
     """Navigate to the target."""
     
-    # 调用子函数，子函数的 Context 自动挂到 ctx.children
-    obs = observe(ctx, task=f"find {target}")
+    obs_result = observe(ctx, task=f"find {target}")  # 返回解析后的结果
     
-    if obs.target_visible:
-        result = act(ctx, target=target, location=obs.location)
-        return result
+    if obs_result.target_visible:
+        act_result = act(ctx, target=target, location=obs_result.location)
+        return act_result
 
 
 def observe(parent_ctx: Context, task: str):
@@ -58,10 +57,21 @@ def observe(parent_ctx: Context, task: str):
     reply = llm_call(
         prompt=ctx.prompt,
         input=ctx.input,
-        context=ctx.sibling_summaries(),  # 之前兄弟的摘要
+        context=ctx.sibling_summaries(),
     )
     
-    ctx.output = parse(reply)
+    ctx.output = parse(reply)  # ObserveResult
+    return ctx.output           # 返回结果，不是 Context
+
+
+def act(parent_ctx: Context, target: str, location: list):
+    """Click the specified target at the given location."""
+    ctx = parent_ctx.child("act", prompt=act.__doc__)
+    
+    ctx.input = {"target": target, "location": location}
+    click(location)
+    
+    ctx.output = {"clicked": True, "target": target}
     return ctx.output
 ```
 
