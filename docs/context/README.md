@@ -7,8 +7,8 @@ One tree records everything. Queries select what to show.
 
 | File | Description |
 |---|---|
-| [VISIBILITY.md](VISIBILITY.md) | **Context Visibility** — how `summarize()` queries the tree. 6 scenarios with Mermaid diagrams: full tree, depth control, include/exclude paths, branch selection, isolated mode, independent trees, path addressing. |
-| [MANAGEMENT.md](MANAGEMENT.md) | **Context Management** — strategies for API mode vs Session mode. Injection levels by tree position, recency decay, progressive detail, cache-aware layout (prompt caching cost optimization), Session compression/checkpoint, ContextPolicy design. |
+| [ENGINEERING.md](ENGINEERING.md) | **Context Engineering** — how `summarize()` queries the tree. 6 scenarios with Mermaid diagrams: full tree, depth control, include/exclude paths, branch selection, isolated mode, independent trees, path addressing. |
+| [PRACTICE.md](PRACTICE.md) | **Context Practice** — strategies for API mode vs Session mode. Injection levels by tree position, recency decay, progressive detail, cache-aware layout (prompt caching cost optimization), Session compression/checkpoint, ContextPolicy design. |
 
 ## Diagrams
 

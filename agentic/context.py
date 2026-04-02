@@ -46,8 +46,8 @@ Key design decisions (lessons learned):
 See also:
     - function.py: @agentic_function decorator
     - runtime.py: runtime.exec() — LLM call with auto recording
-    - docs/context/VISIBILITY.md: visual diagrams of all query scenarios
-    - docs/context/MANAGEMENT.md: injection strategies, decay, caching, Session
+    - docs/context/ENGINEERING.md: visual diagrams of all query scenarios
+    - docs/context/PRACTICE.md: injection strategies, decay, caching, Session
 """
 
 from __future__ import annotations
