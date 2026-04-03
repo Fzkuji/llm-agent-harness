@@ -165,6 +165,55 @@ def _build_messages(prompt, input=None, images=None, context=None, schema=None):
     return messages
 
 
+async def async_exec(
+    prompt: str,
+    input: dict = None,
+    images: list[str] = None,
+    context: str = None,
+    schema: dict = None,
+    model: str = "sonnet",
+    call: Any = None,
+) -> str:
+    """
+    Async version of exec(). Same behavior, but awaits the call function.
+
+    The `call` function must be async: async fn(messages, model) -> str
+    """
+    ctx = _current_ctx.get(None)
+
+    if ctx is not None and ctx.raw_reply:
+        raise RuntimeError(
+            f"runtime.async_exec() called twice in {ctx.name}(). "
+            f"Each @agentic_function should call runtime.exec/async_exec at most once. "
+            f"Split into separate @agentic_function calls."
+        )
+
+    if context is None and ctx is not None:
+        if ctx._summarize_kwargs:
+            context = ctx.summarize(**ctx._summarize_kwargs)
+        else:
+            context = ctx.summarize()
+
+    if ctx is not None:
+        ctx.input = input
+        ctx.media = images
+
+    messages = _build_messages(prompt, input, images, context, schema)
+
+    if call is not None:
+        reply = await call(messages, model=model)
+    else:
+        raise NotImplementedError(
+            "No async LLM API configured. Pass `call=your_async_function` to runtime.async_exec().\n"
+            "The call function should have signature: async fn(messages, model) -> str"
+        )
+
+    if ctx is not None:
+        ctx.raw_reply = reply
+
+    return reply
+
+
 def _default_api_call(messages, model="sonnet"):
     """Placeholder. Users must provide a `call` function."""
     raise NotImplementedError(

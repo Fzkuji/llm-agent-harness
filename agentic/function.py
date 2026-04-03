@@ -114,12 +114,59 @@ class agentic_function:
         return functools.partial(self._wrapper, obj)
 
     def _make_wrapper(self, fn: Callable) -> Callable:
-        if inspect.iscoroutinefunction(fn):
-            raise TypeError(
-                f"@agentic_function does not support async functions. "
-                f"{fn.__name__} is async. Use a sync wrapper instead."
-            )
         sig = inspect.signature(fn)
+
+        if inspect.iscoroutinefunction(fn):
+            return self._make_async_wrapper(fn, sig)
+        return self._make_sync_wrapper(fn, sig)
+
+    def _make_async_wrapper(self, fn: Callable, sig: inspect.Signature) -> Callable:
+        render = self.render
+        compress = self.compress
+        summarize = self.summarize_kwargs
+
+        @functools.wraps(fn)
+        async def wrapper(*args, **kwargs):
+            parent = _current_ctx.get(None)
+
+            ctx = Context(
+                name=fn.__name__,
+                prompt=fn.__doc__ or "",
+                params={},
+                parent=parent,
+                render=render,
+                compress=compress,
+                start_time=time.time(),
+                _summarize_kwargs=summarize,
+            )
+            if parent is not None:
+                parent.children.append(ctx)
+
+            token = _current_ctx.set(ctx)
+            try:
+                bound = sig.bind(*args, **kwargs)
+                bound.apply_defaults()
+                ctx.params = dict(bound.arguments)
+
+                result = await fn(*args, **kwargs)
+                ctx.output = result
+                ctx.status = "success"
+                return result
+            except Exception as e:
+                ctx.error = str(e)
+                ctx.status = "error"
+                raise
+            finally:
+                ctx.end_time = time.time()
+                _current_ctx.reset(token)
+                if parent is None:
+                    _ctx_module._last_root = ctx
+                    _auto_save(ctx)
+
+        wrapper._is_agentic = True
+        return wrapper
+
+    def _make_sync_wrapper(self, fn: Callable, sig: inspect.Signature) -> Callable:
         render = self.render
         compress = self.compress
         summarize = self.summarize_kwargs
