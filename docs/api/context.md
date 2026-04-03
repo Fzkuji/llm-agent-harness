@@ -1,169 +1,203 @@
-# agentic.Context
+# Context
+
+> Source: [`agentic/context.py`](../../agentic/context.py)
+
+执行记录。每次 `@agentic_function` 调用自动创建一个节点，节点通过 `parent/children` 形成树。
+
+用户不需要手动创建或修改 Context 对象。
+
+---
+
+## Class: `Context`
 
 ```python
-class agentic.Context
+@dataclass
+class Context
 ```
 
-Execution record for one function call. Created automatically by [@agentic_function](agentic_function.md). Users do not instantiate this class directly.
+### 字段
 
-Each `Context` node stores the function's name, arguments, return value, timing, and (if [Runtime.exec()](runtime.md) was called) the LLM reply. Nodes are linked via `parent` and `children` to form a tree.
+**由 `@agentic_function` 设置（进入时）：**
 
-### Fields
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `name` | `str` | `""` | 函数名 |
+| `prompt` | `str` | `""` | docstring（也是 LLM prompt） |
+| `params` | `dict` | `{}` | 调用参数 |
+| `parent` | `Context \| None` | `None` | 父节点 |
+| `children` | `list[Context]` | `[]` | 子节点列表 |
+| `render` | `str` | `"summary"` | 默认渲染级别 |
+| `compress` | `bool` | `False` | 是否隐藏子节点 |
+| `start_time` | `float` | `0.0` | 开始时间戳 |
 
-| Field | Type | Set by | Description |
-|-------|------|--------|-------------|
-| `name` | `str` | [@agentic_function](agentic_function.md) | Function name |
-| `prompt` | `str` | [@agentic_function](agentic_function.md) | Docstring |
-| `params` | `dict` | [@agentic_function](agentic_function.md) | Call arguments |
-| `output` | `Any` | [@agentic_function](agentic_function.md) | Return value |
-| `error` | `str` | [@agentic_function](agentic_function.md) | Error message if failed |
-| `status` | `str` | [@agentic_function](agentic_function.md) | `"running"` → `"success"` or `"error"` |
-| `parent` | `Context` | [@agentic_function](agentic_function.md) | Parent node |
-| `children` | `list[Context]` | [@agentic_function](agentic_function.md) | Child nodes |
-| `render` | `str` | [@agentic_function](agentic_function.md) | Default render level (see [agentic_function](agentic_function.md)) |
-| `compress` | `bool` | [@agentic_function](agentic_function.md) | Hide children after completion (see [agentic_function](agentic_function.md)) |
-| `start_time` | `float` | [@agentic_function](agentic_function.md) | Start timestamp |
-| `end_time` | `float` | [@agentic_function](agentic_function.md) | End timestamp |
-| `raw_reply` | `str \| None` | [Runtime.exec()](runtime.md) | LLM response text (`None` if not called) |
+**由 `@agentic_function` 设置（退出时）：**
 
-### Properties
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `output` | `Any` | `None` | 返回值 |
+| `error` | `str` | `""` | 错误信息 |
+| `status` | `str` | `"running"` | `"running"` → `"success"` 或 `"error"` |
+| `end_time` | `float` | `0.0` | 结束时间戳 |
 
-#### path
+**由 `Runtime.exec()` 设置：**
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `raw_reply` | `str \| None` | `None` | LLM 原始回复（`None` = 没调用过 LLM） |
+
+---
+
+## 属性
+
+### `path`
 
 ```python
 Context.path -> str
 ```
 
-Auto-computed tree address. Format: `{parent_path}/{name}_{index}`.
+自动计算的树路径。格式：`{parent_path}/{name}_{index}`。
 
-The index counts same-name siblings under the same parent: `observe_0` is the first `observe`, `observe_1` is the second, etc.
+同名兄弟按顺序编号：`observe_0` 是第一个，`observe_1` 是第二个。
 
+```python
+"login_flow/observe_0"
+"login_flow/navigate_0/click_0"
 ```
-"navigate_0/observe_1/run_ocr_0"
-```
 
-#### duration_ms
+### `duration_ms`
 
 ```python
 Context.duration_ms -> float
 ```
 
-Execution time in milliseconds. Returns `0.0` if the function is still running.
+执行耗时（毫秒）。还在运行时返回 `0.0`。
 
 ---
 
-### summarize
+## 方法
+
+### `summarize()`
 
 ```python
-Context.summarize(depth=-1, siblings=-1, level=None, include=None, exclude=None, branch=None, max_tokens=None) -> str
+Context.summarize(
+    depth=-1,
+    siblings=-1,
+    level=None,
+    include=None,
+    exclude=None,
+    branch=None,
+    max_tokens=None,
+) -> str
 ```
 
-Query the Context tree and return a text string for LLM input. This is how Context data flows into LLM calls — [runtime.exec()](runtime.md) calls this automatically.
+从 Context 树中提取文本，用于 LLM prompt 注入。`Runtime.exec()` 自动调用此方法。
 
-**Parameters:**
+#### 参数
 
-- **depth** (`int`, default `-1`) — How many ancestor levels to show. `-1` = all, `0` = none, `1` = parent only, `N` = up to N levels.
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `depth` | `int` | `-1` | 显示多少层祖先。`-1`=全部，`0`=不显示，`1`=只看父节点 |
+| `siblings` | `int` | `-1` | 显示多少个之前的兄弟。`-1`=全部，`0`=不显示，`N`=最近 N 个 |
+| `level` | `str \| None` | `None` | 覆盖所有节点的渲染级别 |
+| `include` | `list[str] \| None` | `None` | 路径白名单，支持 `*` 通配符 |
+| `exclude` | `list[str] \| None` | `None` | 路径黑名单，支持 `*` 通配符 |
+| `branch` | `list[str] \| None` | `None` | 展开指定节点的子节点 |
+| `max_tokens` | `int \| None` | `None` | token 预算，超出时丢弃最早的兄弟 |
 
-- **siblings** (`int`, default `-1`) — How many previous siblings to show. `-1` = all, `0` = none, `N` = last N (keeps the N closest to current, in chronological order).
+#### 返回值
 
-- **level** (`str | None`, default `None`) — Override render level for all nodes. If `None`, each node uses its own `render` setting. Values: `"trace"` / `"detail"` / `"summary"` / `"result"` / `"silent"`.
+`str` — 可直接注入 LLM prompt 的文本。始终包含 execution context header 和当前调用信息。
 
-- **include** (`list[str] | None`, default `None`) — Path whitelist. Only nodes whose path matches are shown. Supports `*` wildcard.
-
-- **exclude** (`list[str] | None`, default `None`) — Path blacklist. Nodes whose path matches are hidden. Supports `*` wildcard.
-
-- **branch** (`list[str] | None`, default `None`) — Expand children of named nodes. By default, siblings are one line each (children not shown). Respects `compress`: compressed nodes are not expanded.
-
-- **max_tokens** (`int | None`, default `None`) — Token budget. When exceeded, drops oldest siblings first. Uses `len(text) / 4` as estimate.
-
-**Default behavior:**
-
-All ancestors (root → parent) + all same-level siblings that completed before this node. Siblings' children are not shown.
-
-**Returns:** `str` — text ready for LLM prompt injection. Always includes the execution context header and current call info, even with `depth=0, siblings=0`.
-
-**Example:**
+#### 示例
 
 ```python
-ctx.summarize()                                 # all ancestors + all siblings
-ctx.summarize(depth=1, siblings=3)              # parent + last 3 siblings
-ctx.summarize(depth=0, siblings=0)              # nothing (isolated)
-ctx.summarize(level="detail")                   # override all render levels
-ctx.summarize(include=["root/navigate_0/*"])    # path whitelist
-ctx.summarize(branch=["observe"])               # expand observe's children
-ctx.summarize(max_tokens=1000)                  # with token budget
-```
-
-Given this tree, with `verify` as the current node:
-
-```
-root
-└── navigate("login")
-    ├── observe("find login")   → {"found": true}   1200ms
-    ├── act("click login")      → {"clicked": true}  820ms
-    └── verify("check")         ← current
-```
-
-```python
-ctx.summarize()
-# [Ancestor: root()]
-# [Ancestor: navigate(target="login")]
-# observe: {"found": true} 1200ms
-# act: {"clicked": true} 820ms
-
-ctx.summarize(depth=0, siblings=1)
-# act: {"clicked": true} 820ms
+ctx.summarize()                              # 全部祖先 + 全部兄弟
+ctx.summarize(depth=1, siblings=3)           # 父节点 + 最近 3 个兄弟
+ctx.summarize(depth=0, siblings=0)           # 最小上下文（只有当前调用信息）
+ctx.summarize(level="detail")               # 所有节点强制 detail 级别
+ctx.summarize(include=["login/observe_0/*"]) # 只看 observe 的子节点
+ctx.summarize(exclude=["login/click_0"])     # 排除 click
+ctx.summarize(max_tokens=1000)              # 限制 token 数
 ```
 
 ---
 
-### tree
+### `tree()`
 
 ```python
 Context.tree(indent=0) -> str
 ```
 
-Full tree view for debugging. Shows ALL nodes regardless of `render` or `compress` settings.
+完整的树视图，用于调试。显示所有节点，不受 `render` 或 `compress` 影响。
 
-**Example:**
+#### 返回值
 
+`str` — 人类可读的树结构。
+
+#### 示例
+
+```python
+print(login_flow.context.tree())
 ```
-root …
-  navigate ✓ 3200ms → {'success': True}
-    observe ✓ 1200ms → {'found': True}
-    act ✓ 820ms → {'clicked': True}
-    verify ✓ 200ms → {'passed': True}
+
+输出：
+```
+login_flow ✓ 8800ms → dashboard verified
+  observe ✓ 3100ms → found login form
+  click ✓ 2500ms → clicked login button
+  verify ✓ 3200ms → dashboard verified
 ```
 
 ---
 
-### traceback
+### `traceback()`
 
 ```python
 Context.traceback() -> str
 ```
 
-Error traceback in a format similar to Python's.
+错误追踪，格式类似 Python traceback。
 
-**Example:**
+#### 返回值
 
+`str` — 错误链。
+
+#### 示例
+
+```python
+# 当某个子函数出错时
+print(login_flow.context.traceback())
+```
+
+输出：
 ```
 Agentic Traceback:
-  navigate(target="login") → error, 4523ms
+  login_flow(username="admin") → error, 4523ms
     observe(task="find login") → success, 1200ms
-    act(target="login") → error, 820ms
+    click(element="login") → error, 820ms
       error: element not interactable
 ```
 
 ---
 
-### save
+### `save()`
 
 ```python
 Context.save(path: str)
 ```
 
-Save the full tree to a file.
+保存完整的 Context 树到文件。
 
-- `.md` → human-readable tree (same output as [tree()](#tree))
-- `.jsonl` → one JSON object per node, with all fields
+| 扩展名 | 格式 |
+|--------|------|
+| `.md` | 人类可读（同 `tree()` 输出） |
+| `.jsonl` | 每行一个 JSON 对象，包含所有字段 |
+
+#### 示例
+
+```python
+login_flow.context.save("logs/run.jsonl")  # 机器可读
+login_flow.context.save("logs/run.md")     # 人类可读
+```
+
+> **注意：** 顶层函数执行完后会自动保存到 `agentic/logs/`，通常不需要手动调用。

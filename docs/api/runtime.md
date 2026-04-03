@@ -1,127 +1,184 @@
-# agentic.Runtime
+# Runtime
 
-```python
-class agentic.Runtime(call=None, model="default")
-```
+> Source: [`agentic/runtime.py`](../../agentic/runtime.py)
 
-LLM runtime. Wraps a provider and handles Context integration.
-
-Create once, use everywhere. When `exec()` is called inside an [@agentic_function](agentic_function.md):
-
-1. **Reads** from the Context tree — calls [Context.summarize()](context.md#summarize) to build context text.
-2. **Prepends** context as the first text block in the content list.
-3. **Calls** `_call()` with the full content list.
-4. **Records** `raw_reply` on the current Context node.
-
-When called outside any `@agentic_function`, works as a plain LLM call with no context injection or recording.
-
-### Constructor
-
-```python
-Runtime(call=None, model="default")
-```
-
-- **call** (`Callable | None`) — LLM provider function. Signature: `fn(content: list[dict], model: str, response_format: dict) -> str`. If `None`, subclass and override `_call()`.
-
-- **model** (`str`, default `"default"`) — Default model name. Can be overridden per-call.
-
-### Two ways to use
-
-**1. Pass a call function:**
-
-```python
-runtime = Runtime(call=my_func, model="gemini-2.5-flash")
-```
-
-**2. Subclass and override `_call()`:**
-
-```python
-class GeminiRuntime(Runtime):
-    def _call(self, content, model="default", response_format=None):
-        # convert content list → Gemini API format
-        # return reply text
-```
+LLM 运行时。封装 LLM provider，自动处理 Context 注入和记录。
 
 ---
 
-### exec
+## Class: `Runtime`
+
+```python
+class Runtime(call=None, model="default")
+```
+
+### 构造参数
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `call` | `Callable \| None` | `None` | LLM provider 函数。签名：`fn(content: list[dict], model: str, response_format: dict) -> str`。如果不传，需要子类化并重写 `_call()` |
+| `model` | `str` | `"default"` | 默认模型名称，每次调用可覆盖 |
+
+### 属性
+
+| 属性 | 类型 | 说明 |
+|------|------|------|
+| `model` | `str` | 默认模型名称 |
+
+---
+
+## 方法
+
+### `exec()`
 
 ```python
 Runtime.exec(content, context=None, response_format=None, model=None) -> str
 ```
 
-Call the LLM with automatic Context integration.
+调用 LLM，自动注入 Context。
 
-**Parameters:**
+**在 `@agentic_function` 内部调用时：**
+1. 从 Context 树生成 execution context（调用 `summarize()`）
+2. 把 context 作为第一个 text block 插入 content 列表
+3. 调用 `_call()` 发送请求
+4. 把回复记录到当前 Context 节点的 `raw_reply`
 
-- **content** (`list[dict]`) — List of content blocks:
-  ```python
-  {"type": "text", "text": "Find the login button."}
-  {"type": "image", "path": "screenshot.png"}
-  {"type": "audio", "path": "recording.wav"}
-  {"type": "file", "path": "data.csv"}
-  ```
+**在 `@agentic_function` 外部调用时：** 直接调用 LLM，不注入 context，不记录。
 
-- **context** (`str | None`, default `None`) — Override auto-generated context. If `None`, auto-generates from the Context tree.
+**每个 `@agentic_function` 最多调用一次 `exec()`。** 第二次调用会抛 `RuntimeError`。
 
-- **response_format** (`dict | None`, default `None`) — Output format constraint (JSON schema). Passed to `_call()` for provider-native handling.
+#### 参数
 
-- **model** (`str | None`, default `None`) — Override the default model for this call.
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `content` | `list[dict]` | *(必填)* | 内容块列表（见下方格式） |
+| `context` | `str \| None` | `None` | 手动覆盖自动生成的 context。`None` = 自动 |
+| `response_format` | `dict \| None` | `None` | 输出格式约束（JSON schema），传给 `_call()` |
+| `model` | `str \| None` | `None` | 覆盖默认模型 |
 
-**Returns:** `str` — the LLM's reply text.
-
-**Guard:** Raises `RuntimeError` if called twice in the same `@agentic_function`.
-
----
-
-### async_exec
+#### Content block 格式
 
 ```python
-Runtime.async_exec(content, context=None, response_format=None, model=None) -> str
+{"type": "text",  "text": "Find the login button."}
+{"type": "image", "path": "screenshot.png"}
+{"type": "audio", "path": "recording.wav"}
+{"type": "file",  "path": "data.csv"}
 ```
 
-Async version of `exec()`. Calls `_async_call()` instead of `_call()`.
+#### 返回值
+
+`str` — LLM 的回复文本。
+
+#### 异常
+
+- `RuntimeError` — 同一个 `@agentic_function` 内调用了两次
+- `TypeError` — 传入了 async 的 call 函数（应使用 `async_exec()`）
+- `NotImplementedError` — 没有配置 call 函数
 
 ---
 
-### _call
+### `async_exec()`
+
+```python
+await Runtime.async_exec(content, context=None, response_format=None, model=None) -> str
+```
+
+`exec()` 的异步版本。内部调用 `_async_call()`。
+
+参数和行为与 `exec()` 相同。如果传入同步 call 函数，会自动适配（不报错）。
+
+---
+
+### `_call()`
 
 ```python
 Runtime._call(content, model="default", response_format=None) -> str
 ```
 
-Override this in subclasses. Receives the full content list (context + user content) and returns reply text.
+实际调用 LLM 的方法。**子类化时重写此方法。**
 
-### _async_call
+#### 参数
 
-```python
-Runtime._async_call(content, model="default", response_format=None) -> str
-```
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `content` | `list[dict]` | 完整的内容列表（context + 用户内容） |
+| `model` | `str` | 模型名称 |
+| `response_format` | `dict \| None` | 输出格式约束 |
 
-Async version of `_call()`.
+#### 返回值
+
+`str` — LLM 回复文本。
 
 ---
 
-### Example
+### `_async_call()`
 
 ```python
-import google.generativeai as genai
-from agentic import agentic_function, Runtime
+await Runtime._async_call(content, model="default", response_format=None) -> str
+```
 
-genai.configure(api_key="...")
+`_call()` 的异步版本。子类化时重写此方法以支持异步 provider。
 
-def gemini_call(content, model="gemini-2.5-flash", response_format=None):
-    text_parts = [b["text"] for b in content if b["type"] == "text"]
-    response = genai.GenerativeModel(model).generate_content("\n".join(text_parts))
-    return response.text
+---
 
-runtime = Runtime(call=gemini_call, model="gemini-2.5-flash")
+## 使用方式
+
+### 方式一：传入 call 函数
+
+```python
+from agentic import Runtime, agentic_function
+
+def my_llm(content, model="sonnet", response_format=None):
+    # 把 content 转成你的 provider 格式，发请求
+    texts = [b["text"] for b in content if b["type"] == "text"]
+    return call_my_api("\n".join(texts), model=model)
+
+runtime = Runtime(call=my_llm, model="sonnet")
 
 @agentic_function
 def observe(task):
-    """Look at the screen and describe what you see."""
+    """Look at the screen."""
     return runtime.exec(content=[
         {"type": "text", "text": f"Find: {task}"},
         {"type": "image", "path": "screenshot.png"},
     ])
+```
+
+### 方式二：子类化
+
+```python
+class AnthropicRuntime(Runtime):
+    def __init__(self, api_key, model="sonnet"):
+        super().__init__(model=model)
+        self.client = anthropic.Anthropic(api_key=api_key)
+
+    def _call(self, content, model="sonnet", response_format=None):
+        messages_content = []
+        for block in content:
+            if block["type"] == "text":
+                messages_content.append({"type": "text", "text": block["text"]})
+        response = self.client.messages.create(
+            model=model, max_tokens=1024,
+            messages=[{"role": "user", "content": messages_content}],
+        )
+        return response.content[0].text
+
+runtime = AnthropicRuntime(api_key="sk-...", model="claude-sonnet-4-20250514")
+```
+
+### 多个 Runtime 共存
+
+```python
+fast = Runtime(call=gemini_call, model="gemini-2.5-flash")
+strong = Runtime(call=claude_call, model="sonnet")
+
+@agentic_function
+def observe(task):
+    """Quick observation with cheap model."""
+    return fast.exec(content=[...])
+
+@agentic_function
+def plan(goal):
+    """Complex planning with strong model."""
+    return strong.exec(content=[...])
 ```

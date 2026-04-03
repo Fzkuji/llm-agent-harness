@@ -1,35 +1,41 @@
-# Python API
+# API Reference
 
-## agentic
+> Source: [`agentic/`](../agentic/)
 
-The `agentic` package provides three core components for building LLM-powered functions with automatic context tracking.
+## 核心组件
 
-### Decorator
+| 组件 | 源文件 | 说明 |
+|------|--------|------|
+| [`agentic_function`](api/agentic_function.md) | `function.py` | 装饰器。把普通函数变成 Agentic Function，自动记录到 Context 树 |
+| [`Runtime`](api/runtime.md) | `runtime.py` | LLM 运行时类。处理 Context 注入、调用 LLM、记录回复 |
+| [`Context`](api/context.md) | `context.py` | 执行记录。每个函数调用一个节点，节点组成树 |
+| [`create`](api/meta.md) | `meta.py` | Meta function。用自然语言描述生成新的 @agentic_function |
 
-| API | Description |
-|-----|-------------|
-| [agentic_function](api/agentic_function.md) | Records function execution into the Context tree. |
+## 导入
 
-### Runtime
+```python
+from agentic import agentic_function, Runtime, Context, create
+```
 
-| API | Description |
-|-----|-------------|
-| [Runtime](api/runtime.md) | LLM runtime class. Handles context injection and recording. |
-| [Runtime.exec](api/runtime.md#exec) | Call an LLM with automatic context integration. |
-| [Runtime.async_exec](api/runtime.md#async_exec) | Async version of exec. |
+## 快速示例
 
-### Context
+```python
+from agentic import agentic_function, Runtime
 
-| API | Description |
-|-----|-------------|
-| [Context](api/context.md) | Execution record for one function call. |
-| [Context.summarize](api/context.md#summarize) | Query the tree for LLM input. |
-| [Context.tree](api/context.md#tree) | Full tree view for debugging. |
-| [Context.traceback](api/context.md#traceback) | Error traceback. |
-| [Context.save](api/context.md#save) | Save tree to file. |
+# 1. 创建 Runtime
+runtime = Runtime(call=my_llm_func, model="sonnet")
 
-### Meta
+# 2. 定义函数
+@agentic_function
+def observe(task):
+    """Look at the screen."""
+    return runtime.exec(content=[
+        {"type": "text", "text": f"Find: {task}"},
+    ])
 
-| API | Description |
-|-----|-------------|
-| [create](api/meta.md) | Generate a new @agentic_function from a natural language description. |
+# 3. 调用
+result = observe(task="login button")
+
+# 4. 查看 Context
+print(observe.context.tree())
+```
