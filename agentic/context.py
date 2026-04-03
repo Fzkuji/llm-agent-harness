@@ -337,6 +337,10 @@ class Context:
         lines.append(f"{self_indent}    {self.name}({_fmt_params(self.params)})")
         if self.prompt:
             lines.append(f'{self_indent}    """{self.prompt}"""')
+        if self.input:
+            lines.append(f"{self_indent}    Input: {_json(self.input, 300)}")
+        if self.media:
+            lines.append(f"{self_indent}    Media: {self.media}")
 
         return "\n".join(lines)
 
@@ -366,7 +370,7 @@ class Context:
 
         if level == "result":
             if self.output is not None:
-                lines.append(f"{indent}    Output: {_json(self.output, 200)}")
+                lines.append(f"{indent}    return {_json(self.output, 200)}")
             return "\n".join(lines)
 
         # docstring as annotation (not "Purpose:")
@@ -377,7 +381,7 @@ class Context:
         if self.media:
             lines.append(f"{indent}    Media: {self.media}")
         if self.output is not None:
-            lines.append(f"{indent}    Output: {_json(self.output, 300)}")
+            lines.append(f"{indent}    return {_json(self.output, 300)}")
         if self.error:
             lines.append(f"{indent}    Error: {self.error}")
         lines.append(f"{indent}    Status: {self.status}{dur}")

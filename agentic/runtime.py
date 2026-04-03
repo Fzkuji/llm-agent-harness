@@ -91,17 +91,17 @@ def exec(
             f"Split into separate @agentic_function calls."
         )
 
+    # --- Write: record what we're sending (before summarize so current call shows input) ---
+    if ctx is not None:
+        ctx.input = input
+        ctx.media = images
+
     # --- Read: auto-generate context from the tree ---
     if context is None and ctx is not None:
         if ctx._summarize_kwargs:
             context = ctx.summarize(**ctx._summarize_kwargs)
         else:
             context = ctx.summarize()
-
-    # --- Write: record what we're sending ---
-    if ctx is not None:
-        ctx.input = input
-        ctx.media = images
 
     # --- Build prompt ---
     indent = "    " * (ctx._depth() + 1) if ctx else "    "
@@ -151,11 +151,6 @@ def _build_prompt(
 
     if context:
         ctx_lines = [context]
-        if prompt:
-            ctx_lines.append(f"{indent}Task: {prompt}")
-        if input:
-            input_str = json.dumps(input, ensure_ascii=False, default=str)
-            ctx_lines.append(f"{indent}Input: {input_str}")
         if schema:
             schema_str = json.dumps(schema, indent=2)
             ctx_lines.append(f"{indent}Output Format: Return ONLY valid JSON matching this schema:")
@@ -200,15 +195,15 @@ async def async_exec(
             f"Split into separate @agentic_function calls."
         )
 
+    if ctx is not None:
+        ctx.input = input
+        ctx.media = images
+
     if context is None and ctx is not None:
         if ctx._summarize_kwargs:
             context = ctx.summarize(**ctx._summarize_kwargs)
         else:
             context = ctx.summarize()
-
-    if ctx is not None:
-        ctx.input = input
-        ctx.media = images
 
     indent = "    " * (ctx._depth() + 1) if ctx else "    "
     full_prompt = _build_prompt(
