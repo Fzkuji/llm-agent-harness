@@ -137,8 +137,6 @@ class Context:
     # show the complete structure.
 
     # --- LLM call record (set by runtime.exec()) ---
-    input: Optional[dict] = None    # Structured data sent to LLM
-    media: Optional[list] = None    # Image/file paths sent to LLM
     raw_reply: str = ""             # Raw LLM response text
 
     # --- Internal: decorator config ---
@@ -496,8 +494,6 @@ class Context:
             "name": self.name,
             "prompt": self.prompt,
             "params": self.params,
-            "input": self.input,
-            "media": self.media,
             "output": self.output,
             "raw_reply": self.raw_reply,
             "error": self.error,

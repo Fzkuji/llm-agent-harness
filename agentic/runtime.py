@@ -91,11 +91,6 @@ def exec(
             f"Split into separate @agentic_function calls."
         )
 
-    # --- Write: record what we're sending (before summarize so current call shows input) ---
-    if ctx is not None:
-        ctx.input = input
-        ctx.media = images
-
     # --- Read: auto-generate context from the tree ---
     if context is None and ctx is not None:
         if ctx._summarize_kwargs:
@@ -194,10 +189,6 @@ async def async_exec(
             f"Each @agentic_function should call runtime.exec/async_exec at most once. "
             f"Split into separate @agentic_function calls."
         )
-
-    if ctx is not None:
-        ctx.input = input
-        ctx.media = images
 
     if context is None and ctx is not None:
         if ctx._summarize_kwargs:
