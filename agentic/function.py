@@ -1,36 +1,16 @@
 """
-@agentic_function — decorator that records function execution into the Context tree.
+agentic_function — decorator class that records function execution into the Context tree.
 
-This is the only thing users need to add to their code. Everything else
-(tree management, context injection, LLM recording) happens automatically.
+Usage is identical to a decorator function:
 
-Three settings, all optional:
-
-    render      How others see my results when they call summarize().
-                Default: "summary" (one-liner with output and duration).
-
-    summarize   What context I see when I call the LLM via runtime.exec().
-                Default: None → see all ancestors + all same-level siblings.
-                Pass a dict to customize: {"depth": 1, "siblings": 3}
-
-    compress    After I finish, hide my children from summarize().
-                Default: False → children are visible if requested via branch=.
-                Set True for high-level functions whose internal steps
-                are irrelevant to the outside world.
-
-Usage:
-
-    from agentic import agentic_function
-
-    # Simplest: just decorate. All defaults.
     @agentic_function
-    def observe(task):
-        ...
+    def observe(task): ...
 
-    # Customized: detailed rendering, limited context, compressed output.
-    @agentic_function(render="detail", summarize={"depth": 1, "siblings": 3}, compress=True)
-    def navigate(target):
-        ...
+    @agentic_function(render="detail", summarize={"depth": 1}, compress=True)
+    def navigate(target): ...
+
+Internally it's a class (like torch.no_grad), but users interact with it
+as a decorator. The class form allows clean documentation and introspection.
 """
 
 from __future__ import annotations
@@ -43,19 +23,13 @@ from typing import Callable, Optional
 from agentic.context import Context, _current_ctx
 
 
-def agentic_function(
-    fn: Optional[Callable] = None,
-    *,
-    render: str = "summary",
-    summarize: Optional[dict] = None,
-    compress: bool = False,
-):
+class agentic_function:
     """
-    Decorator: marks a function as an Agentic Function.
+    Decorator that records function execution into the Context tree.
 
-    Every decorated function is unconditionally recorded into the Context tree.
-    There is no opt-out — if you decorate it, it gets recorded. If you don't
-    want recording, don't decorate it.
+    Every decorated function is unconditionally recorded. On entry, a new
+    Context node is created. On exit, the node is updated with the return
+    value (or error) and timing.
 
     Args:
         render:     How others see my results via summarize().
@@ -93,8 +67,53 @@ def agentic_function(
 
                     Default: False.
     """
-    def decorator(fn: Callable) -> Callable:
+
+    def __init__(
+        self,
+        fn: Optional[Callable] = None,
+        *,
+        render: str = "summary",
+        summarize: Optional[dict] = None,
+        compress: bool = False,
+    ):
+        self.render = render
+        self.summarize_kwargs = summarize
+        self.compress = compress
+
+        if fn is not None:
+            # Used as @agentic_function without parentheses
+            self._fn = fn
+            self._wrapper = self._make_wrapper(fn)
+            functools.update_wrapper(self, fn)
+        else:
+            # Used as @agentic_function(...) with arguments
+            self._fn = None
+            self._wrapper = None
+
+    def __call__(self, *args, **kwargs):
+        if self._fn is not None:
+            # @agentic_function (no parens) — self is the decorator,
+            # __call__ is invoked with the actual function arguments
+            return self._wrapper(*args, **kwargs)
+        else:
+            # @agentic_function(...) — first __call__ receives the function
+            fn = args[0]
+            self._fn = fn
+            self._wrapper = self._make_wrapper(fn)
+            functools.update_wrapper(self, fn)
+            return self
+
+    def __get__(self, obj, objtype=None):
+        """Support instance methods."""
+        if obj is None:
+            return self
+        return functools.partial(self._wrapper, obj)
+
+    def _make_wrapper(self, fn: Callable) -> Callable:
         sig = inspect.signature(fn)
+        render = self.render
+        compress = self.compress
+        summarize = self.summarize_kwargs
 
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
@@ -106,7 +125,6 @@ def agentic_function(
             # Find or create parent node
             parent = _current_ctx.get(None)
             if parent is None:
-                # First decorated call in this thread → create root
                 parent = Context(
                     name="root",
                     start_time=time.time(),
@@ -142,11 +160,5 @@ def agentic_function(
                 ctx.end_time = time.time()
                 _current_ctx.reset(token)
 
-        # Mark for introspection
         wrapper._is_agentic = True
         return wrapper
-
-    # Support both @agentic_function and @agentic_function(...)
-    if fn is not None:
-        return decorator(fn)
-    return decorator
