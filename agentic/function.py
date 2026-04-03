@@ -38,10 +38,9 @@ class agentic_function:
     Args:
         render:     How others see my results via summarize().
 
-                    "trace"   — everything: prompt, I/O, raw LLM reply, error
-                    "detail"  — name(params) → status | input | output
-                    "summary" — name: output_snippet duration  (DEFAULT)
-                    "result"  — return value only (JSON)
+                    "summary" — name, docstring, params, output, status, duration (DEFAULT)
+                    "detail"  — summary + LLM raw_reply
+                    "result"  — name + return value only
                     "silent"  — not shown
 
                     This is a default. Callers can override per-query:
@@ -222,7 +221,7 @@ def _auto_save(ctx: Context):
     try:
         logs_dir = os.path.join(os.path.dirname(__file__), "logs")
         os.makedirs(logs_dir, exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         filename = f"{ctx.name}_{timestamp}.jsonl"
         ctx.save(os.path.join(logs_dir, filename))
     except Exception:

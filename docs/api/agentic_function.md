@@ -14,11 +14,10 @@ Every decorated function is unconditionally recorded. On entry, a new [Context](
 
   | Value | Output |
   |-------|--------|
-  | `"trace"` | Prompt + full I/O + raw LLM reply + error |
-  | `"detail"` | `name(params) → status duration \| input \| output` |
-  | `"summary"` | `name: output_snippet duration` |
-  | `"result"` | Return value only (JSON) |
-  | `"silent"` | Not shown |
+  | `"summary"` | name, docstring, params, output, status, duration (default) |
+  | `"detail"` | summary + LLM raw\_reply |
+  | `"result"` | name + return value only |
+  | `"silent"` | not shown |
 
   This is a default. Callers can override it per-query with `ctx.summarize(level="detail")`.
 

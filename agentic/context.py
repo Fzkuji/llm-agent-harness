@@ -87,7 +87,7 @@ class Context:
         output OR error, status, end_time
 
     Set by runtime.exec() (during execution):
-        input, media, raw_reply
+        raw_reply
     """
 
     # --- Identity & input ---
@@ -346,9 +346,9 @@ class Context:
         Render this node in traceback format.
 
         Level controls how much detail:
-          - "summary" (default): name, purpose, input, output, status
+          - "summary" (default): name, docstring, params, output, status, duration
           - "detail": summary + LLM raw_reply
-          - "result": just name and output
+          - "result": name + return value only
           - "silent": empty string
         """
         if self.summary_fn:

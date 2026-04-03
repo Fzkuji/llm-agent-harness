@@ -163,7 +163,7 @@ Control how much of a function's data is visible to sibling functions:
 @agentic_function                       # default: summary
 def observe(task): ...
 
-@agentic_function(render="detail")      # siblings see full input/output
+@agentic_function(render="detail")      # siblings also see LLM raw_reply
 def observe(task): ...
 
 @agentic_function(render="silent")      # invisible to siblings
@@ -172,10 +172,9 @@ def internal_helper(x): ...
 
 | Level | What siblings see |
 |-------|-------------------|
-| `trace` | prompt + full I/O + raw LLM reply |
-| `detail` | full input and output |
-| `summary` | one-line summary (default) |
-| `result` | return value only |
+| `summary` | name, docstring, params, output, status, duration (default) |
+| `detail` | summary + LLM raw\_reply |
+| `result` | name + return value only |
 | `silent` | nothing |
 
 ---

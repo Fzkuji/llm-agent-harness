@@ -6,7 +6,7 @@ class agentic.Context
 
 Execution record for one function call. Created automatically by [@agentic_function](agentic_function.md). Users do not instantiate this class directly.
 
-Each `Context` node stores the function's name, arguments, return value, timing, and (if [runtime.exec()](runtime.md) was called) the LLM input/output. Nodes are linked via `parent` and `children` to form a tree.
+Each `Context` node stores the function's name, arguments, return value, timing, and (if [Runtime.exec()](runtime.md) was called) the LLM reply. Nodes are linked via `parent` and `children` to form a tree.
 
 ### Fields
 
@@ -24,7 +24,7 @@ Each `Context` node stores the function's name, arguments, return value, timing,
 | `compress` | `bool` | [@agentic_function](agentic_function.md) | Hide children after completion (see [agentic_function](agentic_function.md)) |
 | `start_time` | `float` | [@agentic_function](agentic_function.md) | Start timestamp |
 | `end_time` | `float` | [@agentic_function](agentic_function.md) | End timestamp |
-| `raw_reply` | `str` | [Runtime.exec()](runtime.md) | LLM response text |
+| `raw_reply` | `str \| None` | [Runtime.exec()](runtime.md) | LLM response text (`None` if not called) |
 
 ### Properties
 
@@ -80,7 +80,7 @@ Query the Context tree and return a text string for LLM input. This is how Conte
 
 All ancestors (root → parent) + all same-level siblings that completed before this node. Siblings' children are not shown.
 
-**Returns:** `str` — text ready for LLM prompt injection. Empty string if nothing to show.
+**Returns:** `str` — text ready for LLM prompt injection. Always includes the execution context header and current call info, even with `depth=0, siblings=0`.
 
 **Example:**
 
