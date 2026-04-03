@@ -21,6 +21,7 @@ def agentic_function(
     *,
     render: str = "summary",
     summarize: Optional[dict] = None,
+    compress: bool = False,
 ):
     """
     Decorator: marks a function as an Agentic Function.
@@ -36,6 +37,9 @@ def agentic_function(
                    auto-generates context for this function's LLM calls.
                    Example: {"depth": 1, "siblings": 3}
                    If None, uses default summarize() (all ancestors + all siblings).
+
+        compress:  When True, after this function completes, others only see its
+                   own rendered result — children are not expanded.
     """
     def decorator(fn: Callable) -> Callable:
         sig = inspect.signature(fn)
@@ -62,6 +66,7 @@ def agentic_function(
                 params=params,
                 parent=parent,
                 render=render,
+                compress=compress,
                 start_time=time.time(),
                 _summarize_kwargs=summarize,
             )

@@ -66,6 +66,10 @@ class Context:
     # This is a DEFAULT — callers can override it with summarize(level=...).
     render: str = "summary"
 
+    # When True, after this function completes, summarize renders only this node's
+    # own result — children are not expanded. The full tree is still recorded.
+    compress: bool = False
+
     # === Auto-managed by runtime.exec() ===
     input: Optional[dict] = None
     media: Optional[list] = None
@@ -156,7 +160,7 @@ class Context:
                 if render_level == "silent":
                     continue
                 rendered = c._render(render_level)
-                if branch and c.name in branch:
+                if branch and c.name in branch and not (c.compress and c.status != "running"):
                     rendered += "\n" + c._render_branch(level)
                 sibling_parts.append(rendered)
 
