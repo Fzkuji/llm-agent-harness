@@ -44,7 +44,7 @@ def exec(
     input: dict = None,
     images: list[str] = None,
     context: str = None,
-    schema: dict = None,
+    response_format: dict = None,
     model: str = "sonnet",
     call: Any = None,
 ) -> str:
@@ -54,7 +54,7 @@ def exec(
     Builds a structured prompt that tells the LLM:
     - Where it is in the call tree (function name, docstring, params)
     - What happened before (ancestors + siblings' execution records)
-    - What it needs to do now (prompt + input + schema)
+    - What it needs to do now (prompt + input + response_format)
 
     Args:
         prompt:   Instructions for the LLM.
@@ -69,7 +69,7 @@ def exec(
                   If None (default): auto-generates from the Context tree.
                   If provided: used as-is, no tree query.
 
-        schema:   Expected JSON output schema.
+        response_format:   Expected JSON output response_format.
                   Appended as an output format constraint.
 
         model:    Model name or alias. Passed to the `call` function.
@@ -104,7 +104,7 @@ def exec(
         context=context,
         prompt=prompt,
         input=input,
-        schema=schema,
+        response_format=response_format,
         indent=indent,
     )
 
@@ -132,7 +132,7 @@ def _build_prompt(
     context: Optional[str] = None,
     prompt: str = "",
     input: Optional[dict] = None,
-    schema: Optional[dict] = None,
+    response_format: Optional[dict] = None,
     indent: str = "    ",
 ) -> str:
     """
@@ -146,10 +146,10 @@ def _build_prompt(
 
     if context:
         ctx_lines = [context]
-        if schema:
-            schema_str = json.dumps(schema, indent=2)
-            ctx_lines.append(f"{indent}Output Format: Return ONLY valid JSON matching this schema:")
-            for line in schema_str.split("\n"):
+        if response_format:
+            response_format_str = json.dumps(response_format, indent=2)
+            ctx_lines.append(f"{indent}Output Format: Return ONLY valid JSON matching this response_format:")
+            for line in response_format_str.split("\n"):
                 ctx_lines.append(f"{indent}{line}")
         parts.append("\n".join(ctx_lines))
     else:
@@ -159,9 +159,9 @@ def _build_prompt(
         if input:
             input_str = json.dumps(input, ensure_ascii=False, default=str, indent=2)
             parts.append(f"Input:\n{input_str}")
-        if schema:
-            schema_str = json.dumps(schema, indent=2)
-            parts.append(f"Output Format:\nReturn ONLY valid JSON matching this schema:\n{schema_str}")
+        if response_format:
+            response_format_str = json.dumps(response_format, indent=2)
+            parts.append(f"Output Format:\nReturn ONLY valid JSON matching this response_format:\n{response_format_str}")
 
     return "\n".join(parts)
 
@@ -171,7 +171,7 @@ async def async_exec(
     input: dict = None,
     images: list[str] = None,
     context: str = None,
-    schema: dict = None,
+    response_format: dict = None,
     model: str = "sonnet",
     call: Any = None,
 ) -> str:
@@ -201,7 +201,7 @@ async def async_exec(
         context=context,
         prompt=prompt,
         input=input,
-        schema=schema,
+        response_format=response_format,
         indent=indent,
     )
 
