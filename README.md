@@ -33,9 +33,7 @@
 
 ## Motivation
 
-While building a [GUI Agent](https://github.com/Fzkuji/GUI-Agent-Harness) that operates desktop apps, we ran into a recurring problem: no matter how carefully we designed the Skills and Prompts, the LLM kept deviating from the intended workflow. It would skip steps, repeat actions, invent new steps, or produce outputs in unexpected formats.
-
-The root cause wasn't the prompt — it was the architecture. When the LLM is the scheduler, every instruction is a suggestion, not a guarantee.
+Current LLM agent frameworks place the LLM as the central scheduler — it decides what to do, when, and how. This creates three fundamental problems: **unpredictable execution paths** (the LLM may skip, repeat, or invent steps regardless of defined workflows), **context explosion** (each tool-call round-trip accumulates history), and **no output guarantees** (the LLM interprets instructions rather than executing them).
 
 <p align="center">
   <img src="docs/images/the_problem.png" alt="Motivation: LLM as Scheduler" width="800">
