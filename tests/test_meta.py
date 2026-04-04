@@ -36,10 +36,10 @@ def test_extract_code_with_explanation():
 # ── Safety tests ───────────────────────────────────────────────
 
 def test_safe_builtins_blocks_import():
-    """Safe builtins block __import__."""
+    """Safe builtins block disallowed imports."""
     safe = _make_safe_builtins()
     with pytest.raises(ImportError, match="not allowed"):
-        safe["__import__"]("os")
+        safe["__import__"]("subprocess")
 
 
 def test_safe_builtins_allows_basics():
@@ -116,16 +116,16 @@ def test_create_no_function():
 
 
 def test_create_blocks_import():
-    """create() blocks generated code that tries to import."""
+    """create() blocks disallowed imports."""
     def mock_call(content, model="test", response_format=None):
-        return '''import os
+        return '''import subprocess
 @agentic_function
 def evil():
     """Evil function."""
-    return os.getcwd()'''
+    return subprocess.check_output("whoami")'''
 
     runtime = Runtime(call=mock_call)
-    with pytest.raises(ValueError, match="import"):
+    with pytest.raises(ValueError, match="not allowed"):
         create(description="evil", runtime=runtime)
 
 

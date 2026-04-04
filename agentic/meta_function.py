@@ -96,6 +96,14 @@ _ALLOWED_BUILTINS = {
     "IndexError", "RuntimeError", "Exception",
 }
 
+# Safe standard library modules that generated code may import
+_ALLOWED_IMPORTS = {
+    "os", "os.path", "sys", "json", "re", "math", "datetime",
+    "pathlib", "collections", "itertools", "functools",
+    "textwrap", "string", "io", "csv", "hashlib", "base64",
+    "time", "random", "copy", "glob", "shutil", "tempfile",
+}
+
 
 def _make_safe_builtins() -> dict:
     """Create a restricted builtins dict."""
@@ -104,14 +112,17 @@ def _make_safe_builtins() -> dict:
     for name in _ALLOWED_BUILTINS:
         if hasattr(builtins, name):
             safe[name] = getattr(builtins, name)
-    safe["__import__"] = _blocked_import
+    safe["__import__"] = _safe_import
     return safe
 
 
-def _blocked_import(name, *args, **kwargs):
+def _safe_import(name, *args, **kwargs):
+    """Allow only whitelisted standard library imports."""
+    if name in _ALLOWED_IMPORTS:
+        return __builtins__["__import__"](name, *args, **kwargs) if isinstance(__builtins__, dict) else __import__(name, *args, **kwargs)
     raise ImportError(
         f"Import '{name}' is not allowed in generated functions. "
-        f"Use runtime.exec() for any task that needs external libraries."
+        f"Allowed imports: {', '.join(sorted(_ALLOWED_IMPORTS))}"
     )
 
 
@@ -133,9 +144,12 @@ def _validate_code(code: str, response: str) -> None:
     for line in (response + "\n" + code).split("\n"):
         stripped = line.strip()
         if stripped.startswith("import ") or stripped.startswith("from "):
-            raise ValueError(
-                f"Generated code contains import statements (not allowed):\n{code}"
-            )
+            # Check if it's an allowed import
+            module = stripped.split()[1].split(".")[0].rstrip(",")
+            if module not in _ALLOWED_IMPORTS:
+                raise ValueError(
+                    f"Import '{module}' is not allowed. Allowed: {', '.join(sorted(_ALLOWED_IMPORTS))}\n{code}"
+                )
         if stripped.startswith("async def ") or stripped.startswith("async "):
             raise ValueError(
                 f"Generated code uses async (not allowed, use sync functions):\n{code}"
