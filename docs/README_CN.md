@@ -63,42 +63,50 @@ def observe(task):
 
 ## 快速开始
 
-**30 秒上手：**
+```bash
+git clone https://github.com/Fzkuji/Agentic-Programming.git
+cd Agentic-Programming
+pip install -e .
+```
+
+### 用 Claude Code（不需要 API key）
 
 ```bash
-pip install -e .
+# 先装 Claude Code CLI：npm install -g @anthropic-ai/claude-code && claude login
 python examples/quickstart.py
 ```
 
-**最简示例（不需要 API key，只需 [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)）：**
+### 用 OpenClaw
+
+```bash
+pip install -e /path/to/Agentic-Programming
+```
 
 ```python
 from agentic import agentic_function
 from agentic.providers import ClaudeCodeRuntime
+from agentic.meta_function import create
 
-runtime = ClaudeCodeRuntime(model="sonnet")
+runtime = ClaudeCodeRuntime()
 
-@agentic_function
-def greet(name):
-    """用创意的方式打招呼。"""
-    return runtime.exec(content=[
-        {"type": "text", "text": f"用创意的方式跟 {name} 打招呼。"},
-    ])
-
-result = greet(name="World")
-print(result)                    # "嘿 World！🌍✨"
-print(greet.context.tree())      # 执行追踪
+# 用 create() 创建函数，后续可以反复使用
+summarize = create("把文本总结成 3 个要点", runtime=runtime)
+result = summarize(text="你的文本...")
 ```
 
-**用 API key（Anthropic/OpenAI/Gemini）：**
+### 用 API Key（Anthropic / OpenAI / Gemini）
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...    # 或 OPENAI_API_KEY / GEMINI_API_KEY
+python examples/quickstart.py
+```
 
 ```python
-from agentic.providers import AnthropicRuntime
-
-runtime = AnthropicRuntime(model="claude-sonnet-4-20250514")  # 使用 ANTHROPIC_API_KEY 环境变量
+from agentic.providers import AnthropicRuntime   # 或 OpenAIRuntime、GeminiRuntime
+runtime = AnthropicRuntime(model="claude-sonnet-4-20250514")
 ```
 
-> 📖 完整 3 分钟上手指南见 [Getting Started](GETTING_STARTED.md)。
+> 📖 完整指南：[Getting Started](GETTING_STARTED.md) • [Claude Code](INTEGRATION_CLAUDE_CODE.md) • [OpenClaw](INTEGRATION_OPENCLAW.md)
 
 ---
 

@@ -67,42 +67,50 @@ def observe(task):
 
 ## Quick Start
 
-**30 seconds — install and run:**
+```bash
+git clone https://github.com/Fzkuji/Agentic-Programming.git
+cd Agentic-Programming
+pip install -e .
+```
+
+### With Claude Code (no API key needed)
 
 ```bash
-pip install -e .
+# Install Claude Code CLI first: npm install -g @anthropic-ai/claude-code && claude login
 python examples/quickstart.py
 ```
 
-**The simplest agentic function (no API key needed, just [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)):**
+### With OpenClaw
 
-```python
+```bash
+# Install as a dependency in your OpenClaw workspace
+pip install -e /path/to/Agentic-Programming
+
+# Use in your skills or scripts
 from agentic import agentic_function
 from agentic.providers import ClaudeCodeRuntime
 
-runtime = ClaudeCodeRuntime(model="sonnet")
+runtime = ClaudeCodeRuntime()
 
-@agentic_function
-def greet(name):
-    """Greet someone in a creative way."""
-    return runtime.exec(content=[
-        {"type": "text", "text": f"Say hello to {name} creatively."},
-    ])
-
-result = greet(name="World")
-print(result)                    # "Hey World! 🌍✨"
-print(greet.context.tree())      # execution trace
+# Create functions with create(), use them later
+from agentic.meta_function import create
+summarize = create("Summarize text into 3 bullet points", runtime=runtime)
+result = summarize(text="Your text here...")
 ```
 
-**With an API key (Anthropic/OpenAI/Gemini):**
+### With API Key (Anthropic / OpenAI / Gemini)
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...    # or OPENAI_API_KEY / GEMINI_API_KEY
+python examples/quickstart.py
+```
 
 ```python
-from agentic.providers import AnthropicRuntime
-
-runtime = AnthropicRuntime(model="claude-sonnet-4-20250514")  # uses ANTHROPIC_API_KEY env var
+from agentic.providers import AnthropicRuntime   # or OpenAIRuntime, GeminiRuntime
+runtime = AnthropicRuntime(model="claude-sonnet-4-20250514")
 ```
 
-> 📖 See [Getting Started](docs/GETTING_STARTED.md) for the full 3-minute setup guide.
+> 📖 Full guides: [Getting Started](docs/GETTING_STARTED.md) • [Claude Code](docs/INTEGRATION_CLAUDE_CODE.md) • [OpenClaw](docs/INTEGRATION_OPENCLAW.md)
 
 ---
 
