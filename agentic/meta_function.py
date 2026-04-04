@@ -33,42 +33,6 @@ from agentic.runtime import Runtime
 
 # ── Prompts ─────────────────────────────────────────────────────
 
-_GENERATE_PROMPT = """\
-Write a Python function that does the following:
-
-{description}
-
-Rules:
-1. If the task requires LLM reasoning (analyzing text, making judgments, generating content),
-   decorate with @agentic_function and use runtime.exec() to call the LLM.
-   Content is a list of dicts: [{{"type": "text", "text": "..."}}]
-2. If the task is purely deterministic (file operations, math, data processing),
-   write a normal Python function WITHOUT @agentic_function and WITHOUT runtime.exec().
-3. Standard library imports are allowed (os, json, re, pathlib, etc.).
-4. Do NOT use async/await.
-5. `agentic_function` and `runtime` are available in scope if needed.
-
-Code style (MUST follow):
-- Type hints on all parameters and return type.
-- Google-style docstring with: one-line summary, Args section, Returns section.
-- If calling other agentic functions, import them from agentic.functions.
-- Example docstring format:
-  def my_func(text: str, count: int = 3) -> str:
-      \"\"\"Summarize text into bullet points.
-
-      Args:
-          text: The text to summarize.
-          count: Number of bullet points.
-
-      Returns:
-          A string with bullet-point summary.
-
-      Dependencies:
-          None (or list functions this calls).
-      \"\"\"\n
-Write ONLY the function definition. No extra imports at top level, no examples, no explanation.
-"""
-
 _FIX_PROMPT = """\
 Fix the following agentic function.
 
@@ -417,22 +381,30 @@ def _collect_attempt_info(ctx, lines: list, depth: int = 0):
 
 @agentic_function
 def create(description: str, runtime: Runtime, name: str = None, as_skill: bool = False) -> callable:
-    """Create a new function from a natural language description.
+    """Write a Python function based on the user's description.
+
+    Rules:
+    - If the task requires LLM reasoning, use @agentic_function + runtime.exec().
+    - If the task is purely deterministic, write a normal Python function.
+    - Standard library imports allowed (os, json, re, pathlib, etc.).
+    - No async/await.
+    - Type hints on all parameters and return type.
+    - Google-style docstring: one-line summary, Args, Returns, Dependencies.
+    - If calling other functions, import from agentic.functions.
+
+    Write ONLY the function definition. No extra imports, no examples.
 
     Args:
         description:  What the function should do.
         runtime:      Runtime instance for LLM calls.
-        name:         Optional name override for the generated function.
-        as_skill:     If True, also create a SKILL.md in skills/{name}/
-                      so the function is discoverable by LLM agents.
-                      Use for top-level entry-point functions.
-                      Don't use for internal helper functions.
+        name:         Optional name override.
+        as_skill:     If True, also create a SKILL.md for agent discovery.
 
     Returns:
-        A callable function (agentic or regular, LLM decides).
+        A callable function.
     """
     response = runtime.exec(content=[
-        {"type": "text", "text": _GENERATE_PROMPT.format(description=description)},
+        {"type": "text", "text": f"Write a Python function that does the following:\n\n{description}"},
     ])
     code = _extract_code(response)
     fn_name = name or _guess_name(code) or "generated"
