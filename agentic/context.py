@@ -135,6 +135,9 @@ class Context:
 
     # --- LLM call record (set by runtime.exec()) ---
     raw_reply: str = None            # Raw LLM response text (None = not called yet)
+    attempts: list = field(default_factory=list)
+    # Each exec() attempt is recorded here, whether it succeeds or fails:
+    # {"attempt": 1, "reply": "LLM response" or None, "error": "error msg" or None}
 
     # --- Internal: decorator config ---
     _summarize_kwargs: Optional[dict] = field(default=None, repr=False)
@@ -370,6 +373,15 @@ class Context:
             lines.append(f"{indent}    return {_json(self.output, 300)}")
         if self.error:
             lines.append(f"{indent}    Error: {self.error}")
+
+        # Show failed attempts if any
+        failed_attempts = [a for a in self.attempts if a.get("error")]
+        if failed_attempts:
+            for a in failed_attempts:
+                lines.append(f"{indent}    [Attempt {a['attempt']} FAILED] {a['error']}")
+                if a.get("reply"):
+                    lines.append(f"{indent}      Reply was: {str(a['reply'])[:200]}")
+
         lines.append(f"{indent}    Status: {self.status}{dur}")
 
         # detail adds LLM interaction
@@ -493,6 +505,7 @@ class Context:
             "params": self.params,
             "output": self.output,
             "raw_reply": self.raw_reply,
+            "attempts": self.attempts,
             "error": self.error,
             "status": self.status,
             "render": self.render,

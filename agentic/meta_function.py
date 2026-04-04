@@ -236,3 +236,107 @@ def fix(description: str, code: str, error_log: str, runtime: Runtime, name: str
     fixed_code = _extract_code(response)
     _validate_code(fixed_code, response)
     return _compile_function(fixed_code, runtime, name)
+
+
+# ── Core: run_with_fix() ───────────────────────────────────────────
+
+@agentic_function
+def run_with_fix(fn, args: dict, runtime: Runtime, description: str = None, code: str = None):
+    """Execute a function with automatic error recovery via fix().
+
+    Flow:
+        1. Execute fn(**args)
+        2. If it fails (after exec retries), call fix() to rewrite the function
+        3. Execute the fixed function
+        4. If still fails, raise with full error report
+
+    Everything is recorded in one Context tree:
+        run_with_fix ✓
+        ├── execute (attempt 1) ✗  ← failed, with attempts details
+        ├── fix ✓                   ← LLM rewrites the function
+        └── execute (attempt 2) ✓  ← fixed version succeeds
+
+    Args:
+        fn:           The @agentic_function to execute.
+        args:         Arguments to pass to fn.
+        runtime:      Runtime instance (for fix() LLM calls).
+        description:  What the function is supposed to do (for fix prompt).
+                      Defaults to fn's docstring.
+        code:         Source code of fn (for fix prompt).
+                      Auto-detected via inspect.getsource() if not provided.
+
+    Returns:
+        The result of fn (or the fixed version of fn).
+
+    Raises:
+        RuntimeError: If fix also fails.
+    """
+    import inspect
+
+    # Resolve defaults
+    if description is None:
+        description = getattr(fn, '__doc__', '') or str(fn)
+    if code is None:
+        try:
+            code = inspect.getsource(fn)
+        except (OSError, TypeError):
+            code = f"# Source not available for {getattr(fn, '__name__', 'unknown')}"
+
+    # Attempt 1: run the original function
+    try:
+        return fn(**args)
+    except (TypeError, NotImplementedError):
+        raise  # Programming errors — don't fix
+    except Exception as first_error:
+        # Build error log from Context attempts if available
+        error_log = _build_error_log(fn, first_error)
+
+        # Fix: let LLM rewrite the function
+        fixed_fn = fix(
+            description=description,
+            code=code,
+            error_log=error_log,
+            runtime=runtime,
+            name=getattr(fn, '__name__', 'fixed'),
+        )
+
+        # Attempt 2: run the fixed function
+        try:
+            return fixed_fn(**args)
+        except Exception as second_error:
+            raise RuntimeError(
+                f"run_with_fix failed: original and fixed versions both failed.\n"
+                f"Original error: {first_error}\n"
+                f"Fixed error: {second_error}\n"
+                f"Original code:\n{code}"
+            ) from second_error
+
+
+def _build_error_log(fn, error: Exception) -> str:
+    """Build detailed error log from function's Context and exception."""
+    lines = [f"Exception: {type(error).__name__}: {error}"]
+
+    # Try to get attempts from Context
+    ctx = getattr(fn, 'context', None)
+    if ctx is not None:
+        # Walk the tree to find nodes with failed attempts
+        _collect_attempt_info(ctx, lines)
+
+    return "\n".join(lines)
+
+
+def _collect_attempt_info(ctx, lines: list, depth: int = 0):
+    """Recursively collect attempt info from Context tree."""
+    prefix = "  " * depth
+    if ctx.attempts:
+        for a in ctx.attempts:
+            status = "OK" if a["error"] is None else "FAILED"
+            lines.append(f"{prefix}{ctx.name} attempt {a['attempt']}: {status}")
+            if a["error"]:
+                lines.append(f"{prefix}  Error: {a['error']}")
+            if a.get("reply") and a["error"]:
+                lines.append(f"{prefix}  Reply was: {str(a['reply'])[:300]}")
+    elif ctx.error:
+        lines.append(f"{prefix}{ctx.name}: {ctx.error}")
+    for child in ctx.children:
+        _collect_attempt_info(child, lines, depth + 1)

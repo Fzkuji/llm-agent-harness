@@ -118,23 +118,24 @@ class Runtime:
         full_content.extend(content)
 
         # --- Call the LLM (with retry) ---
-        errors = []
         for attempt in range(self.max_retries):
             try:
                 reply = self._call(full_content, model=use_model, response_format=response_format)
-                # --- Write: record what we got back ---
+                # Record successful attempt
                 if ctx is not None:
+                    ctx.attempts.append({"attempt": attempt + 1, "reply": reply, "error": None})
                     ctx.raw_reply = reply
                 return reply
             except (TypeError, NotImplementedError):
                 raise  # Programming errors — don't retry
             except Exception as e:
-                errors.append(f"Attempt {attempt + 1}: {type(e).__name__}: {e}")
+                # Record failed attempt
+                if ctx is not None:
+                    ctx.attempts.append({"attempt": attempt + 1, "reply": None, "error": f"{type(e).__name__}: {e}"})
                 if attempt == self.max_retries - 1:
-                    # All retries exhausted
-                    error_report = "\n".join(errors)
-                    if ctx is not None:
-                        ctx.raw_reply = None  # Keep None so error is visible
+                    error_report = "\n".join(
+                        f"Attempt {a['attempt']}: {a['error']}" for a in (ctx.attempts if ctx else [])
+                    )
                     raise RuntimeError(
                         f"exec() failed after {self.max_retries} attempts in {ctx.name if ctx else 'unknown'}():\n{error_report}"
                     ) from e
@@ -168,21 +169,22 @@ class Runtime:
             full_content.append({"type": "text", "text": context})
         full_content.extend(content)
 
-        errors = []
         for attempt in range(self.max_retries):
             try:
                 reply = await self._async_call(full_content, model=use_model, response_format=response_format)
                 if ctx is not None:
+                    ctx.attempts.append({"attempt": attempt + 1, "reply": reply, "error": None})
                     ctx.raw_reply = reply
                 return reply
             except (TypeError, NotImplementedError):
                 raise
             except Exception as e:
-                errors.append(f"Attempt {attempt + 1}: {type(e).__name__}: {e}")
+                if ctx is not None:
+                    ctx.attempts.append({"attempt": attempt + 1, "reply": None, "error": f"{type(e).__name__}: {e}"})
                 if attempt == self.max_retries - 1:
-                    error_report = "\n".join(errors)
-                    if ctx is not None:
-                        ctx.raw_reply = None
+                    error_report = "\n".join(
+                        f"Attempt {a['attempt']}: {a['error']}" for a in (ctx.attempts if ctx else [])
+                    )
                     raise RuntimeError(
                         f"async_exec() failed after {self.max_retries} attempts in {ctx.name if ctx else 'unknown'}():\n{error_report}"
                     ) from e
