@@ -1,4 +1,8 @@
 <p align="center">
+  <img src="docs/images/banner.png" alt="Agentic Programming: Redefining Agent Flow Control" width="900">
+</p>
+
+<p align="center">
   <h1 align="center">🧬 Agentic Programming</h1>
   <p align="center">
     <strong>Python functions that think.</strong><br>
