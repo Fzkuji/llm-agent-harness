@@ -67,47 +67,56 @@ def observe(task):
 
 ## Quick Start
 
-### Option 1: Claude Code CLI (no API key)
-
 ```bash
-# 1. Install Claude Code if you haven't
-npm install -g @anthropic-ai/claude-code && claude login
-
-# 2. Clone and install
 git clone https://github.com/Fzkuji/Agentic-Programming.git
 cd Agentic-Programming && pip install -e .
+```
 
-# 3. Run
+Once installed, there are **three entry points** — but they all do the same thing: once triggered, **the function takes control**, not the LLM.
+
+### Entry 1: Command Line
+
+The simplest way. Tell your LLM (or run directly) to execute a Python script:
+
+```bash
 python examples/quickstart.py
 ```
 
-### Option 2: API Key (Anthropic / OpenAI / Gemini)
+Or inline:
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY / GEMINI_API_KEY
-pip install -e ".[anthropic]"          # or .[openai] / .[gemini]
-python examples/quickstart.py
+python -c "
+from agentic.meta_function import create
+from agentic.providers import ClaudeCodeRuntime
+runtime = ClaudeCodeRuntime()
+fn = create('Summarize text into 3 bullet points', runtime=runtime)
+print(fn(text='Your article text here...'))
+"
 ```
 
-### Option 3: As an OpenClaw Skill
+No configuration needed. If you have Claude Code CLI installed (`claude`), it just works.
+
+### Entry 2: Skill
+
+For LLM agents that support skills (OpenClaw, etc.). Install as a skill:
 
 ```bash
-cd ~/.openclaw/workspace
-git clone https://github.com/Fzkuji/Agentic-Programming.git skills/agentic-programming
-pip install -e skills/agentic-programming
+cp -r skill/ ~/.openclaw/workspace/skills/agentic-programming/
 ```
 
-Once installed, just tell your OpenClaw agent what to do:
+Then just talk to your agent:
 
-> "Create a function that summarizes text into 3 bullet points"
+> "Create a function that analyzes code quality"
 
-> "Fix this function — it should use bullet points, not numbered lists"
+The agent reads the [SKILL.md](skill/SKILL.md), calls `create()`, and the function handles everything from there. The agent doesn't control the execution — the function does.
 
-> "Run a multi-step analysis on this code"
+### Entry 3: MCP Tool *(coming soon)*
 
-The agent picks up the skill, calls `create()` / `fix()` / `@agentic_function` behind the scenes, and returns the result. See the [SKILL.md](skill/SKILL.md) for details.
+For MCP-compatible clients. `create()` and `fix()` exposed as MCP tools.
 
-> 📖 Full guides: [Getting Started](docs/GETTING_STARTED.md) • [Claude Code](docs/INTEGRATION_CLAUDE_CODE.md) • [OpenClaw](docs/INTEGRATION_OPENCLAW.md)
+---
+
+**The key insight:** regardless of how you trigger it, once an `@agentic_function` starts running, **Python controls the flow**. The LLM is only called when the function explicitly asks for reasoning via `runtime.exec()`.
 
 ---
 
