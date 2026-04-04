@@ -1,11 +1,11 @@
 ---
 name: meta-function
-description: "Create new Python functions from natural language descriptions, or fix broken ones. Use when: (1) you need a function that doesn't exist yet, (2) an existing function has bugs. Triggers: 'create a function', 'generate a function', 'fix this function', 'make a function that...'."
+description: "Create, fix, or publish Python functions using Agentic Programming. Use when: (1) need a new function from a description, (2) need to fix a broken function, (3) want to publish a function as a skill for other agents. Triggers: 'create a function', 'generate a function', 'fix this function', 'make a skill', 'publish as skill'."
 ---
 
 # Meta Function
 
-Create and fix Python functions using LLM.
+Create, fix, and publish Python functions using LLM.
 
 ## Setup
 
@@ -27,15 +27,11 @@ result = fn(<PARAMS>)
 - Deterministic tasks → generates pure Python
 - Reasoning tasks → generates `@agentic_function` with `runtime.exec()`
 - Auto-saved to `agentic/functions/<NAME>.py`
-- Add `as_skill=True` to also create a `skills/<NAME>/SKILL.md` for agent discovery:
+- Add `as_skill=True` for a quick skill template:
 
 ```python
 fn = create("...", runtime=runtime, name="my_tool", as_skill=True)
-# Now skills/my_tool/SKILL.md exists and agents can find it
 ```
-
-Use `as_skill=True` for top-level entry-point functions.
-Don't use it for internal helpers that other functions call.
 
 ## Fix a function
 
@@ -44,3 +40,22 @@ from agentic.meta_function import fix
 
 fixed = fix(fn=broken_fn, runtime=runtime, instruction="<WHAT_TO_CHANGE>")
 ```
+
+## Create a skill (LLM-written)
+
+Use `create_skill()` to generate a SKILL.md with LLM-written description and trigger words:
+
+```python
+from agentic.meta_function import create_skill
+
+path = create_skill(
+    fn_name="my_tool",
+    description="What the function does",
+    code=source_code,
+    runtime=runtime,
+)
+# → skills/my_tool/SKILL.md
+```
+
+Use for top-level entry-point functions that agents should discover.
+Don't use for internal helpers.

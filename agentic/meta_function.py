@@ -224,23 +224,57 @@ def _save_function(code: str, fn_name: str, description: str = None) -> str:
     return filepath
 
 
-def _save_skill(fn_name: str, description: str, code: str) -> str:
-    """Create a SKILL.md for the function in skills/{fn_name}/."""
+_CREATE_SKILL_PROMPT = """\
+Write a SKILL.md file for an OpenClaw skill. This file tells an LLM agent what this function does and when to use it.
+
+Function name: {fn_name}
+Description: {description}
+Source code:
+```python
+{code}
+```
+
+The SKILL.md must have this exact format:
+
+---
+name: {fn_name}
+description: "<one-line description for agent discovery, include trigger words>"
+---
+
+# <Title>
+
+<Brief description>
+
+## Setup
+
+<How to install>
+
+## Usage
+
+<Code example showing how to import and call the function>
+
+## Parameters
+
+<Table of parameters>
+
+Rules:
+1. The description in the frontmatter must include trigger words (when should an agent use this?)
+2. Usage example must be correct Python that actually works
+3. If the function uses runtime.exec(), mention that Claude Code CLI is needed
+4. Keep it concise — agents read this every message, so shorter is better
+
+Write ONLY the SKILL.md content. No explanation.
+"""
+
+
+def _save_skill_template(fn_name: str, description: str, code: str) -> str:
+    """Create a basic template SKILL.md (no LLM needed)."""
     import os
-    # skills/ is at repo root, parallel to agentic/
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return ""
     repo_root = os.path.dirname(os.path.dirname(__file__))
     skill_dir = os.path.join(repo_root, "skills", fn_name)
     os.makedirs(skill_dir, exist_ok=True)
-
-    # Detect if function uses runtime.exec() (agentic) or not (pure Python)
-    is_agentic = "runtime.exec" in code
-
-    # Extract parameters from code
-    import re as _re
-    param_match = _re.search(r"def\s+\w+\(([^)]*)", code)
-    params = param_match.group(1).strip() if param_match else ""
-    # Remove type hints and defaults for display
-    param_names = [p.strip().split(":")[0].split("=")[0].strip() for p in params.split(",") if p.strip() and p.strip() != "self"]
 
     skill_md = f"""---
 name: {fn_name}
@@ -251,25 +285,53 @@ description: "{description}"
 
 {description}
 
-## Setup
-
-```bash
-pip install -e /path/to/Agentic-Programming
-```
-{chr(10) + 'Requires Claude Code CLI (`claude`) for LLM calls.' + chr(10) if is_agentic else ''}
 ## Usage
 
 ```python
 from agentic.functions.{fn_name} import {fn_name}
-{'from agentic.providers import ClaudeCodeRuntime' + chr(10) + fn_name + "._fn.__globals__['runtime'] = ClaudeCodeRuntime()" + chr(10) if is_agentic else ''}
-result = {fn_name}({', '.join(f'{p}=...' for p in param_names)})
-print(result)
+result = {fn_name}(...)
 ```
 """
-
     filepath = os.path.join(skill_dir, "SKILL.md")
     with open(filepath, "w") as f:
         f.write(skill_md)
+    return filepath
+
+
+@agentic_function
+def create_skill(fn_name: str, description: str, code: str, runtime: Runtime) -> str:
+    """Create a SKILL.md for a function, using LLM to write a good description.
+
+    Args:
+        fn_name:      Function name.
+        description:  What the function does.
+        code:         Function source code.
+        runtime:      Runtime for LLM calls.
+
+    Returns:
+        Path to the created SKILL.md.
+    """
+    import os
+
+    response = runtime.exec(content=[
+        {"type": "text", "text": _CREATE_SKILL_PROMPT.format(
+            fn_name=fn_name, description=description, code=code,
+        )},
+    ])
+
+    # Extract content (strip markdown fences if any)
+    skill_content = response.strip()
+    if skill_content.startswith("```"):
+        lines = skill_content.split("\n")
+        skill_content = "\n".join(lines[1:-1] if lines[-1].startswith("```") else lines[1:])
+
+    repo_root = os.path.dirname(os.path.dirname(__file__))
+    skill_dir = os.path.join(repo_root, "skills", fn_name)
+    os.makedirs(skill_dir, exist_ok=True)
+
+    filepath = os.path.join(skill_dir, "SKILL.md")
+    with open(filepath, "w") as f:
+        f.write(skill_content)
 
     return filepath
 
@@ -363,7 +425,7 @@ def create(description: str, runtime: Runtime, name: str = None, as_skill: bool 
     # Save first, then validate and compile
     _save_function(code, fn_name, description)
     if as_skill:
-        _save_skill(fn_name, description, code)
+        _save_skill_template(fn_name, description, code)
     _validate_code(code, response)
     return _compile_function(code, runtime, name)
 
