@@ -30,20 +30,11 @@ The core issue: **the LLM controls the flow.** You're asking a reasoning engine 
 
 ## The Idea
 
-**Give the flow back to Python. Let the LLM focus on reasoning.**
+<p align="center">
+  <img src="docs/images/the_idea.png" alt="The Idea: Python controls flow, LLM reasons" width="800">
+</p>
 
-```
-🐍 Python: "Step 1: take screenshot + OCR"
-   ↓ deterministic code, instant
-🧠 LLM: "I see a login button at (200, 300)"       ← reasoning only
-   ↓
-🐍 Python: "Step 2: click (200, 300)"
-   ↓ deterministic code, instant
-🧠 LLM: "Login successful, I see the dashboard"    ← reasoning only
-   Done. 2 LLM calls instead of 10.
-```
-
-Python handles scheduling, loops, error handling, and data flow. The LLM only answers questions.
+**Give the flow back to Python. Let the LLM focus on reasoning.** Python handles scheduling, loops, error handling, and data flow. The LLM only answers questions.
 
 ```python
 @agentic_function
