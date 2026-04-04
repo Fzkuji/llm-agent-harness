@@ -39,7 +39,7 @@ Current LLM agent frameworks place the LLM as the central scheduler — it decid
   <img src="docs/images/the_problem.png" alt="Motivation: LLM as Scheduler" width="800">
 </p>
 
-The core issue: **the LLM controls the flow.** You're asking a reasoning engine to also be a scheduler, a state machine, and a format enforcer. That's not what it's good at.
+The core issue: **the LLM controls the flow, but nothing enforces it.** The LLM may follow a workflow, or it may not — there is no strict constraint. Skills, prompts, and system messages are suggestions, not guarantees. The execution path is fundamentally non-deterministic.
 
 ## The Idea
 
