@@ -10,6 +10,7 @@ Available providers:
     GeminiRuntime       — Google Gemini API (text + image)
     ClaudeCodeRuntime   — Claude Code CLI (no API key, uses subscription)
     CodexRuntime        — OpenAI Codex CLI (no API key in harness, uses codex auth)
+    GeminiCLIRuntime    — Gemini CLI (no API key, uses Google account)
 
 Usage:
     from agentic.providers import AnthropicRuntime
@@ -43,7 +44,10 @@ def __getattr__(name):
     if name == "CodexRuntime":
         from agentic.providers.codex import CodexRuntime
         return CodexRuntime
+    if name == "GeminiCLIRuntime":
+        from agentic.providers.gemini_cli import GeminiCLIRuntime
+        return GeminiCLIRuntime
     raise AttributeError(f"module 'agentic.providers' has no attribute {name!r}")
 
 
-__all__ = ["AnthropicRuntime", "OpenAIRuntime", "GeminiRuntime", "ClaudeCodeRuntime", "CodexRuntime"]
+__all__ = ["AnthropicRuntime", "OpenAIRuntime", "GeminiRuntime", "ClaudeCodeRuntime", "CodexRuntime", "GeminiCLIRuntime"]
