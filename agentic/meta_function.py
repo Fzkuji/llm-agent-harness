@@ -332,21 +332,54 @@ def _collect_attempt_info(ctx, lines: list, depth: int = 0):
 def create(description: str, runtime: Runtime, name: str = None, as_skill: bool = False) -> callable:
     """Write a Python function based on the user's description.
 
+    IMPORTANT — How our framework works:
+    In Agentic Programming, the function's docstring IS the LLM prompt.
+    When runtime.exec() is called, the framework automatically sends:
+    1. The full execution context (parent functions, sibling results)
+    2. The current function's docstring
+    3. The current function's parameters and their values
+    4. Whatever the function passes in content=[...]
+
+    So the docstring already tells the LLM what to do. The content should
+    ONLY contain the actual data (user's text, file path, etc.), NOT
+    repeated instructions. The docstring handles the instructions.
+
     Rules:
     - If the task requires LLM reasoning, use @agentic_function + runtime.exec().
-      Content is a list of dicts: [{"type": "text", "text": "..."}].
       `agentic_function` and `runtime` are already available in scope.
     - If the task is purely deterministic, write a normal Python function
       WITHOUT @agentic_function and WITHOUT runtime.exec().
     - Standard library imports allowed (os, json, re, pathlib, math, etc.).
     - No async/await.
     - Type hints on all parameters and return type.
-    - Google-style docstring with: one-line summary, Args, Returns, Dependencies.
-    - If calling other agentic functions, import from agentic.functions.
+    - Google-style docstring: one-line summary, Args, Returns.
     - The function will be saved to agentic/functions/ for reuse.
 
-    Write ONLY the function definition. No extra imports at top level,
-    no examples, no explanation. Start with def or @agentic_function.
+    Example of a CORRECT agentic function:
+
+        @agentic_function
+        def sentiment(text: str) -> str:
+            \"\"\"Analyze the sentiment of the given text.
+            Return exactly one word: positive, negative, or neutral.\"\"\"\n            return runtime.exec(content=[
+                {"type": "text", "text": text},
+            ])
+
+    Notice: the docstring says what to do ("analyze sentiment, return one word").
+    The content ONLY passes the data (text). No instructions in content.
+
+    Example of a CORRECT pure Python function:
+
+        def word_count(text: str) -> int:
+            \"\"\"Count the number of words in a text string.
+
+            Args:
+                text: The input text.
+
+            Returns:
+                Number of words.
+            \"\"\"\n            return len(text.split())
+
+    Write ONLY the function definition. No extra imports, no explanation.
 
     Args:
         description:  What the function should do.
