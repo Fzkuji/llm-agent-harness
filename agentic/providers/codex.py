@@ -1,0 +1,242 @@
+"""
+Codex CLI provider — routes LLM calls through the OpenAI Codex CLI.
+
+Uses `codex exec` (non-interactive mode) with full-auto sandbox.
+No API key needed in the harness — Codex CLI uses its own auth.
+
+Supports:
+- Text content blocks
+- Image content blocks (via -i flag for file paths, temp files for base64)
+- Session continuity (via `codex exec resume <session_id>`)
+
+Usage:
+    from agentic.providers.codex import CodexRuntime
+
+    runtime = CodexRuntime(model="o4-mini")
+
+    @agentic_function
+    def observe(task):
+        return runtime.exec(content=[
+            {"type": "text", "text": f"Find: {task}"},
+            {"type": "image", "path": "screenshot.png"},
+        ])
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+import mimetypes
+import os
+import shutil
+import subprocess
+import tempfile
+import uuid
+from typing import Optional
+
+from agentic.runtime import Runtime
+
+
+class CodexRuntime(Runtime):
+    """
+    Runtime that routes LLM calls through the OpenAI Codex CLI.
+
+    Requires `codex` CLI to be installed and authenticated.
+    Uses Codex CLI's own auth (no separate API key needed in harness).
+
+    Supports images via -i flag (file paths) or temp files (base64 data).
+    Supports session continuity via `codex exec resume`.
+
+    Args:
+        model:      Model to use (default: "o4-mini"). Passed to --model flag.
+        timeout:    Max seconds per CLI call (default: 300).
+        cli_path:   Path to codex CLI binary (auto-detected if not specified).
+        session_id: Session ID for continuity. "auto" = generate UUID.
+                    None = stateless (each call independent).
+        workdir:    Working directory for codex. None = current directory.
+        sandbox:    Sandbox mode: "read-only", "workspace-write", or
+                    "danger-full-access" (default: "workspace-write").
+        full_auto:  Use --full-auto flag (default: True).
+    """
+
+    def __init__(
+        self,
+        model: str = "o4-mini",
+        timeout: int = 300,
+        cli_path: str = None,
+        session_id: str = "auto",
+        workdir: str = None,
+        sandbox: str = "workspace-write",
+        full_auto: bool = True,
+    ):
+        super().__init__(model=model)
+        self.timeout = timeout
+        self.cli_path = cli_path or shutil.which("codex")
+        self.workdir = workdir
+        self.sandbox = sandbox
+        self.full_auto = full_auto
+        self._turn_count = 0
+
+        if session_id == "auto":
+            self._session_id = str(uuid.uuid4())
+        else:
+            self._session_id = session_id
+
+        if self.cli_path is None:
+            raise FileNotFoundError(
+                "Codex CLI not found. Install it first:\n"
+                "  npm install -g @openai/codex\n"
+                "Then authenticate:\n"
+                "  codex auth"
+            )
+
+    def _call(self, content: list[dict], model: str = "o4-mini", response_format: dict = None) -> str:
+        """Call Codex CLI with the content list.
+
+        Images are passed via -i flag (file paths). Base64 data is
+        written to temp files first. URL images are skipped with a
+        text note (Codex CLI only supports local files).
+        """
+        # Collect text parts and image paths
+        text_parts = []
+        image_paths = []
+        temp_files = []
+
+        try:
+            for block in content:
+                btype = block.get("type", "text")
+
+                if btype == "text":
+                    text_parts.append(block["text"])
+
+                elif btype == "image":
+                    path = self._resolve_image(block, temp_files)
+                    if path:
+                        image_paths.append(path)
+                    elif "url" in block:
+                        # Codex CLI doesn't support URLs — add as text note
+                        text_parts.append(f"[Image URL: {block['url']}]")
+
+                elif "text" in block:
+                    text_parts.append(block["text"])
+
+            prompt = "\n".join(text_parts)
+            if response_format:
+                prompt += f"\n\nRespond with ONLY valid JSON matching this schema: {json.dumps(response_format)}"
+
+            result = self._run_codex(prompt, image_paths, model)
+            self._turn_count += 1
+            return result
+
+        finally:
+            # Clean up temp files
+            for tf in temp_files:
+                try:
+                    os.unlink(tf)
+                except OSError:
+                    pass
+
+    def _resolve_image(self, block: dict, temp_files: list) -> Optional[str]:
+        """Resolve an image block to a local file path.
+
+        For file paths, returns the path directly.
+        For base64 data, writes to a temp file and returns its path.
+        For URLs, returns None (Codex CLI doesn't support URLs).
+        """
+        if "path" in block:
+            return block["path"]
+
+        if "data" in block:
+            media_type = block.get("media_type", "image/png")
+            ext = mimetypes.guess_extension(media_type) or ".png"
+            fd, tmp_path = tempfile.mkstemp(suffix=ext, prefix="codex_img_")
+            try:
+                os.write(fd, base64.b64decode(block["data"]))
+            finally:
+                os.close(fd)
+            temp_files.append(tmp_path)
+            return tmp_path
+
+        return None
+
+    def _run_codex(self, prompt: str, image_paths: list[str], model: str) -> str:
+        """Build and run the codex exec command."""
+        is_resume = self._session_id and self._turn_count > 0
+
+        if is_resume:
+            cmd = [self.cli_path, "exec", "resume", self._session_id]
+        else:
+            cmd = [self.cli_path, "exec"]
+
+        # Common flags
+        if model:
+            cmd.extend(["--model", model])
+
+        if self.full_auto:
+            cmd.append("--full-auto")
+        elif self.sandbox:
+            cmd.extend(["--sandbox", self.sandbox])
+
+        if self.workdir:
+            cmd.extend(["--cd", self.workdir])
+
+        cmd.append("--skip-git-repo-check")
+
+        # Image flags
+        for img_path in image_paths:
+            cmd.extend(["-i", img_path])
+
+        # Output: capture last message to a temp file for reliable extraction
+        fd, output_file = tempfile.mkstemp(suffix=".txt", prefix="codex_out_")
+        os.close(fd)
+        try:
+            cmd.extend(["-o", output_file])
+
+            # Prompt goes last
+            cmd.append(prompt)
+
+            try:
+                proc = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=self.timeout,
+                )
+            except subprocess.TimeoutExpired:
+                raise TimeoutError(f"Codex CLI timed out after {self.timeout}s")
+
+            if proc.returncode != 0:
+                self._handle_error(proc)
+
+            # Read output from the -o file
+            try:
+                with open(output_file, "r") as f:
+                    result = f.read().strip()
+                if result:
+                    return result
+            except (FileNotFoundError, IOError):
+                pass
+
+            # Fall back to stdout
+            return proc.stdout.strip()
+
+        finally:
+            try:
+                os.unlink(output_file)
+            except OSError:
+                pass
+
+    def _handle_error(self, result):
+        """Handle CLI errors."""
+        error_msg = result.stderr.strip() or result.stdout.strip() or "Unknown error"
+        if "auth" in error_msg.lower() or "login" in error_msg.lower() or "api key" in error_msg.lower():
+            raise ConnectionError(
+                f"Codex CLI authentication error. Run: codex auth\n"
+                f"Error: {error_msg}"
+            )
+        raise RuntimeError(f"Codex CLI error (exit {result.returncode}): {error_msg}")
+
+    def reset(self):
+        """Start a new session."""
+        self._session_id = str(uuid.uuid4())
+        self._turn_count = 0

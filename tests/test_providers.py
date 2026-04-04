@@ -6,6 +6,7 @@ All tests use mocked SDKs — no real API calls are made.
 
 import base64
 import os
+import subprocess
 import types
 import pytest
 from unittest.mock import MagicMock, patch, mock_open
@@ -515,6 +516,201 @@ class TestGeminiRuntime:
 # Provider lazy import tests
 # ══════════════════════════════════════════════════════════════
 
+# ══════════════════════════════════════════════════════════════
+# CodexRuntime tests
+# ══════════════════════════════════════════════════════════════
+
+class TestCodexRuntime:
+    """Tests for CodexRuntime with mocked subprocess."""
+
+    @pytest.fixture(autouse=True)
+    def setup_mock(self, monkeypatch, tmp_path):
+        """Mock shutil.which and subprocess.run."""
+        self.tmp_path = tmp_path
+        monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/codex" if name == "codex" else None)
+
+        # Default mock: write output to -o file, return success
+        def mock_run(cmd, **kwargs):
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = "mock codex reply"
+            result.stderr = ""
+            # Find -o flag and write output
+            for i, arg in enumerate(cmd):
+                if arg == "-o" and i + 1 < len(cmd):
+                    with open(cmd[i + 1], "w") as f:
+                        f.write("mock codex reply")
+                    break
+            return result
+
+        self._mock_run = MagicMock(side_effect=mock_run)
+        monkeypatch.setattr("subprocess.run", self._mock_run)
+
+        yield
+
+    def _make_runtime(self, **kwargs):
+        from agentic.providers.codex import CodexRuntime
+        return CodexRuntime(cli_path="/usr/bin/codex", **kwargs)
+
+    def test_text_only_call(self):
+        """Text-only content produces correct codex exec command."""
+        rt = self._make_runtime()
+        result = rt._call([{"type": "text", "text": "hello"}])
+        assert result == "mock codex reply"
+        cmd = self._mock_run.call_args[0][0]
+        assert cmd[0] == "/usr/bin/codex"
+        assert cmd[1] == "exec"
+        assert "--full-auto" in cmd
+        assert "--skip-git-repo-check" in cmd
+        # Prompt should be last
+        assert cmd[-1] == "hello"
+
+    def test_model_flag(self):
+        """Model is passed via --model flag."""
+        rt = self._make_runtime(model="o3")
+        rt._call([{"type": "text", "text": "hi"}], model="o3")
+        cmd = self._mock_run.call_args[0][0]
+        idx = cmd.index("--model")
+        assert cmd[idx + 1] == "o3"
+
+    def test_image_from_file(self, tmp_path):
+        """Image with path is passed via -i flag."""
+        img_path = tmp_path / "test.png"
+        img_path.write_bytes(b"\x89PNG" + b"\x00" * 10)
+
+        rt = self._make_runtime()
+        rt._call([{"type": "image", "path": str(img_path)}])
+        cmd = self._mock_run.call_args[0][0]
+        assert "-i" in cmd
+        idx = cmd.index("-i")
+        assert cmd[idx + 1] == str(img_path)
+
+    def test_image_from_base64(self):
+        """Image with base64 data is written to temp file and passed via -i."""
+        import base64 as b64
+        data = b64.b64encode(b"\x89PNG\x00" * 3).decode()
+        rt = self._make_runtime()
+        rt._call([{"type": "image", "data": data, "media_type": "image/png"}])
+        cmd = self._mock_run.call_args[0][0]
+        assert "-i" in cmd
+        idx = cmd.index("-i")
+        # Should be a temp file path
+        assert "codex_img_" in cmd[idx + 1]
+
+    def test_image_url_fallback_to_text(self):
+        """Image with URL adds text note since codex CLI doesn't support URLs."""
+        rt = self._make_runtime()
+        rt._call([{"type": "image", "url": "https://example.com/img.png"}])
+        cmd = self._mock_run.call_args[0][0]
+        # No -i flag for URL
+        assert "-i" not in cmd
+        # URL should appear in prompt text
+        assert "https://example.com/img.png" in cmd[-1]
+
+    def test_session_resume(self):
+        """Second call uses 'resume' subcommand."""
+        rt = self._make_runtime(session_id="test-session")
+        rt._call([{"type": "text", "text": "first"}])
+        cmd1 = self._mock_run.call_args[0][0]
+        assert "resume" not in cmd1
+
+        rt._call([{"type": "text", "text": "second"}])
+        cmd2 = self._mock_run.call_args[0][0]
+        assert cmd2[2] == "resume"
+        assert "test-session" in cmd2
+
+    def test_stateless_mode(self):
+        """session_id=None never uses resume."""
+        rt = self._make_runtime(session_id=None)
+        rt._call([{"type": "text", "text": "first"}])
+        rt._call([{"type": "text", "text": "second"}])
+        cmd = self._mock_run.call_args[0][0]
+        assert "resume" not in cmd
+
+    def test_workdir_flag(self):
+        """workdir is passed via --cd flag."""
+        rt = self._make_runtime(workdir="/tmp/myproject")
+        rt._call([{"type": "text", "text": "hi"}])
+        cmd = self._mock_run.call_args[0][0]
+        idx = cmd.index("--cd")
+        assert cmd[idx + 1] == "/tmp/myproject"
+
+    def test_response_format_appended(self):
+        """response_format is appended to prompt text."""
+        rt = self._make_runtime()
+        schema = {"type": "object", "properties": {"name": {"type": "string"}}}
+        rt._call([{"type": "text", "text": "test"}], response_format=schema)
+        cmd = self._mock_run.call_args[0][0]
+        assert "JSON" in cmd[-1]
+
+    def test_cli_not_found(self, monkeypatch):
+        """Missing CLI raises FileNotFoundError."""
+        monkeypatch.setattr("shutil.which", lambda name: None)
+        from agentic.providers.codex import CodexRuntime
+        with pytest.raises(FileNotFoundError, match="Codex CLI not found"):
+            CodexRuntime(cli_path=None)
+
+    def test_cli_error_propagates(self):
+        """CLI errors are raised as RuntimeError."""
+        def failing_run(cmd, **kwargs):
+            result = MagicMock()
+            result.returncode = 1
+            result.stderr = "something went wrong"
+            result.stdout = ""
+            return result
+
+        self._mock_run.side_effect = failing_run
+        rt = self._make_runtime()
+
+        with pytest.raises(RuntimeError, match="Codex CLI error"):
+            rt._call([{"type": "text", "text": "test"}])
+
+    def test_auth_error(self):
+        """Auth errors raise ConnectionError."""
+        def auth_fail(cmd, **kwargs):
+            result = MagicMock()
+            result.returncode = 1
+            result.stderr = "Invalid API key"
+            result.stdout = ""
+            return result
+
+        self._mock_run.side_effect = auth_fail
+        rt = self._make_runtime()
+
+        with pytest.raises(ConnectionError, match="authentication"):
+            rt._call([{"type": "text", "text": "test"}])
+
+    def test_timeout(self):
+        """Timeout raises TimeoutError."""
+        self._mock_run.side_effect = subprocess.TimeoutExpired(cmd="codex", timeout=10)
+        rt = self._make_runtime(timeout=10)
+
+        with pytest.raises(TimeoutError, match="timed out"):
+            rt._call([{"type": "text", "text": "test"}])
+
+    def test_reset(self):
+        """reset() creates new session and resets turn count."""
+        rt = self._make_runtime()
+        rt._call([{"type": "text", "text": "first"}])
+        old_session = rt._session_id
+        rt.reset()
+        assert rt._session_id != old_session
+        assert rt._turn_count == 0
+
+    def test_sandbox_mode(self):
+        """Custom sandbox mode without full_auto."""
+        rt = self._make_runtime(full_auto=False, sandbox="read-only")
+        rt._call([{"type": "text", "text": "hi"}])
+        cmd = self._mock_run.call_args[0][0]
+        assert "--full-auto" not in cmd
+        idx = cmd.index("--sandbox")
+        assert cmd[idx + 1] == "read-only"
+
+
+# ══════════════════════════════════════════════════════════════
+# Provider lazy import tests
+# ══════════════════════════════════════════════════════════════
+
 class TestProviderLazyImport:
     """Test that providers/__init__.py lazy-loads correctly."""
 
@@ -525,8 +721,10 @@ class TestProviderLazyImport:
             _ = providers.NonExistentRuntime
 
     def test_all_exports(self):
-        """__all__ lists the three providers."""
+        """__all__ lists all providers."""
         from agentic import providers
         assert "AnthropicRuntime" in providers.__all__
         assert "OpenAIRuntime" in providers.__all__
         assert "GeminiRuntime" in providers.__all__
+        assert "ClaudeCodeRuntime" in providers.__all__
+        assert "CodexRuntime" in providers.__all__

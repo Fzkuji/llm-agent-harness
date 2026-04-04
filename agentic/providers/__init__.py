@@ -9,6 +9,7 @@ Available providers:
     OpenAIRuntime       — OpenAI GPT API (text + image, response_format)
     GeminiRuntime       — Google Gemini API (text + image)
     ClaudeCodeRuntime   — Claude Code CLI (no API key, uses subscription)
+    CodexRuntime        — OpenAI Codex CLI (no API key in harness, uses codex auth)
 
 Usage:
     from agentic.providers import AnthropicRuntime
@@ -19,6 +20,9 @@ Usage:
 
     from agentic.providers import GeminiRuntime
     rt = GeminiRuntime(api_key="...", model="gemini-2.5-flash")
+
+    from agentic.providers import CodexRuntime
+    rt = CodexRuntime(model="o4-mini")
 """
 
 
@@ -36,7 +40,10 @@ def __getattr__(name):
     if name == "ClaudeCodeRuntime":
         from agentic.providers.claude_code import ClaudeCodeRuntime
         return ClaudeCodeRuntime
+    if name == "CodexRuntime":
+        from agentic.providers.codex import CodexRuntime
+        return CodexRuntime
     raise AttributeError(f"module 'agentic.providers' has no attribute {name!r}")
 
 
-__all__ = ["AnthropicRuntime", "OpenAIRuntime", "GeminiRuntime", "ClaudeCodeRuntime"]
+__all__ = ["AnthropicRuntime", "OpenAIRuntime", "GeminiRuntime", "ClaudeCodeRuntime", "CodexRuntime"]
