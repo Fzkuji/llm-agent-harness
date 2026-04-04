@@ -5,9 +5,10 @@ Each provider is an optional dependency. Import will give a clear error
 if the required SDK is not installed.
 
 Available providers:
-    AnthropicRuntime  — Anthropic Claude (text + image, prompt caching)
-    OpenAIRuntime     — OpenAI GPT (text + image, response_format)
-    GeminiRuntime     — Google Gemini (text + image)
+    AnthropicRuntime    — Anthropic Claude API (text + image, prompt caching)
+    OpenAIRuntime       — OpenAI GPT API (text + image, response_format)
+    GeminiRuntime       — Google Gemini API (text + image)
+    ClaudeCodeRuntime   — Claude Code CLI (no API key, uses subscription)
 
 Usage:
     from agentic.providers import AnthropicRuntime
@@ -32,7 +33,10 @@ def __getattr__(name):
     if name == "GeminiRuntime":
         from agentic.providers.gemini import GeminiRuntime
         return GeminiRuntime
+    if name == "ClaudeCodeRuntime":
+        from agentic.providers.claude_code import ClaudeCodeRuntime
+        return ClaudeCodeRuntime
     raise AttributeError(f"module 'agentic.providers' has no attribute {name!r}")
 
 
-__all__ = ["AnthropicRuntime", "OpenAIRuntime", "GeminiRuntime"]
+__all__ = ["AnthropicRuntime", "OpenAIRuntime", "GeminiRuntime", "ClaudeCodeRuntime"]
