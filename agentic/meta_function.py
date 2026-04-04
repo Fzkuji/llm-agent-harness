@@ -39,18 +39,19 @@ Write a Python function that does the following:
 {description}
 
 Rules:
-1. Decorate with @agentic_function
-2. Write a clear docstring — this becomes the LLM prompt
-3. Use runtime.exec() to call the LLM when reasoning is needed
-4. Content is a list of dicts: [{{"type": "text", "text": "..."}}]
-5. Return a meaningful result (string or dict)
-6. Use only standard Python — no imports needed
-7. Do NOT use async/await — write a normal synchronous function
+1. If the task requires LLM reasoning (analyzing text, making judgments, generating content),
+   decorate with @agentic_function and use runtime.exec() to call the LLM.
+   Content is a list of dicts: [{{"type": "text", "text": "..."}}]
+2. If the task is purely deterministic (file operations, math, data processing),
+   write a normal Python function WITHOUT @agentic_function and WITHOUT runtime.exec().
+3. Write a clear docstring describing what the function does.
+4. Return a meaningful result (string or dict).
+5. Standard library imports are allowed (os, json, re, pathlib, etc.).
+6. Do NOT use async/await.
 
-`agentic_function` and `runtime` are already available in scope.
+`agentic_function` and `runtime` are available in scope if needed.
 
-Write ONLY the function definition. No imports, no examples, no explanation.
-Start with @agentic_function and end with the return statement.
+Write ONLY the function definition. No extra imports at top level, no examples, no explanation.
 """
 
 _FIX_PROMPT = """\
@@ -218,11 +219,19 @@ def _guess_name(code: str) -> Optional[str]:
 
 
 def _find_function(namespace: dict) -> Optional[callable]:
-    """Find the generated agentic_function in the namespace."""
+    """Find the generated function in the namespace (agentic or regular)."""
+    # First try to find an @agentic_function
     for obj_name, obj in namespace.items():
         if obj_name.startswith("_"):
             continue
         if isinstance(obj, agentic_function):
+            return obj
+    # Then try to find any regular function
+    import types
+    for obj_name, obj in namespace.items():
+        if obj_name.startswith("_"):
+            continue
+        if isinstance(obj, types.FunctionType):
             return obj
     return None
 
