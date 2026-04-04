@@ -12,6 +12,7 @@
     <a href="#quick-start">Quick Start</a> •
     <a href="#how-it-works">How It Works</a> •
     <a href="#api">API</a> •
+    <a href="#integration">Integration</a> •
     <a href="docs/API.md">Docs</a> •
     <a href="examples/">Examples</a>
   </p>
@@ -66,14 +67,20 @@ def observe(task):
 
 ## Quick Start
 
+**30 seconds — install and run:**
+
 ```bash
 pip install -e .
+python examples/quickstart.py
 ```
 
-```python
-from agentic import agentic_function, Runtime
+**The simplest agentic function (no API key needed, just [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)):**
 
-runtime = Runtime(call=my_llm, model="sonnet")
+```python
+from agentic import agentic_function
+from agentic.providers import ClaudeCodeRuntime
+
+runtime = ClaudeCodeRuntime(model="sonnet")
 
 @agentic_function
 def greet(name):
@@ -86,6 +93,16 @@ result = greet(name="World")
 print(result)                    # "Hey World! 🌍✨"
 print(greet.context.tree())      # execution trace
 ```
+
+**With an API key (Anthropic/OpenAI/Gemini):**
+
+```python
+from agentic.providers import AnthropicRuntime
+
+runtime = AnthropicRuntime(model="claude-sonnet-4-20250514")  # uses ANTHROPIC_API_KEY env var
+```
+
+> 📖 See [Getting Started](docs/GETTING_STARTED.md) for the full 3-minute setup guide.
 
 ---
 
@@ -201,6 +218,19 @@ examples/                # 5 runnable demos
 docs/api/                # API reference
 tests/                   # 161 tests
 ```
+
+## Integration
+
+Use Agentic Programming with your existing tools:
+
+| Guide | Description |
+|-------|-------------|
+| [Getting Started](docs/GETTING_STARTED.md) | 3-minute setup, provider comparison, runnable examples |
+| [Claude Code Integration](docs/INTEGRATION_CLAUDE_CODE.md) | Use without API key via Claude Code CLI |
+| [OpenClaw Integration](docs/INTEGRATION_OPENCLAW.md) | Use as OpenClaw skill or MCP tool |
+| [API Reference](docs/API.md) | Full API documentation |
+
+---
 
 ## Contributing
 

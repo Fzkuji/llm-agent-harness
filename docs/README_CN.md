@@ -8,6 +8,7 @@
     <a href="#快速开始">快速开始</a> •
     <a href="#核心思想">核心思想</a> •
     <a href="#api">API</a> •
+    <a href="#集成">集成</a> •
     <a href="../README.md">English</a>
   </p>
 </p>
@@ -62,14 +63,20 @@ def observe(task):
 
 ## 快速开始
 
+**30 秒上手：**
+
 ```bash
 pip install -e .
+python examples/quickstart.py
 ```
 
-```python
-from agentic import agentic_function, Runtime
+**最简示例（不需要 API key，只需 [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)）：**
 
-runtime = Runtime(call=my_llm, model="sonnet")
+```python
+from agentic import agentic_function
+from agentic.providers import ClaudeCodeRuntime
+
+runtime = ClaudeCodeRuntime(model="sonnet")
 
 @agentic_function
 def greet(name):
@@ -82,6 +89,16 @@ result = greet(name="World")
 print(result)                    # "嘿 World！🌍✨"
 print(greet.context.tree())      # 执行追踪
 ```
+
+**用 API key（Anthropic/OpenAI/Gemini）：**
+
+```python
+from agentic.providers import AnthropicRuntime
+
+runtime = AnthropicRuntime(model="claude-sonnet-4-20250514")  # 使用 ANTHROPIC_API_KEY 环境变量
+```
+
+> 📖 完整 3 分钟上手指南见 [Getting Started](GETTING_STARTED.md)。
 
 ---
 
@@ -179,6 +196,19 @@ pip install -e ".[openai]"          # + GPT
 pip install -e ".[gemini]"          # + Gemini
 pip install -e ".[all]"             # 全部
 ```
+
+## 集成
+
+把 Agentic Programming 和你现有的工具一起用：
+
+| 指南 | 说明 |
+|------|------|
+| [Getting Started](GETTING_STARTED.md) | 3 分钟上手，provider 对比，可运行示例 |
+| [Claude Code 集成](INTEGRATION_CLAUDE_CODE.md) | 不需要 API key，用 Claude Code CLI |
+| [OpenClaw 集成](INTEGRATION_OPENCLAW.md) | 作为 OpenClaw skill 或 MCP tool |
+| [API 参考](API.md) | 完整 API 文档 |
+
+---
 
 ## 许可证
 
