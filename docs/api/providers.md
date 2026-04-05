@@ -11,14 +11,23 @@
 框架核心没有任何 SDK 依赖。按需安装：
 
 ```bash
-# Anthropic Claude
+# Anthropic Claude API
 pip install anthropic
 
-# OpenAI GPT
+# OpenAI GPT / Responses API
 pip install openai
 
-# Google Gemini
+# Google Gemini API
 pip install google-genai
+
+# Claude Code CLI
+npm install -g @anthropic-ai/claude-code
+
+# OpenAI Codex CLI
+npm install -g @openai/codex
+
+# Gemini CLI
+npm install -g @google/gemini-cli
 ```
 
 ---
@@ -206,6 +215,114 @@ result = rt.exec(
 ```
 
 传入 `response_format` 时，自动设置 `response_mime_type="application/json"`。如果包含 `schema` 字段，还会设置 `response_schema`。
+
+---
+
+## ClaudeCodeRuntime
+
+Claude Code CLI。适合本地开发机 / 订阅账号场景，不需要在 Python 里单独配置 API key。
+
+```python
+from agentic.providers import ClaudeCodeRuntime
+
+rt = ClaudeCodeRuntime(
+    model="sonnet",
+    timeout=120,
+)
+```
+
+使用前先完成：
+
+```bash
+npm install -g @anthropic-ai/claude-code
+claude login
+```
+
+说明：
+- 主要面向 text 和 image 输入
+- 更适合交互式开发工作流，而不是高吞吐服务端调用
+- 如果传入 audio / video / file blocks，会给出 warning 并跳过不支持的内容
+
+---
+
+## CodexRuntime
+
+Codex CLI。适合已经在本机登录 `codex` 的开发环境。
+
+```python
+from agentic.providers import CodexRuntime
+
+rt = CodexRuntime(
+    model="o4-mini",
+    timeout=120,
+    full_auto=True,
+)
+```
+
+使用前先完成：
+
+```bash
+npm install -g @openai/codex
+codex login
+```
+
+### 构造参数
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `model` | `str \| None` | `None` | 默认模型；`None` 时使用 CLI 默认值 |
+| `timeout` | `int` | `120` | 单次 CLI 调用超时秒数 |
+| `cli_path` | `str \| None` | `None` | Codex CLI 可执行文件路径；为空时自动查找 |
+| `session_id` | `str \| None` | 自动生成 | 会话 ID；保留时支持后续 `resume` |
+| `workdir` | `str \| None` | `None` | 通过 `--cd` 指定工作目录 |
+| `full_auto` | `bool` | `True` | 是否添加 `--full-auto` |
+| `sandbox` | `str` | `"workspace-write"` | CLI sandbox 模式 |
+| `max_retries` | `int` | `2` | 重试次数 |
+
+说明：
+- 支持 text 与 image 文件输入
+- image URL 会降级为文本提示
+- audio / video / file blocks 会 warning 并跳过
+
+---
+
+## GeminiCLIRuntime
+
+Gemini CLI。适合本机已登录 Google 账号的轻量场景，不需要在 Python 里单独传 API key。
+
+```python
+from agentic.providers import GeminiCLIRuntime
+
+rt = GeminiCLIRuntime(
+    model="gemini-2.5-flash",
+    timeout=120,
+    yolo=True,
+)
+```
+
+使用前先完成：
+
+```bash
+npm install -g @google/gemini-cli
+gemini
+```
+
+### 构造参数
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `model` | `str \| None` | `None` | 默认模型；`None` 时使用 CLI 默认值 |
+| `timeout` | `int` | `120` | 单次 CLI 调用超时秒数 |
+| `cli_path` | `str \| None` | `None` | Gemini CLI 可执行文件路径；为空时自动查找 |
+| `sandbox` | `bool` | `False` | 是否启用 CLI sandbox 标志 `-s` |
+| `yolo` | `bool` | `True` | 是否启用自动确认 `-y` |
+| `max_retries` | `int` | `2` | 重试次数 |
+
+说明：
+- text blocks 原样拼接为 prompt
+- image 会降级为文本占位并给出 warning
+- audio / video / file blocks 也会降级为文本占位并 warning
+- `response_format` 会附加为 “只返回 JSON” 的文本约束
 
 ---
 

@@ -8,9 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 - Tests for `fix()` docstring/source fallback, nested child error extraction, and async retry attempt history.
+- Provider export coverage now also checks `GeminiCLIRuntime` in `agentic.providers.__all__`.
 
 ### Changed
 - README installation/configuration guidance now covers optional provider extras, runtime selection, and the `fix()` workflow.
+- README built-in provider examples now include `CodexRuntime` and `GeminiCLIRuntime`, and remove the stale hard-coded test count.
+- `docs/api/providers.md` now documents the CLI runtimes (`ClaudeCodeRuntime`, `CodexRuntime`, `GeminiCLIRuntime`) alongside SDK-based providers.
 - `docs/api/meta_function.md` now documents the current `fix(fn, runtime, instruction, on_question, max_rounds)` API and interactive repair flow.
 - `docs/api/runtime.md` now explains retry attempt recording and how retry history feeds into `fix()`.
 

@@ -1050,3 +1050,4 @@ class TestProviderLazyImport:
         assert "GeminiRuntime" in providers.__all__
         assert "ClaudeCodeRuntime" in providers.__all__
         assert "CodexRuntime" in providers.__all__
+        assert "GeminiCLIRuntime" in providers.__all__

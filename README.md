@@ -99,6 +99,8 @@ Pick one runtime and configure its credential or CLI:
 | Runtime | Install | Auth / setup |
 |---------|---------|--------------|
 | `ClaudeCodeRuntime` | `npm install -g @anthropic-ai/claude-code` | `claude login` |
+| `CodexRuntime` | install Codex CLI | `codex login` |
+| `GeminiCLIRuntime` | install Gemini CLI | sign in with `gemini` |
 | `AnthropicRuntime` | `pip install -e ".[anthropic]"` | `export ANTHROPIC_API_KEY=...` |
 | `OpenAIRuntime` | `pip install -e ".[openai]"` | `export OPENAI_API_KEY=...` |
 | `GeminiRuntime` | `pip install -e ".[gemini]"` | `export GOOGLE_API_KEY=...` |
@@ -206,10 +208,12 @@ fixed_fn = fix(
 ### Built-in Providers
 
 ```python
-from agentic.providers import AnthropicRuntime   # Claude (+ prompt caching)
+from agentic.providers import AnthropicRuntime    # Claude (+ prompt caching)
 from agentic.providers import OpenAIRuntime       # GPT (+ response_format)
-from agentic.providers import GeminiRuntime       # Gemini
+from agentic.providers import GeminiRuntime       # Gemini API
 from agentic.providers import ClaudeCodeRuntime   # Claude Code CLI (no API key)
+from agentic.providers import CodexRuntime        # Codex CLI (no API key in Python)
+from agentic.providers import GeminiCLIRuntime    # Gemini CLI (no API key in Python)
 ```
 
 See [Provider docs](docs/api/providers.md) for setup.
@@ -251,11 +255,14 @@ pip install -e ".[all]"        # install all provider SDKs
 ```python
 from agentic.providers import ClaudeCodeRuntime, AnthropicRuntime
 from agentic.providers import OpenAIRuntime, GeminiRuntime
+from agentic.providers import CodexRuntime, GeminiCLIRuntime
 
 local = ClaudeCodeRuntime(model="sonnet")
 strong = AnthropicRuntime(model="claude-sonnet-4-20250514")
 json_rt = OpenAIRuntime(model="gpt-4o")
 fast = GeminiRuntime(model="gemini-2.5-flash")
+codex = CodexRuntime(model="o4-mini")
+gemini_cli = GeminiCLIRuntime()
 ```
 
 ### Retry + `fix()` workflow
@@ -297,7 +304,7 @@ agentic/
 
 examples/                # runnable demos and provider examples
 docs/api/                # API reference
-tests/                   # 161 tests
+tests/                   # pytest suite for core/runtime/provider behavior
 ```
 
 ## Integration
