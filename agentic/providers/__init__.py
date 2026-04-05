@@ -24,8 +24,114 @@ Usage:
 
     from agentic.providers import CodexRuntime
     rt = CodexRuntime(model="o4-mini")
+
+Auto-detection:
+    from agentic.providers import detect_provider, create_runtime
+
+    provider, model = detect_provider()     # auto-detect best available
+    rt = create_runtime()                   # create runtime with auto-detection
+    rt = create_runtime(provider="anthropic", model="claude-sonnet-4-20250514")
 """
 
+import os
+import shutil
+
+
+# -- Provider registry -------------------------------------------------------
+
+# Maps provider name -> (class_name, module_path, default_model)
+PROVIDERS = {
+    "claude-code":  ("ClaudeCodeRuntime",  "agentic.providers.claude_code",  "sonnet"),
+    "codex":        ("CodexRuntime",       "agentic.providers.codex",        "o4-mini"),
+    "gemini-cli":   ("GeminiCLIRuntime",   "agentic.providers.gemini_cli",   "default"),
+    "anthropic":    ("AnthropicRuntime",    "agentic.providers.anthropic",    "claude-sonnet-4-20250514"),
+    "openai":       ("OpenAIRuntime",       "agentic.providers.openai",       "gpt-4o"),
+    "gemini":       ("GeminiRuntime",       "agentic.providers.gemini",       "gemini-2.5-flash"),
+}
+
+
+def detect_provider() -> tuple[str, str]:
+    """Auto-detect the best available LLM provider.
+
+    Detection priority (CLI-first, then API keys):
+      1. Claude Code CLI  (`claude` in PATH)       — subscription, no per-token cost
+      2. Codex CLI         (`codex` in PATH)        — uses codex auth
+      3. Gemini CLI        (`gemini` in PATH)       — uses Google account
+      4. Anthropic API     (ANTHROPIC_API_KEY set)  — pay per token
+      5. OpenAI API        (OPENAI_API_KEY set)     — pay per token
+      6. Gemini API        (GOOGLE_API_KEY set)     — pay per token
+
+    Returns:
+        (provider_name, default_model) — e.g. ("claude-code", "sonnet")
+
+    Raises:
+        RuntimeError if no provider is found.
+    """
+    # CLI providers (no API key needed)
+    if shutil.which("claude"):
+        return "claude-code", "sonnet"
+    if shutil.which("codex"):
+        return "codex", "o4-mini"
+    if shutil.which("gemini"):
+        return "gemini-cli", "default"
+
+    # API providers (need keys)
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return "anthropic", "claude-sonnet-4-20250514"
+    if os.environ.get("OPENAI_API_KEY"):
+        return "openai", "gpt-4o"
+    if os.environ.get("GOOGLE_API_KEY"):
+        return "gemini", "gemini-2.5-flash"
+
+    raise RuntimeError(
+        "No LLM provider found. Set up one of the following:\n"
+        "\n"
+        "  CLI providers (no API key needed):\n"
+        "    1. Claude Code CLI:  npm install -g @anthropic-ai/claude-code && claude login\n"
+        "    2. Codex CLI:        npm install -g @openai/codex && codex auth\n"
+        "    3. Gemini CLI:       npm install -g @anthropic-ai/gemini-cli\n"
+        "\n"
+        "  API providers (set environment variable):\n"
+        "    4. Anthropic:  export ANTHROPIC_API_KEY=sk-ant-...\n"
+        "    5. OpenAI:     export OPENAI_API_KEY=sk-...\n"
+        "    6. Gemini:     export GOOGLE_API_KEY=...\n"
+    )
+
+
+def create_runtime(provider: str = None, model: str = None, **kwargs):
+    """Create a Runtime instance with auto-detection or explicit provider.
+
+    Args:
+        provider:  Provider name (e.g. "anthropic", "claude-code", "openai").
+                   If None, auto-detects the best available provider.
+        model:     Model name override.
+        **kwargs:  Forwarded to the provider Runtime constructor.
+
+    Returns:
+        A Runtime instance ready to use.
+    """
+    import importlib
+
+    if provider:
+        if provider not in PROVIDERS:
+            available = ", ".join(sorted(PROVIDERS.keys()))
+            raise ValueError(
+                f"Unknown provider: {provider!r}. Available: {available}"
+            )
+        class_name, module_path, default_model = PROVIDERS[provider]
+    else:
+        detected, default_model = detect_provider()
+        class_name, module_path, _ = PROVIDERS[detected]
+        provider = detected
+
+    use_model = model or default_model
+
+    mod = importlib.import_module(module_path)
+    cls = getattr(mod, class_name)
+    return cls(model=use_model, **kwargs)
+
+
+# -- Lazy imports for direct class access ------------------------------------
 
 def __getattr__(name):
     """Lazy imports — only load a provider when accessed."""
@@ -50,4 +156,14 @@ def __getattr__(name):
     raise AttributeError(f"module 'agentic.providers' has no attribute {name!r}")
 
 
-__all__ = ["AnthropicRuntime", "OpenAIRuntime", "GeminiRuntime", "ClaudeCodeRuntime", "CodexRuntime", "GeminiCLIRuntime"]
+__all__ = [
+    "PROVIDERS",
+    "detect_provider",
+    "create_runtime",
+    "AnthropicRuntime",
+    "OpenAIRuntime",
+    "GeminiRuntime",
+    "ClaudeCodeRuntime",
+    "CodexRuntime",
+    "GeminiCLIRuntime",
+]
