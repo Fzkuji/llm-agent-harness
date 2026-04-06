@@ -51,7 +51,7 @@ That's it. Your function now **thinks**.
 
 ## Choose Your Provider
 
-Agentic Programming supports 4 LLM providers out of the box. Pick one:
+Agentic Programming supports 6 built-in runtimes out of the box. Pick one:
 
 ### Option A: Claude Code CLI (Recommended for Getting Started)
 
@@ -140,6 +140,50 @@ runtime = GeminiRuntime(
 ```
 
 **Supports:** Text, images (base64/URL/file), system instructions, JSON schema output.
+
+---
+
+### Option E: Codex CLI
+
+**No Python API key needed.** Uses the Codex CLI you already signed into.
+
+**Prerequisites:**
+```bash
+# install Codex CLI first, then sign in
+codex login
+```
+
+**Usage:**
+```python
+from agentic.providers import CodexRuntime
+
+runtime = CodexRuntime(model="o4-mini")
+```
+
+**Pros:** Local CLI workflow, easy to reuse an existing Codex setup.
+**Cons:** Subprocess overhead, text-only.
+
+---
+
+### Option F: Gemini CLI
+
+**No Python API key needed.** Uses the Gemini CLI session on your machine.
+
+**Prerequisites:**
+```bash
+# install Gemini CLI first, then sign in
+gemini
+```
+
+**Usage:**
+```python
+from agentic.providers import GeminiCLIRuntime
+
+runtime = GeminiCLIRuntime()
+```
+
+**Pros:** Local CLI workflow, no Python-side SDK setup.
+**Cons:** Subprocess overhead, text-only.
 
 ---
 
@@ -290,7 +334,7 @@ python your_script.py
 
 ## 选择 Provider
 
-Agentic Programming 内置 4 个 LLM provider，选一个：
+Agentic Programming 内置 6 个 runtime / provider，选一个：
 
 ### 方案 A：Claude Code CLI（推荐新手使用）
 
@@ -379,6 +423,50 @@ runtime = GeminiRuntime(
 ```
 
 **支持：** 文本、图片（base64/URL/文件）、系统指令、JSON schema 输出。
+
+---
+
+### 方案 E：Codex CLI
+
+**不需要在 Python 里配置 API key。** 直接复用你已经登录好的 Codex CLI。
+
+**前置条件：**
+```bash
+# 先安装 Codex CLI，然后登录
+codex login
+```
+
+**用法：**
+```python
+from agentic.providers import CodexRuntime
+
+runtime = CodexRuntime(model="o4-mini")
+```
+
+**优点：** 本地 CLI 工作流友好，适合已经在用 Codex 的环境。
+**缺点：** 有子进程开销，仅支持文本。
+
+---
+
+### 方案 F：Gemini CLI
+
+**不需要在 Python 里配置 API key。** 直接使用你机器上的 Gemini CLI 会话。
+
+**前置条件：**
+```bash
+# 先安装 Gemini CLI，然后登录
+gemini
+```
+
+**用法：**
+```python
+from agentic.providers import GeminiCLIRuntime
+
+runtime = GeminiCLIRuntime()
+```
+
+**优点：** 本地 CLI 工作流友好，不需要额外装 Python SDK。
+**缺点：** 有子进程开销，仅支持文本。
 
 ---
 

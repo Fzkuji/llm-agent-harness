@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Meta-function regression tests now cover preserving leading imports in `_extract_code()` and executing generated functions that use whitelisted stdlib imports.
 
 ### Changed
+- `docs/GETTING_STARTED.md` now reflects all 6 built-in runtimes, adding setup/usage notes for `CodexRuntime` and `GeminiCLIRuntime` in both English and Chinese sections.
 - README installation/configuration guidance now covers optional provider extras, runtime selection, and the `fix()` workflow.
 - README built-in provider examples now include `CodexRuntime` and `GeminiCLIRuntime`, and remove the stale hard-coded test count.
 - `docs/api/providers.md` now documents the CLI runtimes (`ClaudeCodeRuntime`, `CodexRuntime`, `GeminiCLIRuntime`) alongside SDK-based providers.
