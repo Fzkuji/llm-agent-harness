@@ -617,6 +617,16 @@ class TestGeminiRuntime:
         rt._call([{"type": "text", "text": "test"}], response_format=schema)
         config_call = self.mock_types.GenerateContentConfig.call_args[1]
         assert config_call["response_mime_type"] == "application/json"
+        assert config_call["response_schema"] == {"type": "object"}
+
+    def test_response_format_plain_schema(self):
+        """Plain schema dicts are also forwarded as Gemini response_schema."""
+        rt = self._make_runtime()
+        schema = {"type": "object", "properties": {"ok": {"type": "boolean"}}}
+        rt._call([{"type": "text", "text": "test"}], response_format=schema)
+        config_call = self.mock_types.GenerateContentConfig.call_args[1]
+        assert config_call["response_mime_type"] == "application/json"
+        assert config_call["response_schema"] == schema
 
     def test_no_api_key_raises(self, monkeypatch):
         """Missing API key raises ValueError."""

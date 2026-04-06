@@ -113,8 +113,11 @@ class GeminiRuntime(Runtime):
             config_kwargs["temperature"] = self.temperature
         if response_format is not None:
             config_kwargs["response_mime_type"] = "application/json"
-            if isinstance(response_format, dict) and "schema" in response_format:
-                config_kwargs["response_schema"] = response_format["schema"]
+            if isinstance(response_format, dict):
+                # Accept either {"schema": {...}} or a raw schema dict.
+                # This keeps Gemini aligned with the other runtimes, which
+                # already accept plain schema dictionaries directly.
+                config_kwargs["response_schema"] = response_format.get("schema", response_format)
 
         config = types.GenerateContentConfig(
             **config_kwargs,
