@@ -73,11 +73,11 @@ class ClaudeCodeRuntime(Runtime):
     def __init__(
         self,
         model: str = "sonnet",
-        timeout: int = 180,
+        timeout: int = 600,
         cli_path: str = None,
         session_id: str = "auto",
-        max_turns_per_process: int = 10,
-        compact_every: int = 3,
+        max_turns_per_process: int = 100,
+        compact_every: int = 0,
     ):
         super().__init__(model=model)
         self.timeout = timeout
