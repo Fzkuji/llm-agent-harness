@@ -209,7 +209,13 @@ class ClaudeCodeRuntime(Runtime):
             return reply
 
     def _read_response(self) -> str:
-        """Read lines from stdout until we get a result message."""
+        """Read lines from stdout until we get a result message.
+
+        The timeout is per-line, not total. As long as the process keeps
+        producing output (e.g., tool_use events during interactive mode),
+        the deadline is extended. Timeout only fires when the process goes
+        silent for self.timeout seconds.
+        """
         deadline = time.time() + self.timeout
         result_text = None
 
@@ -230,6 +236,9 @@ class ClaudeCodeRuntime(Runtime):
             line = line.strip()
             if not line:
                 continue
+
+            # Got output — reset deadline (process is alive and working)
+            deadline = time.time() + self.timeout
 
             try:
                 data = json.loads(line)
@@ -255,7 +264,7 @@ class ClaudeCodeRuntime(Runtime):
                         result_text = "\n".join(texts)
                         # Don't return yet — wait for "result" to mark end of turn
 
-        raise TimeoutError(f"Claude Code CLI timed out after {self.timeout}s")
+        raise TimeoutError(f"Claude Code CLI timed out (no output for {self.timeout}s)")
 
     def _read_line_with_timeout(self, remaining: float) -> Optional[str]:
         """Read a single line from stdout with timeout using a thread."""
