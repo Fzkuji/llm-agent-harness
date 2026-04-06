@@ -59,7 +59,8 @@ def detect_provider() -> tuple[str, str]:
       3. Gemini CLI        (`gemini` in PATH)       — uses Google account
       4. Anthropic API     (ANTHROPIC_API_KEY set)  — pay per token
       5. OpenAI API        (OPENAI_API_KEY set)     — pay per token
-      6. Gemini API        (GOOGLE_API_KEY set)     — pay per token
+      6. Gemini API        (GOOGLE_API_KEY or GOOGLE_GENERATIVE_AI_API_KEY set)
+                                                   — pay per token
 
     Returns:
         (provider_name, default_model) — e.g. ("claude-code", "sonnet")
@@ -80,7 +81,7 @@ def detect_provider() -> tuple[str, str]:
         return "anthropic", "claude-sonnet-4-20250514"
     if os.environ.get("OPENAI_API_KEY"):
         return "openai", "gpt-4o"
-    if os.environ.get("GOOGLE_API_KEY"):
+    if os.environ.get("GOOGLE_API_KEY") or os.environ.get("GOOGLE_GENERATIVE_AI_API_KEY"):
         return "gemini", "gemini-2.5-flash"
 
     raise RuntimeError(
@@ -89,12 +90,13 @@ def detect_provider() -> tuple[str, str]:
         "  CLI providers (no API key needed):\n"
         "    1. Claude Code CLI:  npm install -g @anthropic-ai/claude-code && claude login\n"
         "    2. Codex CLI:        npm install -g @openai/codex && codex auth\n"
-        "    3. Gemini CLI:       npm install -g @anthropic-ai/gemini-cli\n"
+        "    3. Gemini CLI:       npm install -g @google/gemini-cli\n"
         "\n"
         "  API providers (set environment variable):\n"
         "    4. Anthropic:  export ANTHROPIC_API_KEY=sk-ant-...\n"
         "    5. OpenAI:     export OPENAI_API_KEY=sk-...\n"
         "    6. Gemini:     export GOOGLE_API_KEY=...\n"
+        "                    (or GOOGLE_GENERATIVE_AI_API_KEY=...)\n"
     )
 
 

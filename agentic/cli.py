@@ -135,9 +135,9 @@ def _cmd_providers():
         "gemini-cli": ("gemini", "Gemini CLI"),
     }
     api_checks = {
-        "anthropic": ("ANTHROPIC_API_KEY", "Anthropic API"),
-        "openai": ("OPENAI_API_KEY", "OpenAI API"),
-        "gemini": ("GOOGLE_API_KEY", "Gemini API"),
+        "anthropic": (("ANTHROPIC_API_KEY",), "Anthropic API"),
+        "openai": (("OPENAI_API_KEY",), "OpenAI API"),
+        "gemini": (("GOOGLE_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY"), "Gemini API"),
     }
 
     # Detection order matches detect_provider()
@@ -152,10 +152,16 @@ def _cmd_providers():
             status = "ready" if found else "not found"
             how = f"`{cmd}` in PATH" if found else f"install: npm install -g ..."
         else:
-            env_var, label = api_checks[name]
-            found = bool(os.environ.get(env_var))
+            env_vars, label = api_checks[name]
+            found_var = next((env_var for env_var in env_vars if os.environ.get(env_var)), None)
+            found = found_var is not None
             status = "ready" if found else "not set"
-            how = f"${env_var}" if found else f"export {env_var}=..."
+            if found:
+                how = f"${found_var}"
+            elif len(env_vars) == 1:
+                how = f"export {env_vars[0]}=..."
+            else:
+                how = " or ".join(f"export {env_var}=..." for env_var in env_vars)
 
         if found and detected is None:
             detected = name

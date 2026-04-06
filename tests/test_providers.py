@@ -5,6 +5,7 @@ All tests use mocked SDKs — no real API calls are made.
 """
 
 import base64
+import importlib
 import json
 import os
 import subprocess
@@ -628,9 +629,20 @@ class TestGeminiRuntime:
         assert config_call["response_mime_type"] == "application/json"
         assert config_call["response_schema"] == schema
 
+    def test_fallback_env_var_google_generative_ai_api_key(self, monkeypatch):
+        """GOOGLE_GENERATIVE_AI_API_KEY is accepted for Gemini API compatibility."""
+        monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+        monkeypatch.setenv("GOOGLE_GENERATIVE_AI_API_KEY", "fallback-key")
+        from agentic.providers.gemini import GeminiRuntime
+
+        rt = GeminiRuntime(api_key=None)
+        assert rt.client == self.mock_client
+        self.mock_genai.Client.assert_called_with(api_key="fallback-key")
+
     def test_no_api_key_raises(self, monkeypatch):
         """Missing API key raises ValueError."""
         monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+        monkeypatch.delenv("GOOGLE_GENERATIVE_AI_API_KEY", raising=False)
         from agentic.providers.gemini import GeminiRuntime
         with pytest.raises(ValueError, match="API key"):
             GeminiRuntime(api_key=None)
@@ -1074,6 +1086,23 @@ class TestGeminiCLIRuntime:
         assert result == "mock gemini reply"
         cmd = self._mock_run.call_args[0][0]
         assert cmd[2] == "implicit text"
+
+
+class TestProviderDetection:
+    """Tests for detect_provider() and create_runtime() wiring."""
+
+    def test_detect_provider_accepts_google_generative_ai_api_key(self, monkeypatch):
+        """Gemini API auto-detection accepts Google's alternate env var name."""
+        monkeypatch.setattr("shutil.which", lambda name: None)
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+        monkeypatch.setenv("GOOGLE_GENERATIVE_AI_API_KEY", "fallback-key")
+
+        from agentic import providers
+        importlib.reload(providers)
+
+        assert providers.detect_provider() == ("gemini", "gemini-2.5-flash")
 
 
 class TestProviderLazyImport:

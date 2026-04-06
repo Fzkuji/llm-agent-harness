@@ -49,7 +49,8 @@ class GeminiRuntime(Runtime):
     Runtime implementation for Google Gemini.
 
     Args:
-        api_key:            Google AI API key. If None, reads from GOOGLE_API_KEY env var.
+        api_key:            Google AI API key. If None, reads from GOOGLE_API_KEY or
+                            GOOGLE_GENERATIVE_AI_API_KEY env vars.
         model:              Default model name (e.g. "gemini-2.5-flash").
         max_output_tokens:  Maximum tokens in the response (default: 4096).
         system_instruction: System instruction. If provided, sent as system_instruction.
@@ -71,10 +72,15 @@ class GeminiRuntime(Runtime):
         self.system_instruction = system_instruction
         self.temperature = temperature
 
-        api_key = api_key or os.environ.get("GOOGLE_API_KEY")
+        api_key = (
+            api_key
+            or os.environ.get("GOOGLE_API_KEY")
+            or os.environ.get("GOOGLE_GENERATIVE_AI_API_KEY")
+        )
         if not api_key:
             raise ValueError(
-                "Google API key is required. Pass api_key= or set GOOGLE_API_KEY env var."
+                "Google API key is required. Pass api_key= or set GOOGLE_API_KEY "
+                "(or GOOGLE_GENERATIVE_AI_API_KEY) env var."
             )
         self.client = genai.Client(api_key=api_key)
 

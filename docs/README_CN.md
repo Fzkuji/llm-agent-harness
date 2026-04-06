@@ -110,10 +110,10 @@ pip install -e .
 |--------|------|
 | Claude Code CLI | `npm i -g @anthropic-ai/claude-code && claude login` |
 | Codex CLI | `npm i -g @openai/codex && codex auth` |
-| Gemini CLI | `npm i -g @anthropic-ai/gemini-cli` |
+| Gemini CLI | `npm i -g @google/gemini-cli` |
 | Anthropic API | `pip install -e ".[anthropic]"` 然后 `export ANTHROPIC_API_KEY=...` |
 | OpenAI API | `pip install -e ".[openai]"` 然后 `export OPENAI_API_KEY=...` |
-| Gemini API | `pip install -e ".[gemini]"` 然后 `export GOOGLE_API_KEY=...` |
+| Gemini API | `pip install -e ".[gemini]"` 然后 `export GOOGLE_API_KEY=...`（或 `export GOOGLE_GENERATIVE_AI_API_KEY=...`） |
 
 使用 `agentic providers` 验证配置。
 

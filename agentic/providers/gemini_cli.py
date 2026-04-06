@@ -74,7 +74,7 @@ class GeminiCLIRuntime(Runtime):
         if self.cli_path is None:
             raise FileNotFoundError(
                 "Gemini CLI not found. Install it first:\n"
-                "  npm install -g @anthropic-ai/gemini-cli\n"
+                "  npm install -g @google/gemini-cli\n"
                 "Then log in:\n"
                 "  gemini"
             )

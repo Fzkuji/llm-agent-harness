@@ -111,10 +111,10 @@ Set up at least one LLM provider:
 |----------|-------|
 | Claude Code CLI | `npm i -g @anthropic-ai/claude-code && claude login` |
 | Codex CLI | `npm i -g @openai/codex && codex auth` |
-| Gemini CLI | `npm i -g @anthropic-ai/gemini-cli` |
+| Gemini CLI | `npm i -g @google/gemini-cli` |
 | Anthropic API | `pip install -e ".[anthropic]"` then `export ANTHROPIC_API_KEY=...` |
 | OpenAI API | `pip install -e ".[openai]"` then `export OPENAI_API_KEY=...` |
-| Gemini API | `pip install -e ".[gemini]"` then `export GOOGLE_API_KEY=...` |
+| Gemini API | `pip install -e ".[gemini]"` then `export GOOGLE_API_KEY=...` (or `export GOOGLE_GENERATIVE_AI_API_KEY=...`) |
 
 Verify with `agentic providers`.
 
