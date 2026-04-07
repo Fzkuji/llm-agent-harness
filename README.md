@@ -42,20 +42,26 @@ result = summarize(text="Your long article here...")
 
 ## Quick Start
 
-```bash
-pip install agentic-programming
-```
+### Prerequisites
 
-Set up at least one LLM provider:
+Agentic Programming requires at least one LLM provider. Set up any of the following:
 
 | Provider | Setup |
 |----------|-------|
 | Claude Code CLI | `npm i -g @anthropic-ai/claude-code && claude login` |
 | Codex CLI | `npm i -g @openai/codex && codex auth` |
 | Gemini CLI | `npm i -g @google/gemini-cli` |
-| Anthropic API | `pip install "agentic-programming[anthropic]"` then `export ANTHROPIC_API_KEY=...` |
-| OpenAI API | `pip install "agentic-programming[openai]"` then `export OPENAI_API_KEY=...` |
-| Gemini API | `pip install "agentic-programming[gemini]"` then `export GOOGLE_API_KEY=...` |
+| Anthropic API | `export ANTHROPIC_API_KEY=...` |
+| OpenAI API | `export OPENAI_API_KEY=...` |
+| Gemini API | `export GOOGLE_API_KEY=...` |
+
+### Install
+
+```bash
+pip install agentic-programming
+```
+
+> For API providers, install with extras: `pip install "agentic-programming[anthropic]"`, `"[openai]"`, or `"[gemini]"`.
 
 Verify with `agentic providers`. Then pick how you want to use it:
 

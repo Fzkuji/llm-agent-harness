@@ -42,20 +42,26 @@ result = summarize(text="你的长文章...")
 
 ## 快速开始
 
-```bash
-pip install agentic-programming
-```
+### 前置条件
 
-至少设置一个 LLM 提供方：
+Agentic Programming 需要至少一个 LLM 提供方。设置以下任意一个：
 
 | 提供方 | 设置 |
 |--------|------|
 | Claude Code CLI | `npm i -g @anthropic-ai/claude-code && claude login` |
 | Codex CLI | `npm i -g @openai/codex && codex auth` |
 | Gemini CLI | `npm i -g @google/gemini-cli` |
-| Anthropic API | `pip install "agentic-programming[anthropic]"` 然后 `export ANTHROPIC_API_KEY=...` |
-| OpenAI API | `pip install "agentic-programming[openai]"` 然后 `export OPENAI_API_KEY=...` |
-| Gemini API | `pip install "agentic-programming[gemini]"` 然后 `export GOOGLE_API_KEY=...` |
+| Anthropic API | `export ANTHROPIC_API_KEY=...` |
+| OpenAI API | `export OPENAI_API_KEY=...` |
+| Gemini API | `export GOOGLE_API_KEY=...` |
+
+### 安装
+
+```bash
+pip install agentic-programming
+```
+
+> API 提供方需安装对应 extras：`pip install "agentic-programming[anthropic]"`、`"[openai]"` 或 `"[gemini]"`。
 
 使用 `agentic providers` 验证配置。然后选择你的使用方式：
 
