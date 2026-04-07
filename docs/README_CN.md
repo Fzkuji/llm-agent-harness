@@ -27,20 +27,9 @@
 
 > **这是一个范式提案。** 当前的 LLM agent 框架让 LLM 控制一切——做什么、何时做、怎么做。结果？不可预测的执行、上下文爆炸、没有输出保证。我们反转这一切：**Python 控制流程，LLM 只在被要求时推理。**
 
-```python
-from agentic import agentic_function, create_runtime
-
-runtime = create_runtime()  # 自动检测最佳 provider
-
-@agentic_function                        # ← 装饰器：自动追踪执行上下文
-def summarize(text: str) -> str:
-    """Summarize the given text into 3 bullet points."""  # ← docstring 就是 prompt
-    return runtime.exec(content=[        # ← LLM 仅在此处推理
-        {"type": "text", "text": text},
-    ])
-
-result = summarize(text="Your long article here...")
-```
+<p align="center">
+  <img src="../docs/images/code_hero.png" alt="Agentic Programming 代码示例" width="800">
+</p>
 
 ## 快速开始
 

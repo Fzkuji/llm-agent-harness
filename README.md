@@ -27,20 +27,9 @@
 
 > **This is a paradigm proposal.** Current LLM agent frameworks let the LLM control everything — what to do, when, and how. The result? Unpredictable execution, context explosion, and no output guarantees. We flip this: **Python controls the flow, LLM only reasons when asked.**
 
-```python
-from agentic import agentic_function, create_runtime
-
-runtime = create_runtime()  # auto-detects best provider
-
-@agentic_function                        # ← decorator: auto-tracks execution context
-def summarize(text: str) -> str:
-    """Summarize the given text into 3 bullet points."""  # ← docstring IS the prompt
-    return runtime.exec(content=[        # ← LLM only reasons here
-        {"type": "text", "text": text},
-    ])
-
-result = summarize(text="Your long article here...")
-```
+<p align="center">
+  <img src="docs/images/code_hero.png" alt="Agentic Programming code example" width="800">
+</p>
 
 ## Quick Start
 
