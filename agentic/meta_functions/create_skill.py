@@ -14,6 +14,26 @@ from agentic.runtime import Runtime
 def create_skill(fn_name: str, description: str, code: str, runtime: Runtime) -> str:
     """Write a SKILL.md for an OpenClaw skill based on the given function.
 
+    Design pattern: ONE skill, ONE entry function.
+
+    A project should have a single SKILL.md at the top level, pointing to
+    a single @agentic_function entry point (e.g. `main` or the project name).
+    That entry function's docstring lists ALL available sub-functions and
+    capabilities. The LLM reads the docstring and decides what to call.
+
+    This pattern works because:
+    - The agent only needs to discover ONE skill to access everything.
+    - The entry function's docstring serves as a complete menu/guide.
+    - Sub-functions are implementation details, not separate skills.
+    - Adding new capabilities = updating the docstring, not creating new skills.
+
+    Example structure:
+        SKILL.md              → triggers: "research", "write paper", etc.
+                                 usage: /research "<task>"
+        project/main.py       → @agentic_function research(task, runtime)
+                                 docstring lists all 45+ sub-functions
+        project/stages/...    → individual @agentic_function files
+
     The SKILL.md must follow this exact format:
     ---
     name: <fn_name>
@@ -21,14 +41,14 @@ def create_skill(fn_name: str, description: str, code: str, runtime: Runtime) ->
     ---
     # <Title>
     ## Usage
-    agentic run <fn_name> --arg key=value
-    ## Parameters
-    <Table of parameters>
+    /name "<task description>"
+    ## Available Functions
+    <Brief list of capabilities the entry function can dispatch to>
 
     Rules:
     - Description must include trigger words (when should an agent use this?).
-    - Usage must use `agentic run` CLI command, not Python code.
-    - If the function uses LLM (runtime.exec), note that Claude Code CLI is needed.
+    - SKILL.md should guide the agent to call the single entry function.
+    - The entry function's docstring handles the rest (what to do, how).
     - Keep concise — agents read this every message.
     - Write ONLY the SKILL.md content, no explanation.
 
