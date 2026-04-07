@@ -39,6 +39,7 @@ from agentic.functions.general_action import general_action
 from agentic.functions.agent_loop import agent_loop
 from agentic.functions.wait import wait
 from agentic.functions.deep_work import deep_work
+from agentic.functions.init_research import init_research
 
 __all__ = [
     "agentic_function",
@@ -53,4 +54,5 @@ __all__ = [
     "agent_loop",
     "wait",
     "deep_work",
+    "init_research",
 ]

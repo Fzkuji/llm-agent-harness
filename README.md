@@ -72,7 +72,12 @@ def login_flow(username, password):
 
 ### Option B: Skills — let your LLM agent use it
 
-Skills files are not included in the pip package — clone the repo and copy them to your CLI tool:
+```bash
+pip install agentic-programming
+agentic install-skills                    # auto-detects Claude Code / Gemini CLI
+```
+
+Or manually:
 
 ```bash
 git clone https://github.com/Fzkuji/Agentic-Programming.git

@@ -1,0 +1,1054 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agentic Visualizer</title>
+<style>
+/* ===== Reset & Base ===== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg-primary: #1a1d23;
+  --bg-secondary: #21252b;
+  --bg-tertiary: #282c34;
+  --bg-hover: #2c313a;
+  --border: #3e4451;
+  --text-primary: #abb2bf;
+  --text-secondary: #636d83;
+  --text-bright: #d7dae0;
+  --accent-blue: #61afef;
+  --accent-green: #98c379;
+  --accent-red: #e06c75;
+  --accent-yellow: #e5c07b;
+  --accent-purple: #c678dd;
+  --accent-cyan: #56b6c2;
+  --accent-orange: #d19a66;
+  --radius: 6px;
+  --transition: 0.2s ease;
+  --shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+
+html, body {
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  overflow: hidden;
+}
+
+/* ===== Layout ===== */
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 20px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  z-index: 10;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.logo {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-bright);
+  letter-spacing: -0.3px;
+}
+
+.logo span {
+  color: var(--accent-blue);
+}
+
+.status-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(97, 175, 239, 0.15);
+  color: var(--accent-blue);
+  border: 1px solid rgba(97, 175, 239, 0.3);
+}
+
+.status-badge.disconnected {
+  background: rgba(224, 108, 117, 0.15);
+  color: var(--accent-red);
+  border-color: rgba(224, 108, 117, 0.3);
+}
+
+.status-badge.paused {
+  background: rgba(229, 192, 123, 0.15);
+  color: var(--accent-yellow);
+  border-color: rgba(229, 192, 123, 0.3);
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn {
+  padding: 5px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all var(--transition);
+  outline: none;
+}
+
+.btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent-blue);
+  color: var(--text-bright);
+}
+
+.btn.active {
+  background: rgba(97, 175, 239, 0.15);
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
+}
+
+.btn-pause {
+  padding: 5px 14px;
+}
+
+.btn-pause.paused {
+  background: rgba(229, 192, 123, 0.15);
+  border-color: var(--accent-yellow);
+  color: var(--accent-yellow);
+}
+
+/* ===== Main Content ===== */
+.main {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* ===== View Toggle ===== */
+.view-tabs {
+  display: flex;
+  gap: 2px;
+  background: var(--bg-primary);
+  border-radius: var(--radius);
+  padding: 2px;
+  border: 1px solid var(--border);
+}
+
+.view-tab {
+  padding: 4px 12px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.view-tab:hover { color: var(--text-primary); }
+.view-tab.active {
+  background: var(--bg-tertiary);
+  color: var(--text-bright);
+}
+
+/* ===== Tree View ===== */
+.tree-panel {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+}
+
+.tree-node {
+  margin-left: 0;
+  animation: nodeAppear 0.3s ease forwards;
+}
+
+@keyframes nodeAppear {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.node-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background var(--transition);
+  user-select: none;
+}
+
+.node-row:hover {
+  background: var(--bg-hover);
+}
+
+.node-row.selected {
+  background: rgba(97, 175, 239, 0.1);
+}
+
+.node-toggle {
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: var(--text-secondary);
+  transition: transform var(--transition);
+  flex-shrink: 0;
+}
+
+.node-toggle.expanded { transform: rotate(90deg); }
+.node-toggle.leaf { visibility: hidden; }
+
+.node-icon {
+  font-size: 13px;
+  flex-shrink: 0;
+  width: 18px;
+  text-align: center;
+}
+
+.node-name {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 13px;
+  color: var(--accent-blue);
+  font-weight: 500;
+}
+
+.node-status {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.node-status.running {
+  background: rgba(97, 175, 239, 0.15);
+  color: var(--accent-blue);
+}
+
+.node-status.success {
+  background: rgba(152, 195, 121, 0.15);
+  color: var(--accent-green);
+}
+
+.node-status.error {
+  background: rgba(224, 108, 117, 0.15);
+  color: var(--accent-red);
+}
+
+.node-duration {
+  font-size: 11px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.node-output-preview {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 300px;
+}
+
+.node-children {
+  margin-left: 20px;
+  border-left: 1px solid var(--border);
+  padding-left: 4px;
+  overflow: hidden;
+  transition: max-height 0.3s ease;
+}
+
+.node-children.collapsed {
+  max-height: 0;
+  overflow: hidden;
+}
+
+/* Status change animation */
+.node-row.status-changed {
+  animation: statusPulse 0.6s ease;
+}
+
+@keyframes statusPulse {
+  0% { background: rgba(97, 175, 239, 0.2); }
+  100% { background: transparent; }
+}
+
+/* ===== Flow View ===== */
+.flow-panel {
+  flex: 1;
+  overflow: auto;
+  padding: 20px;
+  display: none;
+}
+
+.flow-panel.active {
+  display: block;
+}
+
+.flow-container {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-width: fit-content;
+}
+
+.flow-level {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.flow-level-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  width: 80px;
+  flex-shrink: 0;
+  padding-top: 12px;
+  text-align: right;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+.flow-nodes {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.flow-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  min-width: 140px;
+  max-width: 220px;
+  cursor: pointer;
+  transition: all var(--transition);
+  animation: nodeAppear 0.3s ease forwards;
+  position: relative;
+}
+
+.flow-card:hover {
+  border-color: var(--accent-blue);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow);
+}
+
+.flow-card.running { border-left: 3px solid var(--accent-blue); }
+.flow-card.success { border-left: 3px solid var(--accent-green); }
+.flow-card.error { border-left: 3px solid var(--accent-red); }
+
+.flow-card-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.flow-card-name {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-bright);
+}
+
+.flow-card-icon {
+  font-size: 12px;
+}
+
+.flow-card-meta {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.flow-card-output {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.flow-arrow {
+  display: flex;
+  align-items: center;
+  color: var(--text-secondary);
+  font-size: 14px;
+  flex-shrink: 0;
+  padding-top: 10px;
+}
+
+/* ===== Detail Panel ===== */
+.detail-panel {
+  width: 380px;
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+  flex-shrink: 0;
+  transition: width var(--transition);
+}
+
+.detail-panel.collapsed {
+  width: 0;
+  overflow: hidden;
+}
+
+.detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.detail-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-bright);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+.detail-close {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.detail-close:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.detail-body {
+  padding: 16px;
+}
+
+.detail-section {
+  margin-bottom: 16px;
+}
+
+.detail-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.detail-field {
+  margin-bottom: 8px;
+}
+
+.detail-field-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 2px;
+}
+
+.detail-field-value {
+  font-size: 13px;
+  color: var(--text-primary);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  word-break: break-all;
+}
+
+.detail-code {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px;
+  font-size: 12px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 300px;
+  overflow-y: auto;
+  line-height: 1.5;
+}
+
+.detail-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.detail-badge.running {
+  background: rgba(97, 175, 239, 0.15);
+  color: var(--accent-blue);
+}
+.detail-badge.success {
+  background: rgba(152, 195, 121, 0.15);
+  color: var(--accent-green);
+}
+.detail-badge.error {
+  background: rgba(224, 108, 117, 0.15);
+  color: var(--accent-red);
+}
+
+/* ===== Empty State ===== */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-secondary);
+  gap: 12px;
+}
+
+.empty-state-icon {
+  font-size: 48px;
+  opacity: 0.3;
+}
+
+.empty-state-text {
+  font-size: 14px;
+}
+
+.empty-state-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+  opacity: 0.6;
+}
+
+/* ===== Scrollbar ===== */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
+
+/* ===== Loading pulse ===== */
+.pulse {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* ===== Responsive ===== */
+@media (max-width: 768px) {
+  .detail-panel { width: 100%; position: absolute; right: 0; top: 0; bottom: 0; z-index: 20; }
+  .detail-panel.collapsed { width: 0; }
+  .header { padding: 8px 12px; }
+  .tree-panel { padding: 8px; }
+  .node-output-preview { max-width: 120px; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Header -->
+  <div class="header">
+    <div class="header-left">
+      <div class="logo"><span>{ }</span> Agentic Visualizer</div>
+      <div id="statusBadge" class="status-badge">connecting...</div>
+    </div>
+    <div class="header-right">
+      <div class="view-tabs">
+        <button class="view-tab active" data-view="tree" onclick="switchView('tree')">Tree</button>
+        <button class="view-tab" data-view="flow" onclick="switchView('flow')">Flow</button>
+      </div>
+      <button id="btnPause" class="btn btn-pause" onclick="togglePause()">Pause</button>
+      <button class="btn" onclick="refreshTree()">Refresh</button>
+    </div>
+  </div>
+
+  <!-- Main -->
+  <div class="main">
+    <!-- Tree View -->
+    <div id="treePanel" class="tree-panel">
+      <div id="treeContainer"></div>
+    </div>
+
+    <!-- Flow View -->
+    <div id="flowPanel" class="flow-panel">
+      <div id="flowContainer" class="flow-container"></div>
+    </div>
+
+    <!-- Detail Panel -->
+    <div id="detailPanel" class="detail-panel collapsed">
+      <div class="detail-header">
+        <div id="detailTitle" class="detail-title">Node</div>
+        <button class="detail-close" onclick="closeDetail()">&times;</button>
+      </div>
+      <div id="detailBody" class="detail-body"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ===== State =====
+let ws = null;
+let trees = [];
+let selectedPath = null;
+let isPaused = false;
+let currentView = 'tree';
+let expandedNodes = new Set();
+let reconnectTimer = null;
+
+// ===== WebSocket =====
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${proto}//${location.host}/ws`);
+
+  ws.onopen = () => {
+    updateStatus('connected');
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  };
+
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    handleMessage(msg);
+  };
+
+  ws.onclose = () => {
+    updateStatus('disconnected');
+    reconnectTimer = setTimeout(connect, 2000);
+  };
+
+  ws.onerror = () => {
+    ws.close();
+  };
+}
+
+function handleMessage(msg) {
+  switch (msg.type) {
+    case 'full_tree':
+      trees = msg.data || [];
+      render();
+      break;
+    case 'event':
+      handleEvent(msg.event, msg.data);
+      break;
+    case 'status':
+      isPaused = msg.paused;
+      updatePauseBtn();
+      break;
+    case 'pong':
+      break;
+  }
+}
+
+function handleEvent(eventType, data) {
+  // Update tree data by merging the event
+  updateTreeData(data);
+  render();
+
+  // If we have a selected node and it was updated, refresh detail
+  if (selectedPath && data.path === selectedPath) {
+    showDetail(data);
+  }
+}
+
+function updateTreeData(nodeData) {
+  const path = nodeData.path || '';
+  const parts = path.split('/');
+
+  if (parts.length === 1) {
+    // Root node
+    const idx = trees.findIndex(t => t.path === path || t.name === nodeData.name);
+    if (idx >= 0) {
+      // Merge: keep existing children structure if new data has none
+      trees[idx] = mergeNode(trees[idx], nodeData);
+    } else {
+      trees.push(nodeData);
+      expandedNodes.add(path);
+    }
+    return;
+  }
+
+  // Find and update within tree
+  for (let i = 0; i < trees.length; i++) {
+    if (updateNodeInTree(trees[i], nodeData)) return;
+  }
+
+  // If not found in any tree, it might be a root we haven't seen yet
+  // Refresh the full tree
+  refreshTree();
+}
+
+function updateNodeInTree(tree, nodeData) {
+  if (tree.path === nodeData.path) {
+    Object.assign(tree, nodeData, { children: mergeChildren(tree.children, nodeData.children) });
+    return true;
+  }
+  for (let i = 0; i < (tree.children || []).length; i++) {
+    if (updateNodeInTree(tree.children[i], nodeData)) return true;
+  }
+  // Check if this node should be a child
+  if (nodeData.path && nodeData.path.startsWith(tree.path + '/')) {
+    const depth = nodeData.path.split('/').length - tree.path.split('/').length;
+    if (depth === 1) {
+      // Direct child
+      const existIdx = (tree.children || []).findIndex(c => c.path === nodeData.path);
+      if (existIdx >= 0) {
+        tree.children[existIdx] = mergeNode(tree.children[existIdx], nodeData);
+      } else {
+        if (!tree.children) tree.children = [];
+        tree.children.push(nodeData);
+        expandedNodes.add(tree.path);
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
+function mergeNode(existing, incoming) {
+  return {
+    ...existing,
+    ...incoming,
+    children: mergeChildren(existing.children, incoming.children),
+  };
+}
+
+function mergeChildren(existing, incoming) {
+  if (!incoming || incoming.length === 0) return existing || [];
+  if (!existing || existing.length === 0) return incoming;
+  // Merge by path
+  const merged = [...existing];
+  for (const inc of incoming) {
+    const idx = merged.findIndex(m => m.path === inc.path);
+    if (idx >= 0) {
+      merged[idx] = mergeNode(merged[idx], inc);
+    } else {
+      merged.push(inc);
+    }
+  }
+  return merged;
+}
+
+// ===== Rendering =====
+function render() {
+  if (currentView === 'tree') renderTree();
+  else renderFlow();
+}
+
+function renderTree() {
+  const container = document.getElementById('treeContainer');
+  if (trees.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state-icon">{ }</div>
+        <div class="empty-state-text">Waiting for agentic function calls...</div>
+        <div class="empty-state-hint">Decorate functions with @agentic_function to see them here</div>
+      </div>`;
+    return;
+  }
+  container.innerHTML = trees.map(t => renderTreeNode(t)).join('');
+}
+
+function renderTreeNode(node) {
+  const hasChildren = node.children && node.children.length > 0;
+  const isExpanded = expandedNodes.has(node.path);
+  const isSelected = node.path === selectedPath;
+
+  const icon = node.status === 'success' ? '<span style="color:var(--accent-green)">&#10003;</span>'
+    : node.status === 'error' ? '<span style="color:var(--accent-red)">&#10007;</span>'
+    : '<span class="pulse" style="color:var(--accent-blue)">&#9679;</span>';
+
+  const dur = node.duration_ms > 0 ? `${Math.round(node.duration_ms)}ms` : '';
+  const output = node.output != null ? truncate(JSON.stringify(node.output), 40) : '';
+
+  const toggleClass = hasChildren ? (isExpanded ? 'expanded' : '') : 'leaf';
+  const childrenClass = isExpanded ? '' : 'collapsed';
+
+  let html = `<div class="tree-node">
+    <div class="node-row${isSelected ? ' selected' : ''}" data-path="${esc(node.path)}" onclick="selectNode(event, ${esc(JSON.stringify(JSON.stringify(node)))})">
+      <span class="node-toggle ${toggleClass}" onclick="toggleExpand(event, '${esc(node.path)}')">&#9654;</span>
+      <span class="node-icon">${icon}</span>
+      <span class="node-name">${esc(node.name)}</span>
+      <span class="node-status ${node.status}">${node.status}</span>
+      ${dur ? `<span class="node-duration">${dur}</span>` : ''}
+      ${output ? `<span class="node-output-preview">${esc(output)}</span>` : ''}
+    </div>`;
+
+  if (hasChildren) {
+    html += `<div class="node-children ${childrenClass}">`;
+    html += node.children.map(c => renderTreeNode(c)).join('');
+    html += `</div>`;
+  }
+
+  html += `</div>`;
+  return html;
+}
+
+function renderFlow() {
+  const container = document.getElementById('flowContainer');
+  if (trees.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state-icon">{ }</div>
+        <div class="empty-state-text">Waiting for agentic function calls...</div>
+        <div class="empty-state-hint">Decorate functions with @agentic_function to see them here</div>
+      </div>`;
+    return;
+  }
+
+  // Group nodes by depth level
+  const levels = {};
+  for (const tree of trees) {
+    collectByDepth(tree, 0, levels);
+  }
+
+  let html = '';
+  const depths = Object.keys(levels).map(Number).sort((a, b) => a - b);
+  for (const depth of depths) {
+    const nodes = levels[depth];
+    html += `<div class="flow-level">
+      <div class="flow-level-label">depth ${depth}</div>
+      <div class="flow-nodes">`;
+    nodes.forEach((n, i) => {
+      if (i > 0) html += `<div class="flow-arrow">&#8594;</div>`;
+      const icon = n.status === 'success' ? '&#10003;'
+        : n.status === 'error' ? '&#10007;'
+        : '<span class="pulse">&#9679;</span>';
+      const dur = n.duration_ms > 0 ? `${Math.round(n.duration_ms)}ms` : 'running...';
+      const output = n.output != null ? truncate(JSON.stringify(n.output), 30) : '';
+
+      html += `<div class="flow-card ${n.status}" onclick='selectNode(event, ${esc(JSON.stringify(JSON.stringify(n)))})'>
+        <div class="flow-card-header">
+          <span class="flow-card-icon">${icon}</span>
+          <span class="flow-card-name">${esc(n.name)}</span>
+        </div>
+        <div class="flow-card-meta">${dur}</div>
+        ${output ? `<div class="flow-card-output">${esc(output)}</div>` : ''}
+      </div>`;
+    });
+    html += `</div></div>`;
+  }
+
+  container.innerHTML = html;
+}
+
+function collectByDepth(node, depth, levels) {
+  if (!levels[depth]) levels[depth] = [];
+  levels[depth].push(node);
+  for (const child of (node.children || [])) {
+    collectByDepth(child, depth + 1, levels);
+  }
+}
+
+// ===== Detail Panel =====
+function showDetail(node) {
+  selectedPath = node.path;
+  const panel = document.getElementById('detailPanel');
+  const title = document.getElementById('detailTitle');
+  const body = document.getElementById('detailBody');
+
+  panel.classList.remove('collapsed');
+  title.textContent = node.name;
+
+  const statusIcon = node.status === 'success' ? '&#10003;' : node.status === 'error' ? '&#10007;' : '&#9679;';
+  const dur = node.duration_ms > 0 ? `${Math.round(node.duration_ms)}ms` : 'running...';
+
+  let html = `
+    <div class="detail-section">
+      <div class="detail-section-title">Status</div>
+      <div class="detail-badge ${node.status}">${statusIcon} ${node.status} &middot; ${dur}</div>
+    </div>
+
+    <div class="detail-section">
+      <div class="detail-section-title">Path</div>
+      <div class="detail-field-value">${esc(node.path)}</div>
+    </div>`;
+
+  if (node.prompt) {
+    html += `
+    <div class="detail-section">
+      <div class="detail-section-title">Prompt / Docstring</div>
+      <div class="detail-code">${esc(node.prompt)}</div>
+    </div>`;
+  }
+
+  if (node.params && Object.keys(node.params).length > 0) {
+    html += `
+    <div class="detail-section">
+      <div class="detail-section-title">Parameters</div>
+      <div class="detail-code">${esc(JSON.stringify(node.params, null, 2))}</div>
+    </div>`;
+  }
+
+  if (node.output != null) {
+    html += `
+    <div class="detail-section">
+      <div class="detail-section-title">Output</div>
+      <div class="detail-code">${esc(typeof node.output === 'string' ? node.output : JSON.stringify(node.output, null, 2))}</div>
+    </div>`;
+  }
+
+  if (node.error) {
+    html += `
+    <div class="detail-section">
+      <div class="detail-section-title">Error</div>
+      <div class="detail-code" style="color:var(--accent-red)">${esc(node.error)}</div>
+    </div>`;
+  }
+
+  if (node.raw_reply != null) {
+    html += `
+    <div class="detail-section">
+      <div class="detail-section-title">Raw LLM Reply</div>
+      <div class="detail-code">${esc(node.raw_reply)}</div>
+    </div>`;
+  }
+
+  if (node.attempts && node.attempts.length > 0) {
+    html += `
+    <div class="detail-section">
+      <div class="detail-section-title">Attempts (${node.attempts.length})</div>
+      <div class="detail-code">${esc(JSON.stringify(node.attempts, null, 2))}</div>
+    </div>`;
+  }
+
+  html += `
+    <div class="detail-section">
+      <div class="detail-section-title">Render / Compress</div>
+      <div class="detail-field-value">render: ${esc(node.render || 'summary')} | compress: ${node.compress ? 'true' : 'false'}</div>
+    </div>`;
+
+  body.innerHTML = html;
+  render(); // re-render to update selection highlighting
+}
+
+function closeDetail() {
+  selectedPath = null;
+  document.getElementById('detailPanel').classList.add('collapsed');
+  render();
+}
+
+// ===== Interactions =====
+function selectNode(event, nodeJson) {
+  event.stopPropagation();
+  const node = JSON.parse(nodeJson);
+  showDetail(node);
+}
+
+function toggleExpand(event, path) {
+  event.stopPropagation();
+  if (expandedNodes.has(path)) {
+    expandedNodes.delete(path);
+  } else {
+    expandedNodes.add(path);
+  }
+  render();
+}
+
+function switchView(view) {
+  currentView = view;
+  document.querySelectorAll('.view-tab').forEach(t => t.classList.toggle('active', t.dataset.view === view));
+  document.getElementById('treePanel').style.display = view === 'tree' ? 'block' : 'none';
+  document.getElementById('flowPanel').style.display = view === 'flow' ? 'block' : 'none';
+  document.getElementById('flowPanel').classList.toggle('active', view === 'flow');
+  render();
+}
+
+function togglePause() {
+  const endpoint = isPaused ? '/api/resume' : '/api/pause';
+  fetch(endpoint, { method: 'POST' })
+    .then(r => r.json())
+    .then(data => {
+      isPaused = data.paused;
+      updatePauseBtn();
+    })
+    .catch(() => {});
+}
+
+function updatePauseBtn() {
+  const btn = document.getElementById('btnPause');
+  btn.textContent = isPaused ? 'Resume' : 'Pause';
+  btn.classList.toggle('paused', isPaused);
+
+  const badge = document.getElementById('statusBadge');
+  if (isPaused) {
+    badge.textContent = 'paused';
+    badge.className = 'status-badge paused';
+  } else if (ws && ws.readyState === WebSocket.OPEN) {
+    badge.textContent = 'connected';
+    badge.className = 'status-badge';
+  }
+}
+
+function updateStatus(status) {
+  const badge = document.getElementById('statusBadge');
+  if (status === 'connected') {
+    badge.textContent = 'connected';
+    badge.className = 'status-badge';
+  } else {
+    badge.textContent = 'disconnected';
+    badge.className = 'status-badge disconnected';
+  }
+}
+
+function refreshTree() {
+  fetch('/api/tree')
+    .then(r => r.json())
+    .then(data => {
+      trees = data;
+      // Auto-expand all root nodes
+      trees.forEach(t => expandedNodes.add(t.path));
+      render();
+    })
+    .catch(() => {});
+}
+
+// ===== Helpers =====
+function truncate(s, len) {
+  if (!s) return '';
+  return s.length > len ? s.slice(0, len - 3) + '...' : s;
+}
+
+function esc(s) {
+  if (typeof s !== 'string') return s;
+  const div = document.createElement('div');
+  div.textContent = s;
+  return div.innerHTML;
+}
+
+// ===== Keepalive =====
+setInterval(() => {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send('ping');
+  }
+}, 30000);
+
+// ===== Init =====
+connect();
+</script>
+</body>
+</html>

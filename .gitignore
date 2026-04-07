@@ -21,3 +21,7 @@ agentic/functions/
 !agentic/functions/agent_loop.py
 !agentic/functions/wait.py
 !agentic/functions/deep_work.py
+
+# Internal-only functions (not uploaded)
+agentic/functions/init_research.py
+skills/init-research/

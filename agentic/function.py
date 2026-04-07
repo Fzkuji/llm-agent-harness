@@ -24,7 +24,7 @@ import os
 from datetime import datetime
 
 import agentic.context as _ctx_module
-from agentic.context import Context, _current_ctx
+from agentic.context import Context, _current_ctx, _emit_event
 
 
 class agentic_function:
@@ -145,6 +145,7 @@ class agentic_function:
                 parent.children.append(ctx)
 
             token = _current_ctx.set(ctx)
+            _emit_event("node_created", ctx)
             try:
                 bound = sig.bind(*args, **kwargs)
                 bound.apply_defaults()
@@ -160,6 +161,7 @@ class agentic_function:
                 raise
             finally:
                 ctx.end_time = time.time()
+                _emit_event("node_completed", ctx)
                 _current_ctx.reset(token)
                 if parent is None:
                     self_ref.context = ctx
@@ -194,6 +196,7 @@ class agentic_function:
 
             # Set as current context for the duration of the call
             token = _current_ctx.set(ctx)
+            _emit_event("node_created", ctx)
             try:
                 # Bind arguments (inside try so binding errors are recorded)
                 bound = sig.bind(*args, **kwargs)
@@ -210,6 +213,7 @@ class agentic_function:
                 raise
             finally:
                 ctx.end_time = time.time()
+                _emit_event("node_completed", ctx)
                 _current_ctx.reset(token)
                 # If this was a top-level call (no parent), save and close
                 if parent is None:

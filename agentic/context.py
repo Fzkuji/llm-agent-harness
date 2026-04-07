@@ -58,6 +58,55 @@ _current_ctx: ContextVar[Optional["Context"]] = ContextVar(
     "_current_ctx", default=None
 )
 
+# ---------------------------------------------------------------------------
+# Event system — lightweight callbacks for visualization / monitoring
+# ---------------------------------------------------------------------------
+import threading as _threading
+
+_event_callbacks: list[Callable] = []
+_event_lock = _threading.Lock()
+
+
+def on_event(callback: Callable) -> None:
+    """
+    Register a callback for Context tree events.
+
+    The callback receives (event_type: str, data: dict) where event_type is
+    one of: "node_created", "node_updated", "node_completed".
+
+    Thread-safe. Zero overhead when no callbacks are registered (the emit
+    function checks the list length before acquiring the lock).
+    """
+    with _event_lock:
+        _event_callbacks.append(callback)
+
+
+def off_event(callback: Callable) -> None:
+    """Remove a previously registered event callback."""
+    with _event_lock:
+        try:
+            _event_callbacks.remove(callback)
+        except ValueError:
+            pass
+
+
+def _emit_event(event_type: str, ctx: "Context") -> None:
+    """Emit an event to all registered callbacks. No-op if no callbacks."""
+    if not _event_callbacks:
+        return
+    try:
+        data = ctx._to_dict()
+        data["event"] = event_type
+    except Exception:
+        return
+    with _event_lock:
+        cbs = list(_event_callbacks)
+    for cb in cbs:
+        try:
+            cb(event_type, data)
+        except Exception:
+            pass
+
 
 
 
@@ -423,26 +472,98 @@ class Context:
     # TREE INSPECTION — human-readable views
     # ==================================================================
 
-    def tree(self, indent: int = 0) -> str:
+    def tree(self, indent: int = 0, color: bool = True, _is_last: bool = True, _prefix: str = "") -> str:
         """
         Full tree view for debugging. Shows ALL nodes regardless of
         render/compress settings.
 
-        Example output:
-            root …
-              navigate ✓ 3200ms → {'success': True}
-                observe ✓ 1200ms → {'found': True}
-                act ✓ 820ms → {'clicked': True}
+        Args:
+            indent:  Legacy indent level (used if no tree connectors).
+            color:   Use ANSI colors for terminal output (default True).
+            _is_last: Internal — whether this is the last child.
+            _prefix:  Internal — accumulated prefix string for tree lines.
+
+        Example output (with color=False):
+            login_flow ✓ 8.8s
+            ├── observe ✓ 3.1s → "found login form at (200, 300)"
+            ├── click ✓ 2.5s → "clicked login button"
+            └── verify ✓ 3.2s → "dashboard confirmed"
         """
-        prefix = "  " * indent
-        dur = f" {self.duration_ms:.0f}ms" if self.end_time else ""
-        icon = "✓" if self.status == "success" else "✗" if self.status == "error" else "…"
-        out = f" → {self.output}" if self.output is not None else ""
+        # Format duration
+        if self.end_time:
+            ms = self.duration_ms
+            dur = f" {ms/1000:.1f}s" if ms >= 1000 else f" {ms:.0f}ms"
+        else:
+            dur = ""
+
+        # Status icon
+        if self.status == "success":
+            icon = "✓"
+        elif self.status == "error":
+            icon = "✗"
+        else:
+            icon = "⏳"
+
+        # Output / error snippet
+        if self.output is not None:
+            out_str = str(self.output)
+            if len(out_str) > 80:
+                out_str = out_str[:77] + "..."
+            out = f' → "{out_str}"'
+        else:
+            out = ""
         err = f" ERROR: {self.error}" if self.error else ""
-        line = f"{prefix}{self.name} {icon}{dur}{out}{err}"
+
+        # Apply ANSI colors
+        if color:
+            c_reset = "\033[0m"
+            c_name = "\033[1m"  # bold
+            c_dim = "\033[2m"   # dim
+            if self.status == "success":
+                c_icon = "\033[32m"  # green
+            elif self.status == "error":
+                c_icon = "\033[31m"  # red
+            else:
+                c_icon = "\033[33m"  # yellow
+            c_dur = "\033[36m"   # cyan
+            c_out = "\033[2m"    # dim
+            c_err = "\033[31m"   # red
+
+            name_s = f"{c_name}{self.name}{c_reset}"
+            icon_s = f"{c_icon}{icon}{c_reset}"
+            dur_s = f"{c_dur}{dur}{c_reset}" if dur else ""
+            out_s = f"{c_out}{out}{c_reset}" if out else ""
+            err_s = f"{c_err}{err}{c_reset}" if err else ""
+        else:
+            name_s = self.name
+            icon_s = icon
+            dur_s = dur
+            out_s = out
+            err_s = err
+
+        line = f"{_prefix}{name_s} {icon_s}{dur_s}{out_s}{err_s}"
         lines = [line]
-        for c in self.children:
-            lines.append(c.tree(indent + 1))
+
+        # Render children with tree connectors
+        for i, c in enumerate(self.children):
+            is_last_child = (i == len(self.children) - 1)
+            if _prefix or self.parent is not None:
+                # We're inside the tree, use connectors
+                connector = "└── " if is_last_child else "├── "
+                child_prefix = _prefix.replace("├── ", "│   ").replace("└── ", "    ")
+                next_prefix = child_prefix + connector
+            else:
+                # Root node's children
+                connector = "└── " if is_last_child else "├── "
+                next_prefix = connector
+
+            lines.append(c.tree(
+                indent=indent + 1,
+                color=color,
+                _is_last=is_last_child,
+                _prefix=next_prefix,
+            ))
+
         return "\n".join(lines)
 
     def traceback(self) -> str:

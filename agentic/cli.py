@@ -83,6 +83,17 @@ def main():
                         help="Skip clarification questions, start immediately")
     _add_provider_args(p_deep)
 
+    # install-skills
+    p_skills = sub.add_parser("install-skills", help="Install skills for Claude Code / Gemini CLI")
+    p_skills.add_argument("--target", "-t", default=None,
+                          choices=["claude", "gemini"],
+                          help="Target CLI tool (default: auto-detect)")
+
+    # visualize
+    p_viz = sub.add_parser("visualize", help="Start real-time execution visualizer")
+    p_viz.add_argument("--port", type=int, default=8765, help="Port (default: 8765)")
+    p_viz.add_argument("--no-browser", action="store_true", help="Don't open browser")
+
     # providers
     sub.add_parser("providers", help="Show available LLM providers and detection status")
 
@@ -93,7 +104,13 @@ def main():
         return
 
     # Lazy imports — only load when needed
-    if args.command == "list":
+    if args.command == "install-skills":
+        _cmd_install_skills(args.target)
+        return
+    elif args.command == "visualize":
+        _cmd_visualize(args.port, not args.no_browser)
+        return
+    elif args.command == "list":
         _cmd_list()
     elif args.command == "providers":
         _cmd_providers()
@@ -114,6 +131,84 @@ def main():
             args.max_steps, args.max_revisions,
             not args.no_interactive,
         )
+
+
+def _cmd_install_skills(target=None):
+    """Install skills to Claude Code or Gemini CLI."""
+    import os
+    import shutil
+    import tempfile
+    import subprocess
+
+    # Determine target directories
+    home = os.path.expanduser("~")
+    targets = {}
+    if shutil.which("claude"):
+        targets["claude"] = os.path.join(home, ".claude", "skills")
+    if shutil.which("gemini"):
+        targets["gemini"] = os.path.join(home, ".gemini", "skills")
+
+    if target:
+        if target not in targets:
+            print(f"Error: {target} CLI not found. Install it first.")
+            sys.exit(1)
+        targets = {target: targets[target]}
+
+    if not targets:
+        print("No CLI tools found. Install Claude Code or Gemini CLI first:")
+        print("  npm i -g @anthropic-ai/claude-code && claude login")
+        print("  npm i -g @google/gemini-cli")
+        sys.exit(1)
+
+    # Check if skills are available locally (dev install)
+    pkg_dir = os.path.dirname(os.path.dirname(__file__))
+    local_skills = os.path.join(pkg_dir, "skills")
+
+    if os.path.isdir(local_skills):
+        skills_dir = local_skills
+    else:
+        # Download from GitHub
+        print("Downloading skills from GitHub...")
+        tmp = tempfile.mkdtemp()
+        try:
+            subprocess.run(
+                ["git", "clone", "--depth=1", "--filter=blob:none", "--sparse",
+                 "https://github.com/Fzkuji/Agentic-Programming.git", tmp],
+                check=True, capture_output=True,
+            )
+            subprocess.run(
+                ["git", "sparse-checkout", "set", "skills"],
+                cwd=tmp, check=True, capture_output=True,
+            )
+            skills_dir = os.path.join(tmp, "skills")
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            print("Error: Failed to download skills. Install git or clone the repo manually:")
+            print("  git clone https://github.com/Fzkuji/Agentic-Programming.git")
+            print("  cp -r Agentic-Programming/skills/* ~/.claude/skills/")
+            sys.exit(1)
+
+    if not os.path.isdir(skills_dir):
+        print("Error: skills/ directory not found.")
+        sys.exit(1)
+
+    # Copy skills
+    for name, dest in targets.items():
+        os.makedirs(dest, exist_ok=True)
+        count = 0
+        for item in os.listdir(skills_dir):
+            src = os.path.join(skills_dir, item)
+            dst = os.path.join(dest, item)
+            if os.path.isdir(src):
+                if os.path.exists(dst):
+                    shutil.rmtree(dst)
+                shutil.copytree(src, dst)
+                count += 1
+            elif os.path.isfile(src):
+                shutil.copy2(src, dst)
+                count += 1
+        print(f"  Installed {count} skills to {dest} ({name})")
+
+    print("\nDone! Your agent can now use agentic functions via natural language.")
 
 
 def _get_runtime(provider=None, model=None):
@@ -338,6 +433,23 @@ def _cmd_create_skill(name, provider=None, model=None):
     print(f"Creating skill for '{name}'...")
     path = create_skill(fn_name=name, description=description, code=code, runtime=runtime)
     print(f"  Skill created at {path}")
+
+
+def _cmd_visualize(port, open_browser):
+    """Start the real-time visualizer."""
+    try:
+        from agentic.visualize import start_visualizer
+    except ImportError:
+        print("Visualizer dependencies not installed.")
+        print("Install with: pip install agentic-programming[visualize]")
+        sys.exit(1)
+
+    thread = start_visualizer(port=port, open_browser=open_browser)
+    print("Press Ctrl+C to stop.")
+    try:
+        thread.join()
+    except KeyboardInterrupt:
+        print("\nStopping visualizer.")
 
 
 def _cmd_deep_work(task, level, provider, model,

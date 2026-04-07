@@ -7,19 +7,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
-- Tests for `fix()` docstring/source fallback, nested child error extraction, and async retry attempt history.
-- Provider export coverage now also checks `GeminiCLIRuntime` in `agentic.providers.__all__`.
-- Meta-function regression tests now cover preserving leading imports in `_extract_code()` and executing generated functions that use whitelisted stdlib imports.
+- **Real-time web visualization** (`python -m agentic.visualize`) — interactive Context tree viewer with WebSocket streaming
+- **Built-in agentic functions**: `general_action`, `agent_loop`, `wait`, `deep_work`
+- **`deep_work`** — autonomous plan-execute-evaluate loop with quality levels (high_school → professor)
+- **Session continuity** for CLI providers (Claude Code, Codex, Gemini CLI)
+- **Interactive mode** for Claude Code CLI with full tool access
+- **Nested JSON export** for Context trees (`.json` format)
 
 ### Changed
-- `docs/GETTING_STARTED.md` now reflects all 6 built-in runtimes, adding setup/usage notes for `CodexRuntime` and `GeminiCLIRuntime` in both English and Chinese sections.
-- README installation/configuration guidance now covers optional provider extras, runtime selection, and the `fix()` workflow.
-- README built-in provider examples now include `CodexRuntime` and `GeminiCLIRuntime`, and remove the stale hard-coded test count.
-- `docs/api/providers.md` now documents the CLI runtimes (`ClaudeCodeRuntime`, `CodexRuntime`, `GeminiCLIRuntime`) alongside SDK-based providers.
-- `docs/api/meta_function.md` now documents the current `fix(fn, runtime, instruction, on_question, max_rounds)` API and interactive repair flow.
-- `docs/api/runtime.md` now explains retry attempt recording and how retry history feeds into `fix()`.
-- `create()` / `fix()` now preserve approved stdlib imports that appear before the generated function definition, matching the sandbox whitelist documented in `meta_function.py`.
-- `.gitignore` now excludes generated runtime artifacts under `agentic/logs/` and `agentic/functions/`.
+- README redesigned: Quick Start with 3 usage paths (Python/Skills/MCP), annotated code hero image, Deep Work feature showcase
+- Split meta-function skill into four focused skills
+- `create_skill` updated with "one skill, one entry function" pattern
+- Context compaction via `/compact` instead of process restart
+
+### Fixed
+- Stderr pipe buffer deadlock in CLI providers
+- Per-call readline thread replaced with persistent queue-based stdout reader
+- Context branch indentation
 
 ## [0.3.0] - 2025-04-04
 

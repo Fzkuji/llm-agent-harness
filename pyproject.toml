@@ -45,11 +45,19 @@ gemini = [
 mcp = [
     "mcp[cli]>=1.0.0",
 ]
+visualize = [
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.29.0",
+    "websockets>=12.0",
+]
 all = [
     "anthropic>=0.30.0",
     "openai>=1.30.0",
     "google-genai>=1.0.0",
     "mcp[cli]>=1.0.0",
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.29.0",
+    "websockets>=12.0",
 ]
 
 [project.scripts]
