@@ -21,6 +21,8 @@ import uuid
 from typing import Any, Optional
 
 from agentic.context import Context, _current_ctx, on_event, off_event
+from agentic.function import agentic_function
+from agentic.runtime import Runtime
 
 # ---------------------------------------------------------------------------
 # Pause/resume machinery
@@ -300,11 +302,92 @@ def _extract_function_info(filepath: str, name: str, category: str) -> Optional[
 
 
 # ---------------------------------------------------------------------------
-# Chat / execution engine
+# Agentic chat functions — the visualizer eats its own dog food
+# ---------------------------------------------------------------------------
+
+@agentic_function
+def _chat_query(query: str, runtime: Runtime) -> str:
+    """You are a helpful assistant for the Agentic Programming framework.
+    Answer the user's question based on the conversation context.
+    The context of previous messages and function results is automatically
+    provided to you — just respond naturally."""
+    return runtime.exec(content=[{"type": "text", "text": query}])
+
+
+@agentic_function(compress=True)
+def _run_user_function(func_name: str, kwargs: dict, runtime: Runtime) -> str:
+    """Execute a user's agentic function. The result is compressed so the
+    chat agent only sees the final output, not internal execution details."""
+    fn = _load_function(func_name)
+    if fn is None:
+        return f"Function '{func_name}' not found."
+
+    # Inject runtime if needed
+    source = ""
+    inner = fn._fn if hasattr(fn, '_fn') else fn
+    try:
+        source = inspect.getsource(inner)
+    except (OSError, TypeError):
+        pass
+
+    if "runtime" in source:
+        sig = inspect.signature(inner)
+        if "runtime" in sig.parameters and "runtime" not in kwargs:
+            kwargs["runtime"] = runtime
+        elif hasattr(fn, '_fn') and fn._fn:
+            fn._fn.__globals__['runtime'] = runtime
+
+    result = fn(**kwargs)
+
+    # Format result
+    if callable(result):
+        fn_name = getattr(result, '__name__', 'unknown')
+        fn_doc = (getattr(result, '__doc__', '') or '').strip().split('\n')[0]
+        try:
+            inner_sig = inspect.signature(result._fn if hasattr(result, '_fn') else result)
+            params = [p for p in inner_sig.parameters if p not in ('runtime', 'callback', 'self')]
+        except (ValueError, TypeError):
+            params = []
+        msg = f"Created function `{fn_name}`."
+        if params:
+            msg += f"\nUsage: `run {fn_name} {' '.join(f'{p}=\"...\"' for p in params)}`"
+        if fn_doc:
+            msg += f"\nDescription: {fn_doc}"
+        # Refresh function list
+        functions = _discover_functions()
+        _broadcast(json.dumps({"type": "functions_list", "data": functions}, default=str))
+        return msg
+    elif isinstance(result, str):
+        return result
+    else:
+        try:
+            return json.dumps(result, indent=2, default=str)
+        except (TypeError, ValueError):
+            return str(result)
+
+
+def _load_function(func_name: str):
+    """Load a function by name from meta_functions or functions."""
+    meta_names = ["create", "fix", "create_app", "create_skill"]
+    if func_name in meta_names:
+        try:
+            mod = importlib.import_module(f"agentic.meta_functions.{func_name}")
+            return getattr(mod, func_name)
+        except (ImportError, AttributeError):
+            pass
+    try:
+        mod = importlib.import_module(f"agentic.functions.{func_name}")
+        return getattr(mod, func_name)
+    except (ImportError, AttributeError):
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Conversation management — each conversation has a Context tree
 # ---------------------------------------------------------------------------
 
 def _get_or_create_conversation(conv_id: str = None) -> dict:
-    """Get or create a conversation by ID."""
+    """Get or create a conversation with its own Context tree and Runtime."""
     if conv_id is None:
         conv_id = str(uuid.uuid4())[:8]
     with _conversations_lock:
@@ -312,230 +395,102 @@ def _get_or_create_conversation(conv_id: str = None) -> dict:
             _conversations[conv_id] = {
                 "id": conv_id,
                 "title": "New conversation",
-                "messages": [],
+                "root_context": Context(name="chat_session", status="running", start_time=time.time()),
                 "created_at": time.time(),
             }
         return _conversations[conv_id]
 
 
-def _run_function_in_thread(func_name: str, kwargs: dict, conv_id: str, msg_id: str):
-    """Run a function in a background thread, broadcasting results via WebSocket."""
+def _execute_in_context(conv_id: str, msg_id: str, action: str,
+                        func_name: str = None, kwargs: dict = None, query: str = None):
+    """Execute a chat query or function call within the conversation's Context tree.
+
+    This is the core execution engine. Everything runs under the conversation's
+    root Context, so summarize() automatically provides conversation history.
+    """
     try:
-        # Try meta functions first
-        fn = None
-        runtime = None
-        needs_runtime = False
-
-        # Check meta functions
-        meta_names = ["create", "fix", "create_app", "create_skill"]
-        if func_name in meta_names:
-            try:
-                mod = importlib.import_module(f"agentic.meta_functions.{func_name}")
-                fn = getattr(mod, func_name)
-                needs_runtime = True
-            except (ImportError, AttributeError):
-                pass
-
-        # Check built-in functions
-        if fn is None:
-            try:
-                mod = importlib.import_module(f"agentic.functions.{func_name}")
-                fn = getattr(mod, func_name)
-                # Check if it needs runtime
-                source = ""
-                if hasattr(fn, '_fn'):
-                    try:
-                        source = inspect.getsource(fn._fn)
-                    except (OSError, TypeError):
-                        pass
-                elif callable(fn):
-                    try:
-                        source = inspect.getsource(fn)
-                    except (OSError, TypeError):
-                        pass
-                if "runtime" in source:
-                    needs_runtime = True
-            except (ImportError, AttributeError):
-                pass
-
-        if fn is None:
-            _broadcast_chat_response(conv_id, msg_id, {
-                "type": "error",
-                "content": f"Function '{func_name}' not found.",
-            })
-            return
-
-        # Set up runtime if needed
-        if needs_runtime:
-            try:
-                runtime = _get_runtime(conv_id=conv_id, msg_id=msg_id)
-                if "runtime" in (kwargs.keys()):
-                    pass  # user provided
-                else:
-                    # Try to inject runtime
-                    sig = inspect.signature(fn._fn if hasattr(fn, '_fn') else fn)
-                    if "runtime" in sig.parameters:
-                        kwargs["runtime"] = runtime
-                    elif hasattr(fn, '_fn') and fn._fn:
-                        fn._fn.__globals__['runtime'] = runtime
-            except Exception as e:
-                _broadcast_chat_response(conv_id, msg_id, {
-                    "type": "error",
-                    "content": f"Could not set up LLM runtime: {e}\nConfigure a provider first (see `agentic providers`).",
-                })
-                return
-
-        # Validate create() description — ask LLM if it's a clear function request
-        if func_name == "create" and "description" in kwargs:
-            desc = kwargs["description"].strip()
-            if len(desc) < 5:
-                _broadcast_chat_response(conv_id, msg_id, {
-                    "type": "result",
-                    "content": "Description too short. What function would you like to create?",
-                    "function": func_name,
-                })
-                return
-            try:
-                rt = _get_runtime()
-                check = rt.exec(
-                    f'Is the following a clear description of a Python function to create? '
-                    f'Reply ONLY "yes" or "no, <reason>".\n\n'
-                    f'Description: "{desc}"'
-                )
-                check_lower = check.strip().lower()
-                if check_lower.startswith("no"):
-                    reason = check.strip()[2:].strip().lstrip(",").lstrip(":").strip() or "unclear description"
-                    _broadcast_chat_response(conv_id, msg_id, {
-                        "type": "result",
-                        "content": (
-                            f"I couldn't understand what function to create: {reason}\n\n"
-                            "Please describe what the function should **do**. For example:\n"
-                            "- `create a function that reverses a string`\n"
-                            "- `create a function that extracts emails from text`"
-                        ),
-                        "function": func_name,
-                    })
-                    return
-            except Exception:
-                pass  # If validation fails, proceed anyway
-
-        # Execute
-        _broadcast_chat_response(conv_id, msg_id, {
-            "type": "status",
-            "content": f"Running {func_name}({', '.join(f'{k}={repr(v)}' for k,v in kwargs.items())})...",
-        })
-
-        result = fn(**kwargs)
-
-        # Get context tree if available
-        context_tree = None
-        if hasattr(fn, 'context') and fn.context is not None:
-            context_tree = fn.context._to_dict()
-
-        # Format result
-        if isinstance(result, str):
-            content = result
-        elif callable(result):
-            # Meta function returned a function object (e.g., create())
-            fn_name = getattr(result, '__name__', 'unknown')
-            fn_doc = (getattr(result, '__doc__', '') or '').strip().split('\n')[0]
-            # Extract parameter names for usage hint
-            try:
-                inner = result._fn if hasattr(result, '_fn') else result
-                sig = inspect.signature(inner)
-                param_names = [
-                    p for p in sig.parameters
-                    if p not in ('runtime', 'callback', 'self')
-                ]
-            except (ValueError, TypeError):
-                param_names = []
-            if param_names:
-                usage_params = ' '.join(f'{p}="..."' for p in param_names)
-                content = f"Created function `{fn_name}`.\n\nUsage: `run {fn_name} {usage_params}`"
-            else:
-                content = f"Created function `{fn_name}`.\n\nUsage: `run {fn_name}`"
-            if fn_doc:
-                content += f"\n\nDescription: {fn_doc}"
-            # Refresh function list for all clients
-            functions = _discover_functions()
-            _broadcast(json.dumps({"type": "functions_list", "data": functions}, default=str))
-        else:
-            try:
-                content = json.dumps(result, indent=2, default=str)
-            except (TypeError, ValueError):
-                content = str(result)
-
-        _broadcast_chat_response(conv_id, msg_id, {
-            "type": "result",
-            "content": content,
-            "function": func_name,
-            "context_tree": context_tree,
-        })
-
-    except Exception as e:
-        tb = traceback.format_exc()
-        _broadcast_chat_response(conv_id, msg_id, {
-            "type": "error",
-            "content": f"Error running {func_name}: {e}\n\n{tb}",
-        })
-
-
-def _run_general_query(query: str, conv_id: str, msg_id: str):
-    """Run a general LLM query with conversation history for context."""
-    try:
+        conv = _get_or_create_conversation(conv_id)
+        root_ctx = conv["root_context"]
         runtime = _get_runtime(conv_id=conv_id, msg_id=msg_id)
 
-        _broadcast_chat_response(conv_id, msg_id, {
-            "type": "status",
-            "content": "Thinking...",
-        })
+        # Set the conversation root as the current context so that
+        # @agentic_function calls become children of this root
+        token = _current_ctx.set(root_ctx)
 
-        # Build prompt with recent conversation history
-        history_prompt = ""
-        with _conversations_lock:
-            conv = _conversations.get(conv_id)
-            if conv and conv["messages"]:
-                recent = [m for m in conv["messages"]
-                          if m.get("type") != "status"][-20:]
-                history_lines = []
-                for m in recent:
-                    role = m.get("role", "user")
-                    content = m.get("content", "")
-                    if not content:
-                        continue
-                    # Truncate very long outputs
-                    if len(content) > 800:
-                        content = content[:800] + "..."
-                    if role == "user":
-                        history_lines.append(f"User: {content}")
-                    elif m.get("function") and m.get("function") != "llm_query":
-                        # Function execution result — include function name
-                        history_lines.append(f"System: [ran {m['function']}()] → {content}")
-                    else:
-                        history_lines.append(f"Assistant: {content}")
-                if history_lines:
-                    history_prompt = "Conversation so far:\n" + "\n".join(history_lines) + "\n\n"
+        try:
+            if action == "query":
+                # Chat query — @agentic_function with auto context
+                _broadcast_chat_response(conv_id, msg_id, {
+                    "type": "status", "content": "Thinking...",
+                })
+                result = _chat_query(query=query, runtime=runtime)
+                _broadcast_chat_response(conv_id, msg_id, {
+                    "type": "result",
+                    "content": str(result),
+                    "function": "chat",
+                    "context_tree": root_ctx._to_dict(),
+                })
 
-        # Always inject chat history so the LLM sees our web UI context,
-        # regardless of provider type (CLI session context != our chat context)
-        full_query = history_prompt + "User: " + query if history_prompt else query
-        result = runtime.exec(full_query)
+            elif action == "run":
+                # Validate create() description
+                if func_name == "create" and kwargs and "description" in kwargs:
+                    desc = kwargs["description"].strip()
+                    if len(desc) < 5:
+                        _broadcast_chat_response(conv_id, msg_id, {
+                            "type": "result",
+                            "content": "Description too short. What function would you like to create?",
+                            "function": func_name,
+                        })
+                        return
+                    try:
+                        check = runtime.exec(
+                            f'Is this a clear description of a Python function? '
+                            f'Reply ONLY "yes" or "no, <reason>".\n\nDescription: "{desc}"'
+                        )
+                        if check.strip().lower().startswith("no"):
+                            reason = check.strip()[2:].strip().lstrip(",:").strip() or "unclear"
+                            _broadcast_chat_response(conv_id, msg_id, {
+                                "type": "result",
+                                "content": f"Unclear description: {reason}\n\nPlease describe what the function should **do**.",
+                                "function": func_name,
+                            })
+                            return
+                    except Exception:
+                        pass
 
-        _broadcast_chat_response(conv_id, msg_id, {
-            "type": "result",
-            "content": str(result),
-            "function": "llm_query",
-        })
+                _broadcast_chat_response(conv_id, msg_id, {
+                    "type": "status",
+                    "content": f"Running {func_name}...",
+                })
 
-    except ImportError:
-        _broadcast_chat_response(conv_id, msg_id, {
-            "type": "error",
-            "content": "No LLM provider available. Configure one with `agentic providers`.",
-        })
+                # Execute function under context tree (compress=True via _run_user_function)
+                result = _run_user_function(
+                    func_name=func_name,
+                    kwargs=kwargs or {},
+                    runtime=runtime,
+                )
+
+                _broadcast_chat_response(conv_id, msg_id, {
+                    "type": "result",
+                    "content": str(result),
+                    "function": func_name,
+                    "context_tree": root_ctx._to_dict(),
+                })
+
+        finally:
+            _current_ctx.reset(token)
+
+        # Update conversation title from first user message
+        if not conv.get("_titled"):
+            title = (query or func_name or "")[:50]
+            if title:
+                conv["title"] = title + ("..." if len(title) >= 50 else "")
+                conv["_titled"] = True
+
     except Exception as e:
         _broadcast_chat_response(conv_id, msg_id, {
             "type": "error",
-            "content": f"Error: {e}",
+            "content": f"Error: {e}\n\n{traceback.format_exc()}",
         })
 
 
@@ -745,14 +700,16 @@ async def _handle_ws_command(ws, cmd: dict):
 
         if parsed["action"] == "run":
             threading.Thread(
-                target=_run_function_in_thread,
-                args=(parsed["function"], parsed["kwargs"], conv_id, msg_id),
+                target=_execute_in_context,
+                args=(conv_id, msg_id, "run"),
+                kwargs={"func_name": parsed["function"], "kwargs": parsed["kwargs"]},
                 daemon=True,
             ).start()
         elif parsed["action"] == "query":
             threading.Thread(
-                target=_run_general_query,
-                args=(parsed["raw"], conv_id, msg_id),
+                target=_execute_in_context,
+                args=(conv_id, msg_id, "query"),
+                kwargs={"query": parsed["raw"]},
                 daemon=True,
             ).start()
 
@@ -761,21 +718,20 @@ async def _handle_ws_command(ws, cmd: dict):
         with _conversations_lock:
             conv = _conversations.get(conv_id)
         if conv:
-            # Send full conversation but filter out transient status messages
-            filtered_messages = [
-                m for m in conv["messages"]
-                if m.get("type") != "status"
-            ]
-            filtered_conv = {**conv, "messages": filtered_messages}
+            # Send conversation with Context tree
+            tree_data = conv["root_context"]._to_dict() if conv.get("root_context") else {}
             await ws.send_text(json.dumps({
                 "type": "conversation_loaded",
-                "data": filtered_conv,
+                "data": {
+                    "id": conv["id"],
+                    "title": conv["title"],
+                    "context_tree": tree_data,
+                },
             }, default=str))
         else:
-            # Conversation not found on server; tell frontend
             await ws.send_text(json.dumps({
                 "type": "conversation_loaded",
-                "data": {"id": conv_id, "title": "New conversation", "messages": []},
+                "data": {"id": conv_id, "title": "New conversation", "context_tree": {}},
             }, default=str))
 
 
@@ -838,14 +794,16 @@ def create_app():
 
         if parsed["action"] == "run":
             threading.Thread(
-                target=_run_function_in_thread,
-                args=(parsed["function"], parsed["kwargs"], conv_id, msg_id),
+                target=_execute_in_context,
+                args=(conv_id, msg_id, "run"),
+                kwargs={"func_name": parsed["function"], "kwargs": parsed["kwargs"]},
                 daemon=True,
             ).start()
         elif parsed["action"] == "query":
             threading.Thread(
-                target=_run_general_query,
-                args=(parsed["raw"], conv_id, msg_id),
+                target=_execute_in_context,
+                args=(conv_id, msg_id, "query"),
+                kwargs={"query": parsed["raw"]},
                 daemon=True,
             ).start()
 
@@ -861,8 +819,9 @@ def create_app():
         msg_id = str(uuid.uuid4())[:8]
 
         threading.Thread(
-            target=_run_function_in_thread,
-            args=(function_name, kwargs, conv_id, msg_id),
+            target=_execute_in_context,
+            args=(conv_id, msg_id, "run"),
+            kwargs={"func_name": function_name, "kwargs": kwargs},
             daemon=True,
         ).start()
 
