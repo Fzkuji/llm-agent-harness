@@ -43,9 +43,9 @@ import shutil
 PROVIDERS = {
     "claude-code":  ("ClaudeCodeRuntime",  "agentic.providers.claude_code",  "sonnet"),
     "codex":        ("CodexRuntime",       "agentic.providers.codex",        "o4-mini"),
-    "gemini-cli":   ("GeminiCLIRuntime",   "agentic.providers.gemini_cli",   "default"),
-    "anthropic":    ("AnthropicRuntime",    "agentic.providers.anthropic",    "claude-sonnet-4-20250514"),
-    "openai":       ("OpenAIRuntime",       "agentic.providers.openai",       "gpt-4o"),
+    "gemini-cli":   ("GeminiCLIRuntime",   "agentic.providers.gemini_cli",   "gemini-2.5-flash"),
+    "anthropic":    ("AnthropicRuntime",    "agentic.providers.anthropic",    "claude-sonnet-4-6"),
+    "openai":       ("OpenAIRuntime",       "agentic.providers.openai",       "gpt-4.1"),
     "gemini":       ("GeminiRuntime",       "agentic.providers.gemini",       "gemini-2.5-flash"),
 }
 
@@ -74,13 +74,13 @@ def detect_provider() -> tuple[str, str]:
     if shutil.which("codex"):
         return "codex", "o4-mini"
     if shutil.which("gemini"):
-        return "gemini-cli", "default"
+        return "gemini-cli", "gemini-2.5-flash"
 
     # API providers (need keys)
     if os.environ.get("ANTHROPIC_API_KEY"):
-        return "anthropic", "claude-sonnet-4-20250514"
+        return "anthropic", "claude-sonnet-4-6"
     if os.environ.get("OPENAI_API_KEY"):
-        return "openai", "gpt-4o"
+        return "openai", "gpt-4.1"
     if os.environ.get("GOOGLE_API_KEY") or os.environ.get("GOOGLE_GENERATIVE_AI_API_KEY"):
         return "gemini", "gemini-2.5-flash"
 

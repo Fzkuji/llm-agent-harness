@@ -92,6 +92,7 @@ class ClaudeCodeRuntime(Runtime):
         session_id: str = "auto",
         max_turns_per_process: int = 100,
         compact_every: int = 0,
+        tools: str = None,
     ):
         super().__init__(model=model)
         self.timeout = timeout
@@ -101,6 +102,9 @@ class ClaudeCodeRuntime(Runtime):
         self._turn_count = 0
         self._compact_every = compact_every
         self._max_turns = max_turns_per_process
+        self._tools = tools  # e.g. "" for no tools, "Bash" for bash only
+        # Persistent process manages its own context — skip summarize()
+        self.has_session = session_id is not None
 
         if self.cli_path is None:
             raise FileNotFoundError(
@@ -133,6 +137,9 @@ class ClaudeCodeRuntime(Runtime):
 
         if self.model and self.model != "sonnet":
             cmd.extend(["--model", self.model])
+
+        if self._tools is not None:
+            cmd.extend(["--tools", self._tools])
 
         self._proc = subprocess.Popen(
             cmd,

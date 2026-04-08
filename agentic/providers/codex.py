@@ -87,6 +87,9 @@ class CodexRuntime(Runtime):
         else:
             self._session_id = session_id
 
+        # If session is active, CLI manages context — skip summarize()
+        self.has_session = self._session_id is not None
+
         if self.cli_path is None:
             raise FileNotFoundError(
                 "Codex CLI not found. Install it first:\n"

@@ -166,6 +166,7 @@ class GeminiCLIRuntime(Runtime):
             # Capture session_id for future resume
             if "session_id" in data:
                 self._session_id = data["session_id"]
+                self.has_session = True  # CLI now manages context
             self._turn_count += 1
             return data.get("response", raw)
         except (json.JSONDecodeError, KeyError):

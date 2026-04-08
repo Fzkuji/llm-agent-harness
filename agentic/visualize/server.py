@@ -59,25 +59,67 @@ _loop: Optional[asyncio.AbstractEventLoop] = None
 _conversations: dict[str, dict] = {}
 _conversations_lock = threading.Lock()
 
-# Cached runtime (created once, reused)
-_cached_runtime = None
-_cached_provider_name = None
+# Global default provider (used when creating new conversations)
+_default_provider = None
+_default_runtime = None
 _runtime_lock = threading.Lock()
 
+_CLI_PROVIDERS = {"codex", "claude-code", "gemini-cli"}
 
-def _get_runtime(conv_id: str = None, msg_id: str = None):
-    """Get or create a cached runtime instance."""
-    global _cached_runtime
-    if _cached_runtime is not None:
-        return _cached_runtime
-    # Default to codex if available, then API providers
-    _switch_runtime("auto", conv_id, msg_id)
-    return _cached_runtime
+
+def _create_runtime_for_visualizer(provider: str):
+    """Create a runtime appropriate for the visualizer.
+
+    Strategy per provider:
+      - Codex CLI:       session_id=None → stateless, Context tree injects history
+      - Claude Code CLI: default (persistent process), has_session=True → process
+                         manages its own context, summarize() skipped
+      - Gemini CLI:      default → session auto-managed by CLI
+      - API providers:   default → stateless, Context tree injects history
+    """
+    from agentic.providers import create_runtime
+    if provider == "codex":
+        # Codex: disable session, let Context tree manage history
+        return create_runtime(provider=provider, session_id=None)
+    # Claude Code, Gemini CLI, APIs: use default behavior
+    return create_runtime(provider=provider)
+
+
+def _detect_default_provider() -> tuple:
+    """Auto-detect best provider, return (provider_name, runtime)."""
+    for p in ("codex", "claude-code", "gemini-cli", "gemini", "anthropic", "openai"):
+        try:
+            rt = _create_runtime_for_visualizer(p)
+            return p, rt
+        except Exception:
+            continue
+    raise RuntimeError("No provider available")
+
+
+def _get_conv_runtime(conv_id: str, msg_id: str = None):
+    """Get runtime for a conversation, creating if needed."""
+    global _default_provider, _default_runtime
+
+    conv = _conversations.get(conv_id)
+    if conv and conv.get("runtime"):
+        return conv["runtime"]
+
+    # Initialize default if needed
+    with _runtime_lock:
+        if _default_runtime is None:
+            _default_provider, _default_runtime = _detect_default_provider()
+
+    # Create runtime for this conversation using default provider
+    rt = _create_runtime_for_visualizer(_default_provider)
+    if conv:
+        conv["runtime"] = rt
+        conv["provider_name"] = _default_provider
+    return rt
 
 
 def _switch_runtime(provider: str, conv_id: str = None, msg_id: str = None):
-    """Switch to a different runtime provider."""
-    global _cached_runtime, _cached_provider_name
+    """Switch provider. Updates current conversation + global default."""
+    global _default_provider, _default_runtime
 
     with _runtime_lock:
         if conv_id and msg_id:
@@ -86,23 +128,11 @@ def _switch_runtime(provider: str, conv_id: str = None, msg_id: str = None):
                 "content": f"Switching to {provider}...",
             })
 
-        from agentic.providers import create_runtime
-
         try:
             if provider == "auto":
-                # Try CLI first (codex), then API
-                for p in ("codex", "claude-code", "gemini-cli", "gemini", "anthropic", "openai"):
-                    try:
-                        _cached_runtime = create_runtime(provider=p)
-                        _cached_provider_name = p
-                        break
-                    except Exception:
-                        continue
-                if _cached_runtime is None:
-                    raise RuntimeError("No provider available")
+                name, rt = _detect_default_provider()
             else:
-                _cached_runtime = create_runtime(provider=provider)
-                _cached_provider_name = provider
+                name, rt = provider, _create_runtime_for_visualizer(provider)
         except Exception as e:
             if conv_id and msg_id:
                 _broadcast_chat_response(conv_id, msg_id, {
@@ -111,19 +141,95 @@ def _switch_runtime(provider: str, conv_id: str = None, msg_id: str = None):
                 })
             raise
 
-        info = f"{type(_cached_runtime).__name__} ({_cached_provider_name}: {_cached_runtime.model})"
+        # Update global default
+        _default_provider = name
+        _default_runtime = rt
+
+        # Update current conversation's runtime
+        if conv_id:
+            with _conversations_lock:
+                conv = _conversations.get(conv_id)
+            if conv:
+                conv["runtime"] = _create_runtime_for_visualizer(name)
+                conv["provider_name"] = name
+
         if conv_id and msg_id:
             _broadcast_chat_response(conv_id, msg_id, {
                 "type": "status",
-                "content": f"Using {info}",
+                "content": f"Using {name} ({rt.model})",
             })
-        # Broadcast provider change to all clients
+
+        # Broadcast to all clients
         _broadcast(json.dumps({
             "type": "provider_changed",
-            "data": {"provider": _cached_provider_name, "runtime": type(_cached_runtime).__name__, "model": _cached_runtime.model},
+            "data": _get_provider_info(conv_id),
         }))
 
-        return _cached_runtime
+        return rt
+
+
+def _get_provider_info(conv_id: str = None) -> dict:
+    """Get provider info. If conv_id given, return that conversation's provider."""
+    provider_name = _default_provider
+    runtime = _default_runtime
+
+    if conv_id:
+        with _conversations_lock:
+            conv = _conversations.get(conv_id)
+        if conv and conv.get("runtime"):
+            runtime = conv["runtime"]
+            provider_name = conv.get("provider_name", _default_provider)
+
+    if runtime is None:
+        return {"provider": None, "type": None, "model": None, "runtime": None}
+
+    provider_type = "CLI" if provider_name in _CLI_PROVIDERS else "API"
+    return {
+        "provider": provider_name,
+        "type": provider_type,
+        "model": runtime.model,
+        "runtime": type(runtime).__name__,
+    }
+
+
+_CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".agentic", "config.json")
+
+
+def _load_config() -> dict:
+    """Load config from ~/.agentic/config.json."""
+    try:
+        with open(_CONFIG_PATH) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _save_config(config: dict):
+    """Save config to ~/.agentic/config.json."""
+    os.makedirs(os.path.dirname(_CONFIG_PATH), exist_ok=True)
+    with open(_CONFIG_PATH, "w") as f:
+        json.dump(config, f, indent=2)
+
+
+def _get_api_key(env_var: str) -> str:
+    """Get API key from environment or config file."""
+    val = os.environ.get(env_var)
+    if val:
+        return val
+    config = _load_config()
+    return config.get("api_keys", {}).get(env_var, "")
+
+
+def _apply_config_keys():
+    """Inject config file API keys into environment (if not already set)."""
+    config = _load_config()
+    for env_var, val in config.get("api_keys", {}).items():
+        if val and not os.environ.get(env_var):
+            os.environ[env_var] = val
+
+
+# Apply config keys on module load
+_apply_config_keys()
 
 
 def _list_providers() -> list[dict]:
@@ -131,20 +237,24 @@ def _list_providers() -> list[dict]:
     import shutil
     result = []
     checks = [
-        ("codex", "Codex CLI", lambda: shutil.which("codex") is not None),
-        ("claude-code", "Claude Code CLI", lambda: shutil.which("claude") is not None),
-        ("gemini-cli", "Gemini CLI", lambda: shutil.which("gemini") is not None),
-        ("anthropic", "Anthropic API", lambda: bool(os.environ.get("ANTHROPIC_API_KEY"))),
-        ("openai", "OpenAI API", lambda: bool(os.environ.get("OPENAI_API_KEY"))),
-        ("gemini", "Gemini API", lambda: bool(os.environ.get("GOOGLE_API_KEY") or os.environ.get("GOOGLE_GENERATIVE_AI_API_KEY"))),
+        # (name, label, available_check, env_keys_for_config_or_None_if_CLI)
+        ("codex", "Codex CLI", lambda: shutil.which("codex") is not None, None),
+        ("claude-code", "Claude Code CLI", lambda: shutil.which("claude") is not None, None),
+        ("gemini-cli", "Gemini CLI", lambda: shutil.which("gemini") is not None, None),
+        ("anthropic", "Anthropic API", lambda: bool(_get_api_key("ANTHROPIC_API_KEY")), ["ANTHROPIC_API_KEY"]),
+        ("openai", "OpenAI API", lambda: bool(_get_api_key("OPENAI_API_KEY")), ["OPENAI_API_KEY"]),
+        ("gemini", "Gemini API", lambda: bool(_get_api_key("GOOGLE_API_KEY") or _get_api_key("GOOGLE_GENERATIVE_AI_API_KEY")), ["GOOGLE_API_KEY"]),
     ]
-    for name, label, check in checks:
+    for name, label, check, env_keys in checks:
         available = check()
         result.append({
             "name": name,
             "label": label,
             "available": available,
-            "active": name == _cached_provider_name,
+            "active": name == _default_provider,
+            "configurable": env_keys is not None,
+            "configured": available if env_keys else None,
+            "env_keys": env_keys,
         })
     return result
 
@@ -395,7 +505,9 @@ def _get_or_create_conversation(conv_id: str = None) -> dict:
             _conversations[conv_id] = {
                 "id": conv_id,
                 "title": "New conversation",
-                "root_context": Context(name="chat_session", status="running", start_time=time.time()),
+                "root_context": Context(name="chat_session", status="idle", start_time=time.time()),
+                "runtime": None,          # created lazily on first message
+                "provider_name": None,
                 "created_at": time.time(),
             }
         return _conversations[conv_id]
@@ -411,7 +523,10 @@ def _execute_in_context(conv_id: str, msg_id: str, action: str,
     try:
         conv = _get_or_create_conversation(conv_id)
         root_ctx = conv["root_context"]
-        runtime = _get_runtime(conv_id=conv_id, msg_id=msg_id)
+        runtime = _get_conv_runtime(conv_id, msg_id=msg_id)
+
+        # Mark conversation as running
+        root_ctx.status = "running"
 
         # Set the conversation root as the current context so that
         # @agentic_function calls become children of this root
@@ -479,6 +594,7 @@ def _execute_in_context(conv_id: str, msg_id: str, action: str,
 
         finally:
             _current_ctx.reset(token)
+            root_ctx.status = "idle"
 
         # Update conversation title from first user message
         if not conv.get("_titled"):
@@ -628,6 +744,10 @@ async def _websocket_handler(ws):
         await ws.send_text(json.dumps(
             {"type": "history_list", "data": history}, default=str
         ))
+        # Send current provider info
+        await ws.send_text(json.dumps(
+            {"type": "provider_info", "data": _get_provider_info()}, default=str
+        ))
 
         # Keep alive — receive pings/messages
         while True:
@@ -703,7 +823,7 @@ async def _handle_ws_command(ws, cmd: dict):
         with _conversations_lock:
             conv = _conversations.get(conv_id)
         if conv:
-            # Send conversation with Context tree
+            # Send conversation with Context tree + provider info
             tree_data = conv["root_context"]._to_dict() if conv.get("root_context") else {}
             await ws.send_text(json.dumps({
                 "type": "conversation_loaded",
@@ -711,12 +831,18 @@ async def _handle_ws_command(ws, cmd: dict):
                     "id": conv["id"],
                     "title": conv["title"],
                     "context_tree": tree_data,
+                    "provider_info": _get_provider_info(conv_id),
                 },
             }, default=str))
         else:
             await ws.send_text(json.dumps({
                 "type": "conversation_loaded",
-                "data": {"id": conv_id, "title": "New conversation", "context_tree": {}},
+                "data": {
+                    "id": conv_id,
+                    "title": "New conversation",
+                    "context_tree": {},
+                    "provider_info": _get_provider_info(),
+                },
             }, default=str))
 
 
@@ -734,9 +860,35 @@ def create_app():
     # Serve the HTML frontend
     @app.get("/", response_class=HTMLResponse)
     async def index():
+        from starlette.responses import Response
         html_path = os.path.join(os.path.dirname(__file__), "static", "index.html")
         with open(html_path) as f:
-            return HTMLResponse(content=f.read())
+            content = f.read()
+        return Response(
+            content=content,
+            media_type="text/html",
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
+
+    @app.get("/config", response_class=HTMLResponse)
+    async def config_page():
+        from starlette.responses import Response
+        html_path = os.path.join(os.path.dirname(__file__), "static", "config.html")
+        with open(html_path) as f:
+            content = f.read()
+        return Response(
+            content=content,
+            media_type="text/html",
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
 
     # WebSocket — use Starlette's raw WebSocketRoute to avoid FastAPI routing issues
     from starlette.routing import WebSocketRoute
@@ -848,12 +1000,161 @@ def create_app():
         return JSONResponse(content=_list_providers())
 
     @app.post("/api/provider/{name}")
-    async def switch_provider(name: str):
+    async def switch_provider(name: str, body: dict = None):
+        conv_id = body.get("conv_id") if body else None
+        # Check if already active for this conversation
+        if conv_id:
+            with _conversations_lock:
+                conv = _conversations.get(conv_id)
+            if conv and conv.get("provider_name") == name:
+                return JSONResponse(content={"switched": False, "already_active": True, "provider": name})
+        elif name == _default_provider:
+            return JSONResponse(content={"switched": False, "already_active": True, "provider": name})
         try:
-            _switch_runtime(name)
+            _switch_runtime(name, conv_id=conv_id)
             return JSONResponse(content={"switched": True, "provider": name})
         except Exception as e:
             return JSONResponse(content={"error": str(e)}, status_code=400)
+
+    @app.get("/api/models")
+    async def list_models():
+        """List available models for the current provider."""
+        # Models per provider (newest first)
+        models = {
+            "codex": ["o3-pro", "o3", "o4-mini", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"],
+            "claude-code": ["sonnet", "opus", "haiku"],
+            "gemini-cli": ["gemini-3.1-pro", "gemini-3-flash", "gemini-2.5-pro", "gemini-2.5-flash"],
+            "anthropic": [
+                "claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5",
+            ],
+            "openai": ["o3-pro", "o3", "o4-mini", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"],
+            "gemini": ["gemini-3.1-pro", "gemini-3.1-flash-lite", "gemini-3-flash", "gemini-2.5-pro", "gemini-2.5-flash"],
+        }
+        conv_id = None  # Could be passed as query param in future
+        provider = _default_provider or "unknown"
+        current_model = _default_runtime.model if _default_runtime else "default"
+
+        # Check conversation-specific runtime
+        if conv_id:
+            with _conversations_lock:
+                conv = _conversations.get(conv_id)
+            if conv and conv.get("runtime"):
+                current_model = conv["runtime"].model
+                provider = conv.get("provider_name", provider)
+
+        model_list = models.get(provider, [])
+        # Ensure current model is in the list
+        if current_model and current_model not in model_list:
+            model_list = [current_model] + model_list
+
+        return JSONResponse(content={
+            "provider": provider,
+            "current": current_model,
+            "models": model_list,
+        })
+
+    @app.post("/api/model")
+    async def switch_model(body: dict = None):
+        """Switch model for the current conversation's runtime."""
+        if not body or "model" not in body:
+            return JSONResponse(content={"error": "Missing model"}, status_code=400)
+        model = body["model"].strip()
+        conv_id = body.get("conv_id")
+        if conv_id:
+            with _conversations_lock:
+                conv = _conversations.get(conv_id)
+            if conv and conv.get("runtime"):
+                conv["runtime"].model = model
+                info = _get_provider_info(conv_id)
+                _broadcast(json.dumps({"type": "provider_changed", "data": info}))
+                return JSONResponse(content={"switched": True, "model": model})
+        # Update default runtime
+        if _default_runtime:
+            _default_runtime.model = model
+            info = _get_provider_info()
+            _broadcast(json.dumps({"type": "provider_changed", "data": info}))
+            return JSONResponse(content={"switched": True, "model": model})
+        return JSONResponse(content={"error": "No active runtime"}, status_code=400)
+
+    @app.get("/api/config")
+    async def get_config():
+        """Get current API key configuration (masked)."""
+        config = _load_config()
+        keys = config.get("api_keys", {})
+        # Mask values: show first 8 chars + "..."
+        masked = {k: (v[:8] + "..." if len(v) > 8 else "***") for k, v in keys.items() if v}
+        return JSONResponse(content={"api_keys": masked})
+
+    @app.post("/api/config")
+    async def save_config(body: dict = None):
+        """Save pre-verified API keys to config file and apply to environment."""
+        if not body or "api_keys" not in body:
+            return JSONResponse(content={"error": "Missing api_keys"}, status_code=400)
+        config = _load_config()
+        if "api_keys" not in config:
+            config["api_keys"] = {}
+        for key, val in body["api_keys"].items():
+            val = val.strip()
+            if val:
+                config["api_keys"][key] = val
+                os.environ[key] = val
+            else:
+                config["api_keys"].pop(key, None)
+                os.environ.pop(key, None)
+        _save_config(config)
+        return JSONResponse(content={"saved": True})
+
+
+    def _validate_api_key(env_var: str, value: str) -> str | None:
+        """Validate an API key by making a lightweight test call. Returns error string or None."""
+        try:
+            if env_var == "OPENAI_API_KEY":
+                import openai
+                client = openai.OpenAI(api_key=value)
+                client.models.list()
+                return None
+            elif env_var == "ANTHROPIC_API_KEY":
+                import anthropic
+                client = anthropic.Anthropic(api_key=value)
+                client.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=1,
+                    messages=[{"role": "user", "content": "hi"}],
+                )
+                return None
+            elif env_var in ("GOOGLE_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY"):
+                import google.generativeai as genai
+                genai.configure(api_key=value)
+                # Try models in order until one works
+                for m in ("gemini-2.5-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash"):
+                    try:
+                        model = genai.GenerativeModel(m)
+                        model.generate_content("hi", generation_config={"max_output_tokens": 1})
+                        return None
+                    except Exception:
+                        continue
+                # Last resort: list models to verify key is valid
+                list(genai.list_models())
+                return None
+            else:
+                return None  # Unknown key type, skip validation
+        except Exception as e:
+            return str(e)
+
+    @app.post("/api/config/verify")
+    async def verify_key(body: dict = None):
+        """Verify a single API key without saving."""
+        if not body or "env" not in body:
+            return JSONResponse(content={"error": "Missing env"}, status_code=400)
+        value = body.get("value", "")
+        # If masked value, use the stored real key
+        if not value or value.endswith("..."):
+            config = _load_config()
+            value = config.get("api_keys", {}).get(body["env"], "")
+        if not value:
+            return JSONResponse(content={"valid": False, "error": "No key provided"})
+        error = _validate_api_key(body["env"], value)
+        return JSONResponse(content={"valid": error is None, "error": error})
 
     @app.get("/api/node/{path:path}")
     async def get_node(path: str):

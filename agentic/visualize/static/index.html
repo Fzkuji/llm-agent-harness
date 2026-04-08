@@ -334,8 +334,8 @@ html, body {
 
 .status-badge {
   font-size: 11px;
-  padding: 2px 10px;
-  border-radius: 10px;
+  padding: 2px 8px;
+  border-radius: 3px;
   background: rgba(97, 175, 239, 0.12);
   color: var(--accent-blue);
   border: 1px solid rgba(97, 175, 239, 0.25);
@@ -524,6 +524,14 @@ html, body {
   flex-shrink: 0;
 }
 
+.system-message {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 6px 0;
+  opacity: 0.7;
+}
+
 /* Typing indicator (three bouncing dots) */
 .typing-indicator {
   display: flex;
@@ -550,11 +558,45 @@ html, body {
 .runtime-badge {
   font-size: 11px;
   padding: 2px 8px;
-  border-radius: 8px;
-  background: rgba(152,195,121,0.1);
+  border-radius: 3px;
+  background: rgba(152,195,121,0.12);
   color: var(--accent-green);
-  border: 1px solid rgba(152,195,121,0.2);
+  border: 1px solid rgba(152,195,121,0.25);
   white-space: nowrap;
+}
+.runtime-badge.model {
+  background: rgba(198,120,221,0.12);
+  color: var(--accent-purple);
+  border-color: rgba(198,120,221,0.25);
+  cursor: pointer;
+}
+.runtime-badge.model:hover {
+  background: rgba(198,120,221,0.2);
+}
+.model-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  z-index: 100;
+}
+.model-dropdown .runtime-badge.model {
+  background: rgba(75,82,99,0.3);
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+.model-dropdown .runtime-badge.model:hover {
+  color: var(--accent-purple);
+  border-color: rgba(198,120,221,0.3);
+  background: rgba(198,120,221,0.1);
+}
+.model-dropdown .runtime-badge.model.active {
+  color: var(--accent-purple);
+  background: rgba(198,120,221,0.12);
+  border-color: rgba(198,120,221,0.25);
 }
 
 /* Context tree card (inline in chat) */
@@ -625,10 +667,21 @@ html, body {
   display: flex;
   flex-direction: column;
   align-items: center;
+  color: var(--text-secondary);
+  padding: 40px 40px 0;
+}
+.welcome-top {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   justify-content: center;
   gap: 16px;
-  color: var(--text-secondary);
-  padding: 40px;
+}
+.welcome-bottom {
+  padding-top: 16px;
+  margin-bottom: 0;
+  flex-shrink: 0;
 }
 
 .welcome-logo {
@@ -679,7 +732,7 @@ html, body {
 
 /* Input area */
 .input-area {
-  padding: 16px 24px 20px;
+  padding: 12px 24px 12px;
   border-top: 1px solid var(--border);
   background: var(--bg-primary);
   flex-shrink: 0;
@@ -979,10 +1032,16 @@ html, body {
 .provider-item { display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-radius: var(--radius); cursor: pointer; font-size: 12px; color: var(--text-secondary); transition: all var(--transition); }
 .provider-item:hover { background: var(--bg-hover); color: var(--text-primary); }
 .provider-item.active { color: var(--accent-green); }
-.provider-item.unavailable { opacity: 0.4; cursor: default; }
+.provider-item.unavailable { opacity: 0.4; cursor: pointer; }
 .provider-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); flex-shrink: 0; }
 .provider-item.active .provider-dot { background: var(--accent-green); }
 .provider-item.available .provider-dot { background: var(--accent-blue); }
+.provider-type-tag { font-size: 10px; color: var(--text-primary); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
+.provider-item.active .provider-type-tag { color: var(--accent-green); }
+.provider-name { flex: 1; }
+.config-badge { font-size: 9px; padding: 1px 5px; border-radius: 3px; text-decoration: none; background: rgba(75,82,99,0.3); color: var(--text-muted); border: 1px solid var(--border); transition: all 0.2s; cursor: pointer; }
+.config-badge.configured { background: rgba(97,175,239,0.12); color: var(--accent-blue); border-color: rgba(97,175,239,0.3); }
+.config-badge:hover { border-color: var(--accent-blue); color: var(--accent-blue); }
 
 /* Running node pulse animation */
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
@@ -1040,7 +1099,8 @@ html, body {
       <div class="topbar-left">
         <button class="menu-btn" id="menuBtn" onclick="toggleSidebar()">&#9776;</button>
         <span id="statusBadge" class="status-badge">connecting...</span>
-        <span id="runtimeBadge" class="runtime-badge" style="display:none"></span>
+        <span id="providerBadge" class="runtime-badge" style="display:none"></span>
+        <span id="modelBadge" class="runtime-badge model" style="display:none"></span>
       </div>
       <div class="topbar-right">
         <button id="btnPause" class="btn btn-pause" onclick="togglePause()">Pause</button>
@@ -1053,16 +1113,20 @@ html, body {
       <div class="chat-messages" id="chatMessages">
         <!-- Welcome screen (shown when no messages) -->
         <div class="welcome" id="welcomeScreen">
-          <div class="welcome-logo">{ }</div>
-          <div class="welcome-title">Agentic Programming</div>
-          <div class="welcome-text">
-            Run agentic functions, create new ones, or ask questions.
-            Type a command or natural language below.
+          <div class="welcome-top">
+            <div class="welcome-logo">{ }</div>
+            <div class="welcome-title">Agentic Programming</div>
+            <div class="welcome-text">
+              Run agentic functions, create new ones, or ask questions.
+              Type a command or natural language below.
+            </div>
           </div>
-          <div class="welcome-examples">
-            <div class="welcome-example" onclick="setInput('run word_count text=&quot;Hello world&quot;')">run word_count text="Hello world"</div>
-            <div class="welcome-example" onclick="setInput('run sentiment text=&quot;I love this product&quot;')">run sentiment</div>
-            <div class="welcome-example" onclick="setInput('create a function that extracts emails from text --name extract_emails')">create a function</div>
+          <div class="welcome-bottom">
+            <div class="welcome-examples">
+              <div class="welcome-example" onclick="setInput('run word_count text=&quot;Hello world&quot;')">run word_count text="Hello world"</div>
+              <div class="welcome-example" onclick="setInput('run sentiment text=&quot;I love this product&quot;')">run sentiment</div>
+              <div class="welcome-example" onclick="setInput('create a function that extracts emails from text --name extract_emails')">create a function</div>
+            </div>
           </div>
         </div>
       </div>
@@ -1125,7 +1189,7 @@ function connect() {
       const msg = JSON.parse(e.data);
       handleMessage(msg);
     } catch(err) {
-      console.error('[ws.onmessage] error:', err, 'data:', e.data.substring(0, 200));
+      console.error('[ws.onmessage] error:', err);
     }
   };
 
@@ -1175,8 +1239,13 @@ function handleMessage(msg) {
       isPaused = msg.paused;
       updatePauseBtn();
       break;
+    case 'provider_info':
     case 'provider_changed':
+      updateProviderBadge(msg.data);
       loadProviders();
+      if (msg.type === 'provider_changed') {
+        addSystemMessage('Switched to ' + formatProviderLabel(msg.data));
+      }
       break;
     case 'pong':
       break;
@@ -1248,38 +1317,38 @@ function mergeChildren(existing, incoming) {
 
 // ===== Chat =====
 function sendMessage() {
-  try {
-    const input = document.getElementById('chatInput');
-    const text = input.value.trim();
-    if (!text) return;
+  const input = document.getElementById('chatInput');
+  const text = input.value.trim();
+  if (!text) return;
 
-    // Hide welcome
-    const welcome = document.getElementById('welcomeScreen');
-    if (welcome) welcome.style.display = 'none';
+  // Hide welcome
+  const welcome = document.getElementById('welcomeScreen');
+  if (welcome) welcome.style.display = 'none';
 
-    // Add user message to UI
-    addUserMessage(text);
-    input.value = '';
-    autoResize(input);
+  // Add user message to UI
+  addUserMessage(text);
+  input.value = '';
+  autoResize(input);
 
-    // Send to server
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({
-        action: 'chat',
-        text: text,
-        conv_id: currentConvId
-      }));
-      console.log('[sendMessage] sent:', text);
-    } else {
-      console.error('[sendMessage] WebSocket not connected, state:', ws ? ws.readyState : 'null');
-    }
-
-    // Add a pending assistant message placeholder
-    const msgId = 'pending_' + Date.now();
-    addAssistantPlaceholder(msgId);
-  } catch(e) {
-    console.error('[sendMessage] error:', e);
+  // Send to server
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({
+      action: 'chat',
+      text: text,
+      conv_id: currentConvId
+    }));
+  } else {
+    const container = document.getElementById('chatMessages');
+    const errDiv = document.createElement('div');
+    errDiv.className = 'message assistant';
+    errDiv.innerHTML = '<div class="error-content">WebSocket disconnected. Reconnecting...</div>';
+    container.appendChild(errDiv);
+    return;
   }
+
+  // Add a pending assistant message placeholder
+  const msgId = 'pending_' + Date.now();
+  addAssistantPlaceholder(msgId);
 }
 
 function addUserMessage(text) {
@@ -1297,6 +1366,7 @@ function addUserMessage(text) {
 
   // Store
   if (currentConvId && conversations[currentConvId]) {
+    if (!conversations[currentConvId].messages) conversations[currentConvId].messages = [];
     conversations[currentConvId].messages.push({ role: 'user', content: text });
   }
 }
@@ -1332,16 +1402,6 @@ function handleChatResponse(data) {
     }
     statusLine.innerHTML = '<div class="spinner-sm"></div> ' + escHtml(data.content);
     scrollToBottom();
-
-    // Extract runtime info for the badge
-    const content = data.content || '';
-    if (content.startsWith('Using ')) {
-      const badge = document.getElementById('runtimeBadge');
-      if (badge) {
-        badge.textContent = content.replace('...', '');
-        badge.style.display = '';
-      }
-    }
     return;
   }
 
@@ -1395,6 +1455,17 @@ function handleChatResponse(data) {
     contentHtml;
 
   scrollToBottom();
+
+  // Store assistant message
+  if (currentConvId && conversations[currentConvId]) {
+    if (!conversations[currentConvId].messages) conversations[currentConvId].messages = [];
+    conversations[currentConvId].messages.push({
+      role: 'assistant',
+      content: data.content || '',
+      type: type,
+      function: data.function || null,
+    });
+  }
 
   // Update conversation title
   if (currentConvId && conversations[currentConvId]) {
@@ -1710,11 +1781,53 @@ function switchConversation(convId) {
 }
 
 function loadConversationData(data) {
+  // Extract messages from context_tree if no messages stored locally
+  if (!data.messages || data.messages.length === 0) {
+    data.messages = extractMessagesFromTree(data.context_tree);
+  }
   conversations[data.id] = data;
   renderConversations();
   if (data.id === currentConvId) {
     renderConversationMessages(data);
+    // Update provider badge for this conversation
+    if (data.provider_info) {
+      updateProviderBadge(data.provider_info);
+    }
   }
+}
+
+function extractMessagesFromTree(tree) {
+  if (!tree || !tree.children) return [];
+  const messages = [];
+  for (const child of tree.children) {
+    if (child.name === '_chat_query') {
+      const query = child.params && child.params.query;
+      if (query) {
+        messages.push({ role: 'user', content: query });
+      }
+      if (child.output) {
+        messages.push({ role: 'assistant', content: child.output, type: 'result', function: null });
+      }
+    } else if (child.name === '_run_user_function') {
+      const funcName = child.params && child.params.func_name;
+      const kwargs = child.params && child.params.kwargs;
+      const argStr = kwargs ? Object.entries(kwargs).map(([k,v]) => k + '=' + JSON.stringify(v)).join(' ') : '';
+      messages.push({ role: 'user', content: 'run ' + (funcName || '') + (argStr ? ' ' + argStr : '') });
+      if (child.output) {
+        messages.push({ role: 'assistant', content: child.output, type: 'result', function: funcName });
+      }
+    }
+  }
+  // Attach full context tree to the last assistant message
+  if (messages.length > 0) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'assistant') {
+        messages[i].context_tree = tree;
+        break;
+      }
+    }
+  }
+  return messages;
 }
 
 function renderConversationMessages(conv) {
@@ -1788,13 +1901,17 @@ function newConversation() {
   welcome.className = 'welcome';
   welcome.id = 'welcomeScreen';
   welcome.innerHTML =
-    '<div class="welcome-logo">{ }</div>' +
-    '<div class="welcome-title">Agentic Programming</div>' +
-    '<div class="welcome-text">Run agentic functions, create new ones, or ask questions. Type a command or natural language below.</div>' +
-    '<div class="welcome-examples">' +
-      '<div class="welcome-example" onclick="setInput(\'run word_count text=&quot;Hello world&quot;\')">run word_count text="Hello world"</div>' +
-      '<div class="welcome-example" onclick="setInput(\'run sentiment text=&quot;I love this product&quot;\')">run sentiment</div>' +
-      '<div class="welcome-example" onclick="setInput(\'create a function that extracts emails from text --name extract_emails\')">create a function</div>' +
+    '<div class="welcome-top">' +
+      '<div class="welcome-logo">{ }</div>' +
+      '<div class="welcome-title">Agentic Programming</div>' +
+      '<div class="welcome-text">Run agentic functions, create new ones, or ask questions. Type a command or natural language below.</div>' +
+    '</div>' +
+    '<div class="welcome-bottom">' +
+      '<div class="welcome-examples">' +
+        '<div class="welcome-example" onclick="setInput(\'run word_count text=&quot;Hello world&quot;\')">run word_count text="Hello world"</div>' +
+        '<div class="welcome-example" onclick="setInput(\'run sentiment text=&quot;I love this product&quot;\')">run sentiment</div>' +
+        '<div class="welcome-example" onclick="setInput(\'create a function that extracts emails from text --name extract_emails\')">create a function</div>' +
+      '</div>' +
     '</div>';
   container.appendChild(welcome);
   renderConversations();
@@ -1949,6 +2066,106 @@ function togglePanel(name) {
   });
 })();
 
+// ===== Provider Info =====
+
+function formatProviderLabel(info) {
+  if (!info || !info.provider) return 'No provider';
+  const parts = [info.provider];
+  if (info.type) parts.push(info.type);
+  if (info.model) parts.push(info.model);
+  return parts.join(' · ');
+}
+
+function updateProviderBadge(info) {
+  const provBadge = document.getElementById('providerBadge');
+  if (!provBadge) return;
+  if (!info || !info.provider) {
+    provBadge.style.display = 'none';
+    return;
+  }
+  provBadge.textContent = info.provider + (info.type ? ' · ' + info.type : '');
+  provBadge.style.display = '';
+  loadModelPills();
+}
+
+let _modelList = [];
+let _currentModel = '';
+
+async function loadModelPills() {
+  try {
+    const resp = await fetch('/api/models');
+    const data = await resp.json();
+    _modelList = data.models || [];
+    _currentModel = data.current || '';
+  } catch(e) {}
+  const badge = document.getElementById('modelBadge');
+  if (!badge) return;
+  if (!_currentModel) { badge.style.display = 'none'; return; }
+  badge.textContent = _currentModel;
+  badge.style.display = '';
+  badge.onclick = toggleModelDropdown;
+}
+
+function toggleModelDropdown() {
+  const badge = document.getElementById('modelBadge');
+  const existing = document.getElementById('modelDropdown');
+  if (existing) { existing.remove(); return; }
+
+  const dropdown = document.createElement('div');
+  dropdown.id = 'modelDropdown';
+  dropdown.className = 'model-dropdown';
+  // position handled by CSS
+
+  _modelList.forEach(m => {
+    const item = document.createElement('span');
+    item.className = 'runtime-badge model' + (m === _currentModel ? ' active' : '');
+    item.textContent = m;
+    item.style.cursor = 'pointer';
+    item.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (m === _currentModel) { dropdown.remove(); return; }
+      try {
+        const resp = await fetch('/api/model', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: m, conv_id: currentConvId }),
+        });
+        const data = await resp.json();
+        if (data.switched) {
+          _currentModel = m;
+          badge.textContent = m;
+        }
+      } catch(err) {}
+      dropdown.remove();
+    });
+    dropdown.appendChild(item);
+  });
+
+  badge.style.position = 'relative';
+  badge.appendChild(dropdown);
+
+  const close = (e) => {
+    if (!badge.contains(e.target)) {
+      dropdown.remove();
+      document.removeEventListener('click', close);
+    }
+  };
+  setTimeout(() => document.addEventListener('click', close), 0);
+}
+
+function addSystemMessage(text) {
+  const container = document.getElementById('chatMessages');
+  if (!container) return;
+  // Don't add system messages when welcome screen is showing
+  const welcome = document.getElementById('welcomeScreen');
+  if (welcome && welcome.style.display !== 'none') return;
+  const div = document.createElement('div');
+  div.className = 'system-message';
+  div.textContent = text;
+  container.appendChild(div);
+  scrollToBottom();
+}
+
 // ===== Provider Switching =====
 
 async function loadProviders() {
@@ -1964,16 +2181,31 @@ function renderProviders(providers) {
   if (!el) return;
   el.innerHTML = providers.map(p => {
     const cls = p.active ? 'provider-item active' : (p.available ? 'provider-item available' : 'provider-item unavailable');
-    return '<div class="' + cls + '" onclick="' + (p.available ? "switchProvider('" + p.name + "')" : '') + '" title="' + escAttr(p.label) + '">' +
+    const typeTag = p.configurable ? 'API' : 'CLI';
+    // Click row to switch (only if available and not already active)
+    const clickAction = (p.available && !p.active) ? "switchProvider('" + p.name + "')" : "";
+    // Config badge for all providers
+    const isConfigured = p.configurable ? p.configured : p.available;
+    const badgeCls = isConfigured ? 'config-badge configured' : 'config-badge';
+    const badgeText = isConfigured ? 'Configured' : 'Set up';
+    const configBadge = '<a class="' + badgeCls + '" href="/config" target="_blank" onclick="event.stopPropagation()" title="Configure">' + badgeText + '</a>';
+
+    return '<div class="' + cls + '" onclick="' + clickAction + '" title="' + escAttr(p.label) + '">' +
       '<span class="provider-dot"></span>' +
-      '<span>' + escHtml(p.name) + '</span>' +
+      '<span class="provider-type-tag">' + typeTag + '</span>' +
+      '<span class="provider-name">' + escHtml(p.name) + '</span>' +
+      configBadge +
     '</div>';
   }).join('');
 }
 
 async function switchProvider(name) {
   try {
-    const resp = await fetch('/api/provider/' + encodeURIComponent(name), { method: 'POST' });
+    const resp = await fetch('/api/provider/' + encodeURIComponent(name), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conv_id: currentConvId }),
+    });
     const data = await resp.json();
     if (data.switched) {
       loadProviders();

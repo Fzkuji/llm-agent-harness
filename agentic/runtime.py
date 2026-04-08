@@ -67,6 +67,7 @@ class Runtime:
         self._call_fn = call
         self.model = model
         self.max_retries = max_retries
+        self.has_session = False  # Subclasses set True if they manage their own context
 
     def exec(
         self,
@@ -112,7 +113,8 @@ class Runtime:
             )
 
         # --- Read: auto-generate context from the tree ---
-        if context is None and ctx is not None:
+        # Skip if runtime manages its own session (e.g. CLI with resume)
+        if context is None and ctx is not None and not self.has_session:
             if ctx._summarize_kwargs:
                 context = ctx.summarize(**ctx._summarize_kwargs)
             else:
@@ -163,7 +165,7 @@ class Runtime:
                 f"Split into separate @agentic_function calls."
             )
 
-        if context is None and ctx is not None:
+        if context is None and ctx is not None and not self.has_session:
             if ctx._summarize_kwargs:
                 context = ctx.summarize(**ctx._summarize_kwargs)
             else:
