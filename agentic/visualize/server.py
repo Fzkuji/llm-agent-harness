@@ -496,15 +496,25 @@ def _run_general_query(query: str, conv_id: str, msg_id: str):
             conv = _conversations.get(conv_id)
             if conv and conv["messages"]:
                 recent = [m for m in conv["messages"]
-                          if m.get("type") != "status"][-10:]  # last 10 messages
+                          if m.get("type") != "status"][-20:]
                 history_lines = []
                 for m in recent:
                     role = m.get("role", "user")
                     content = m.get("content", "")
-                    if content and len(content) < 500:
-                        history_lines.append(f"{role}: {content}")
+                    if not content:
+                        continue
+                    # Truncate very long outputs
+                    if len(content) > 800:
+                        content = content[:800] + "..."
+                    if role == "user":
+                        history_lines.append(f"User: {content}")
+                    elif m.get("function") and m.get("function") != "llm_query":
+                        # Function execution result — include function name
+                        history_lines.append(f"System: [ran {m['function']}()] → {content}")
+                    else:
+                        history_lines.append(f"Assistant: {content}")
                 if history_lines:
-                    history_prompt = "Previous conversation:\n" + "\n".join(history_lines) + "\n\n"
+                    history_prompt = "Conversation so far:\n" + "\n".join(history_lines) + "\n\n"
 
         # Always inject chat history so the LLM sees our web UI context,
         # regardless of provider type (CLI session context != our chat context)
