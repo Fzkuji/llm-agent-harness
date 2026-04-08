@@ -57,6 +57,23 @@ _loop: Optional[asyncio.AbstractEventLoop] = None
 _conversations: dict[str, dict] = {}
 _conversations_lock = threading.Lock()
 
+# Cached runtime (created once, reused)
+_cached_runtime = None
+_runtime_lock = threading.Lock()
+
+
+def _get_runtime():
+    """Get or create a cached runtime instance."""
+    global _cached_runtime
+    if _cached_runtime is not None:
+        return _cached_runtime
+    with _runtime_lock:
+        if _cached_runtime is not None:
+            return _cached_runtime
+        from agentic.providers import create_runtime
+        _cached_runtime = create_runtime()
+        return _cached_runtime
+
 
 def _find_root(ctx_data: dict) -> Optional[dict]:
     """Walk up to the root of a context path and find the stored root."""
@@ -274,8 +291,7 @@ def _run_function_in_thread(func_name: str, kwargs: dict, conv_id: str, msg_id: 
         # Set up runtime if needed
         if needs_runtime:
             try:
-                from agentic.providers import create_runtime
-                runtime = create_runtime()
+                runtime = _get_runtime()
                 if "runtime" in (kwargs.keys()):
                     pass  # user provided
                 else:
@@ -332,8 +348,7 @@ def _run_function_in_thread(func_name: str, kwargs: dict, conv_id: str, msg_id: 
 def _run_general_query(query: str, conv_id: str, msg_id: str):
     """Run a general LLM query."""
     try:
-        from agentic.providers import create_runtime
-        runtime = create_runtime()
+        runtime = _get_runtime()
 
         _broadcast_chat_response(conv_id, msg_id, {
             "type": "status",
@@ -817,8 +832,7 @@ def create_app():
         def _do_create():
             try:
                 from agentic.meta_functions import create
-                from agentic.providers import create_runtime
-                runtime = create_runtime()
+                runtime = _get_runtime()
                 fn = create(description=desc, runtime=runtime, name=name)
                 _broadcast_chat_response(conv_id, msg_id, {
                     "type": "result",
