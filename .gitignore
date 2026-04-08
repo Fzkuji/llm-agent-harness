@@ -23,5 +23,5 @@ agentic/functions/
 !agentic/functions/deep_work.py
 
 # Internal-only functions (not uploaded)
-agentic/functions/init_research.py
+!agentic/functions/init_research.py
 skills/init-research/

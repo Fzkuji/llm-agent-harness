@@ -307,8 +307,9 @@ class Context:
                         their run_ocr/detect_all children.
                         Respects compress: compressed nodes are NOT expanded.
 
-            max_tokens: Approximate token budget. When exceeded, drops the
-                        oldest siblings first. Uses len(text)/4 as token estimate.
+            max_tokens: Approximate token budget for sibling context. When exceeded,
+                        drops the oldest siblings first. The current call block is
+                        always preserved. Uses len(text)/4 as token estimate.
 
         Returns:
             A string ready to be injected into an LLM prompt.

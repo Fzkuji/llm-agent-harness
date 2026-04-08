@@ -146,6 +146,35 @@ def test_save_jsonl_preserves_numeric_depth(tmp_path):
     assert rows[0]["depth"] == 0
     assert rows[1]["depth"] == 1
 
+
+def test_summarize_max_tokens_keeps_current_call_and_prefers_newer_siblings():
+    """max_tokens trimming drops older siblings first and keeps the current call block."""
+    @agentic_function
+    def step(label: str):
+        return label
+
+    @agentic_function
+    def outer():
+        step("first")
+        step("second")
+        return inspect()
+
+    @agentic_function
+    def inspect():
+        return "ready"
+
+    outer()
+
+    trimmed = outer.context.children[-1].summarize(siblings=-1, max_tokens=20)
+    roomy = outer.context.children[-1].summarize(siblings=-1, max_tokens=40)
+
+    assert "Current Call" in trimmed
+    assert "Current Call" in roomy
+    assert "label='first'" not in roomy
+    assert "label='second'" in roomy
+
+
+
 def test_save_md(tmp_path):
     """save() to .md creates readable output."""
     @agentic_function
