@@ -500,15 +500,7 @@ def _broadcast_chat_response(conv_id: str, msg_id: str, response: dict):
     response["msg_id"] = msg_id
     response["timestamp"] = time.time()
 
-    # Store in conversation
-    with _conversations_lock:
-        if conv_id in _conversations:
-            _conversations[conv_id]["messages"].append({
-                "role": "assistant",
-                "id": msg_id + "_resp",
-                **response,
-            })
-
+    # No need to store in messages list — Context tree IS the storage
     msg = json.dumps({"type": "chat_response", "data": response}, default=str)
     _broadcast(msg)
 
@@ -677,17 +669,10 @@ async def _handle_ws_command(ws, cmd: dict):
         conv_id = conv["id"]
         msg_id = str(uuid.uuid4())[:8]
 
-        # Update title if first message
-        if not conv["messages"]:
+        # Update title from first message
+        if not conv.get("_titled"):
             conv["title"] = text[:50] + ("..." if len(text) > 50 else "")
-
-        # Store user message
-        conv["messages"].append({
-            "role": "user",
-            "id": msg_id,
-            "content": text,
-            "timestamp": time.time(),
-        })
+            conv["_titled"] = True
 
         # Send acknowledgment with conv_id
         await ws.send_text(json.dumps({
@@ -832,7 +817,7 @@ def create_app():
         with _conversations_lock:
             history = [
                 {"id": c["id"], "title": c["title"], "created_at": c["created_at"],
-                 "message_count": len(c["messages"])}
+                 "message_count": len(c.get("root_context", Context()).children)}
                 for c in sorted(_conversations.values(), key=lambda c: c["created_at"], reverse=True)
             ]
         return JSONResponse(content=history)
