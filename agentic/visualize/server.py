@@ -489,19 +489,64 @@ def _parse_chat_input(text: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# WebSocket handler (module-level to avoid FastAPI closure issues)
+# ---------------------------------------------------------------------------
+
+async def _websocket_handler(ws):
+    """WebSocket endpoint for real-time Context tree updates and chat."""
+    await ws.accept()
+
+    with _ws_lock:
+        _ws_connections.append(ws)
+    try:
+        # Send current state on connect
+        tree = _get_full_tree()
+        await ws.send_text(json.dumps(
+            {"type": "full_tree", "data": tree}, default=str
+        ))
+        functions = _discover_functions()
+        await ws.send_text(json.dumps(
+            {"type": "functions_list", "data": functions}, default=str
+        ))
+        with _conversations_lock:
+            history = [
+                {"id": c["id"], "title": c["title"], "created_at": c["created_at"]}
+                for c in _conversations.values()
+            ]
+        await ws.send_text(json.dumps(
+            {"type": "history_list", "data": history}, default=str
+        ))
+
+        # Keep alive — receive pings/messages
+        while True:
+            data = await ws.receive_text()
+            if data == "ping":
+                await ws.send_text(json.dumps({"type": "pong"}))
+            else:
+                try:
+                    cmd = json.loads(data)
+                    await _handle_ws_command(ws, cmd)
+                except json.JSONDecodeError:
+                    pass
+
+    except Exception:
+        pass
+    finally:
+        with _ws_lock:
+            try:
+                _ws_connections.remove(ws)
+            except ValueError:
+                pass
+
+
+# ---------------------------------------------------------------------------
 # FastAPI app
 # ---------------------------------------------------------------------------
 
 def create_app():
     """Create and return the FastAPI application."""
-    try:
-        from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-        from fastapi.responses import HTMLResponse, JSONResponse
-    except ImportError:
-        raise ImportError(
-            "FastAPI is required for the visualizer. "
-            "Install with: pip install agentic-programming[visualize]"
-        )
+    from fastapi import FastAPI
+    from fastapi.responses import HTMLResponse, JSONResponse
 
     app = FastAPI(title="Agentic Visualizer", docs_url=None, redoc_url=None)
 
@@ -512,56 +557,9 @@ def create_app():
         with open(html_path) as f:
             return HTMLResponse(content=f.read())
 
-    # WebSocket endpoint
-    @app.websocket("/ws")
-    async def websocket_endpoint(ws: WebSocket):
-        await ws.accept()
-        with _ws_lock:
-            _ws_connections.append(ws)
-        try:
-            # Send current state on connect
-            tree = _get_full_tree()
-            await ws.send_text(json.dumps(
-                {"type": "full_tree", "data": tree}, default=str
-            ))
-            # Send available functions
-            functions = _discover_functions()
-            await ws.send_text(json.dumps(
-                {"type": "functions_list", "data": functions}, default=str
-            ))
-            # Send conversation history
-            with _conversations_lock:
-                history = [
-                    {"id": c["id"], "title": c["title"], "created_at": c["created_at"]}
-                    for c in _conversations.values()
-                ]
-            await ws.send_text(json.dumps(
-                {"type": "history_list", "data": history}, default=str
-            ))
-
-            # Keep alive — receive pings/messages
-            while True:
-                data = await ws.receive_text()
-                if data == "ping":
-                    await ws.send_text(json.dumps({"type": "pong"}))
-                else:
-                    # Try to parse as JSON command
-                    try:
-                        cmd = json.loads(data)
-                        await _handle_ws_command(ws, cmd)
-                    except json.JSONDecodeError:
-                        pass
-
-        except WebSocketDisconnect:
-            pass
-        except Exception:
-            pass
-        finally:
-            with _ws_lock:
-                try:
-                    _ws_connections.remove(ws)
-                except ValueError:
-                    pass
+    # WebSocket — use Starlette's raw WebSocketRoute to avoid FastAPI routing issues
+    from starlette.routing import WebSocketRoute
+    app.routes.insert(0, WebSocketRoute("/ws", _websocket_handler))
 
     async def _handle_ws_command(ws, cmd: dict):
         """Handle a WebSocket command from the client."""
