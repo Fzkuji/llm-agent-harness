@@ -436,6 +436,59 @@ html, body {
   to { transform: rotate(360deg); }
 }
 
+/* Inline status line (replaces previous, not a full bubble) */
+.status-line {
+  padding: 4px 24px 4px 60px;
+  color: var(--text-muted);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  animation: msgAppear 0.2s ease forwards;
+}
+.status-line .spinner-sm {
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid var(--border);
+  border-top-color: var(--accent-blue);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+/* Typing indicator (three bouncing dots) */
+.typing-indicator {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 36px;
+  height: 24px;
+}
+.typing-indicator .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  animation: bounce 1.4s ease-in-out infinite;
+}
+.typing-indicator .dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-indicator .dot:nth-child(3) { animation-delay: 0.4s; }
+@keyframes bounce {
+  0%, 80%, 100% { transform: translateY(0); }
+  40% { transform: translateY(-6px); }
+}
+
+/* Runtime info badge */
+.runtime-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 8px;
+  background: rgba(152,195,121,0.1);
+  color: var(--accent-green);
+  border: 1px solid rgba(152,195,121,0.2);
+  white-space: nowrap;
+}
+
 /* Context tree card (inline in chat) */
 .context-card {
   margin: 12px 0;
@@ -888,6 +941,7 @@ html, body {
       <div class="topbar-left">
         <button class="menu-btn" onclick="toggleSidebar()">&#9776;</button>
         <span id="statusBadge" class="status-badge">connecting...</span>
+        <span id="runtimeBadge" class="runtime-badge" style="display:none"></span>
       </div>
       <div class="topbar-right">
         <button id="btnPause" class="btn btn-pause" onclick="togglePause()">Pause</button>
@@ -945,7 +999,7 @@ let selectedPath = null;
 let isPaused = false;
 let expandedNodes = new Set();
 let reconnectTimer = null;
-let currentConvId = null;
+let currentConvId = localStorage.getItem('agentic_conv_id') || null;
 let conversations = {};
 let availableFunctions = [];
 let pendingResponses = {};  // msg_id -> element
@@ -959,6 +1013,12 @@ function connect() {
   ws.onopen = () => {
     updateStatus('connected');
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    // Restore conversation from localStorage on reconnect
+    const savedId = localStorage.getItem('agentic_conv_id');
+    if (savedId) {
+      currentConvId = savedId;
+      ws.send(JSON.stringify({ action: 'load_conversation', conv_id: savedId }));
+    }
   };
 
   ws.onmessage = (e) => {
@@ -995,8 +1055,9 @@ function handleMessage(msg) {
       renderConversations();
       break;
     case 'chat_ack':
-      if (!currentConvId && msg.data.conv_id) {
+      if (msg.data.conv_id) {
         currentConvId = msg.data.conv_id;
+        localStorage.setItem('agentic_conv_id', currentConvId);
         if (!conversations[currentConvId]) {
           conversations[currentConvId] = { id: currentConvId, title: 'New conversation', messages: [] };
         }
@@ -1139,15 +1200,44 @@ function addAssistantPlaceholder(id) {
       '<div class="message-avatar bot-avatar">A</div>' +
       '<div class="message-sender">Agentic</div>' +
     '</div>' +
-    '<div class="message-status"><div class="spinner"></div> Processing...</div>';
+    '<div class="typing-indicator"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>';
   container.appendChild(div);
   pendingResponses[id] = div;
   scrollToBottom();
 }
 
 function handleChatResponse(data) {
-  // Find or create response element
-  // Remove any pending placeholders
+  const type = data.type;
+
+  if (type === 'status') {
+    // Show as subtle inline status line; replace previous status if any
+    const container = document.getElementById('chatMessages');
+    let statusLine = document.getElementById('currentStatusLine');
+    if (!statusLine) {
+      statusLine = document.createElement('div');
+      statusLine.id = 'currentStatusLine';
+      statusLine.className = 'status-line';
+      container.appendChild(statusLine);
+    }
+    statusLine.innerHTML = '<div class="spinner-sm"></div> ' + escHtml(data.content);
+    scrollToBottom();
+
+    // Extract runtime info for the badge
+    const content = data.content || '';
+    if (content.startsWith('Using ')) {
+      const badge = document.getElementById('runtimeBadge');
+      if (badge) {
+        badge.textContent = content.replace('...', '');
+        badge.style.display = '';
+      }
+    }
+    return;
+  }
+
+  // Final response (result or error) -- remove status line and pending placeholder
+  const statusLine = document.getElementById('currentStatusLine');
+  if (statusLine) statusLine.remove();
+
   const pendingKeys = Object.keys(pendingResponses);
   let targetEl = null;
   if (pendingKeys.length > 0) {
@@ -1157,28 +1247,10 @@ function handleChatResponse(data) {
   }
 
   if (!targetEl) {
-    // Create new message element
     const container = document.getElementById('chatMessages');
     targetEl = document.createElement('div');
     targetEl.className = 'message assistant';
     container.appendChild(targetEl);
-  }
-
-  const type = data.type;
-
-  if (type === 'status') {
-    // Update placeholder with status
-    targetEl.innerHTML =
-      '<div class="message-header">' +
-        '<div class="message-avatar bot-avatar">A</div>' +
-        '<div class="message-sender">Agentic</div>' +
-      '</div>' +
-      '<div class="message-status"><div class="spinner"></div> ' + escHtml(data.content) + '</div>';
-    // Put it back as pending
-    const newKey = 'pending_' + Date.now();
-    pendingResponses[newKey] = targetEl;
-    scrollToBottom();
-    return;
   }
 
   let contentHtml = '';
@@ -1213,7 +1285,7 @@ function handleChatResponse(data) {
 
   scrollToBottom();
 
-  // Update conversation
+  // Update conversation title
   if (currentConvId && conversations[currentConvId]) {
     if (!conversations[currentConvId].title || conversations[currentConvId].title === 'New conversation') {
       const msgs = conversations[currentConvId].messages;
@@ -1223,6 +1295,22 @@ function handleChatResponse(data) {
       }
     }
   }
+}
+
+function addAssistantMessage(text) {
+  const container = document.getElementById('chatMessages');
+  const welcome = document.getElementById('welcomeScreen');
+  if (welcome) welcome.style.display = 'none';
+  const div = document.createElement('div');
+  div.className = 'message assistant';
+  div.innerHTML =
+    '<div class="message-header">' +
+      '<div class="message-avatar bot-avatar">A</div>' +
+      '<div class="message-sender">Agentic</div>' +
+    '</div>' +
+    '<div class="message-content">' + escHtml(text) + '</div>';
+  container.appendChild(div);
+  scrollToBottom();
 }
 
 function renderContextCard(tree, treeId) {
@@ -1491,6 +1579,7 @@ function clickFunction(name, category) {
 
 function switchConversation(convId) {
   currentConvId = convId;
+  localStorage.setItem('agentic_conv_id', convId);
   renderConversations();
   // Load conversation from server
   if (ws && ws.readyState === WebSocket.OPEN) {
@@ -1504,6 +1593,7 @@ function switchConversation(convId) {
 
 function loadConversationData(data) {
   conversations[data.id] = data;
+  renderConversations();
   if (data.id === currentConvId) {
     renderConversationMessages(data);
   }
@@ -1526,6 +1616,9 @@ function renderConversationMessages(conv) {
   container.innerHTML = '';
 
   for (const msg of conv.messages) {
+    // Skip status messages in history
+    if (msg.type === 'status') continue;
+
     const div = document.createElement('div');
     if (msg.role === 'user') {
       div.className = 'message user';
@@ -1540,6 +1633,17 @@ function renderConversationMessages(conv) {
       let contentHtml = '';
       if (msg.type === 'error') {
         contentHtml = '<div class="error-content">' + escHtml(msg.content || '') + '</div>';
+      } else if (msg.type === 'result') {
+        contentHtml = '<div class="message-content">';
+        if (msg.function) {
+          contentHtml += '<div style="margin-bottom:4px"><span style="font-family:var(--font-mono);color:var(--accent-green);font-size:12px">' +
+            escHtml(msg.function) + '()</span> completed</div>';
+        }
+        contentHtml += '<pre>' + escHtml(msg.content || '') + '</pre></div>';
+        if (msg.context_tree) {
+          const treeId = 'tree_hist_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+          contentHtml += renderContextCard(msg.context_tree, treeId);
+        }
       } else {
         contentHtml = '<div class="message-content"><pre>' + escHtml(msg.content || '') + '</pre></div>';
       }
@@ -1557,6 +1661,7 @@ function renderConversationMessages(conv) {
 
 function newConversation() {
   currentConvId = null;
+  localStorage.removeItem('agentic_conv_id');
   pendingResponses = {};
   const container = document.getElementById('chatMessages');
   container.innerHTML = '';

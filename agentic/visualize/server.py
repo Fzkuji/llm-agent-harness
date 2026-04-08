@@ -62,11 +62,13 @@ _cached_runtime = None
 _runtime_lock = threading.Lock()
 
 
-def _get_runtime():
+def _get_runtime(conv_id: str = None, msg_id: str = None):
     """Get or create a cached runtime instance.
 
     Prefers API providers (fast) over CLI providers (slow) for the visualizer,
     since interactive use requires quick responses.
+
+    If conv_id and msg_id are provided, broadcasts status updates during setup.
     """
     global _cached_runtime
     if _cached_runtime is not None:
@@ -74,16 +76,45 @@ def _get_runtime():
     with _runtime_lock:
         if _cached_runtime is not None:
             return _cached_runtime
+
+        if conv_id and msg_id:
+            _broadcast_chat_response(conv_id, msg_id, {
+                "type": "status",
+                "content": "Setting up runtime...",
+            })
+
+        import concurrent.futures
         from agentic.providers import create_runtime
-        # Try API providers first (much faster for interactive use)
-        for api_provider in ("gemini", "anthropic", "openai"):
+
+        def _try_create():
+            # Try API providers first (much faster for interactive use)
+            for api_provider in ("gemini", "anthropic", "openai"):
+                try:
+                    return create_runtime(provider=api_provider)
+                except Exception:
+                    continue
+            # Fall back to CLI providers
+            return create_runtime()
+
+        # Use a thread pool to enforce a 10-second timeout
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(_try_create)
             try:
-                _cached_runtime = create_runtime(provider=api_provider)
-                return _cached_runtime
-            except Exception:
-                continue
-        # Fall back to CLI providers
-        _cached_runtime = create_runtime()
+                _cached_runtime = future.result(timeout=10)
+            except concurrent.futures.TimeoutError:
+                if conv_id and msg_id:
+                    _broadcast_chat_response(conv_id, msg_id, {
+                        "type": "error",
+                        "content": "Runtime setup timed out after 10 seconds. Check your provider configuration.",
+                    })
+                raise TimeoutError("Runtime setup timed out after 10 seconds")
+
+        if conv_id and msg_id and _cached_runtime is not None:
+            _broadcast_chat_response(conv_id, msg_id, {
+                "type": "status",
+                "content": f"Using {type(_cached_runtime).__name__} (provider: {_cached_runtime.model})...",
+            })
+
         return _cached_runtime
 
 
@@ -303,7 +334,7 @@ def _run_function_in_thread(func_name: str, kwargs: dict, conv_id: str, msg_id: 
         # Set up runtime if needed
         if needs_runtime:
             try:
-                runtime = _get_runtime()
+                runtime = _get_runtime(conv_id=conv_id, msg_id=msg_id)
                 if "runtime" in (kwargs.keys()):
                     pass  # user provided
                 else:
@@ -360,7 +391,7 @@ def _run_function_in_thread(func_name: str, kwargs: dict, conv_id: str, msg_id: 
 def _run_general_query(query: str, conv_id: str, msg_id: str):
     """Run a general LLM query."""
     try:
-        runtime = _get_runtime()
+        runtime = _get_runtime(conv_id=conv_id, msg_id=msg_id)
 
         _broadcast_chat_response(conv_id, msg_id, {
             "type": "status",
@@ -552,6 +583,81 @@ async def _websocket_handler(ws):
 
 
 # ---------------------------------------------------------------------------
+# WebSocket command handler (module-level so _websocket_handler can call it)
+# ---------------------------------------------------------------------------
+
+async def _handle_ws_command(ws, cmd: dict):
+    """Handle a WebSocket command from the client."""
+    action = cmd.get("action")
+
+    if action == "chat":
+        text = cmd.get("text", "").strip()
+        conv_id = cmd.get("conv_id")
+        if not text:
+            return
+
+        conv = _get_or_create_conversation(conv_id)
+        conv_id = conv["id"]
+        msg_id = str(uuid.uuid4())[:8]
+
+        # Update title if first message
+        if not conv["messages"]:
+            conv["title"] = text[:50] + ("..." if len(text) > 50 else "")
+
+        # Store user message
+        conv["messages"].append({
+            "role": "user",
+            "id": msg_id,
+            "content": text,
+            "timestamp": time.time(),
+        })
+
+        # Send acknowledgment with conv_id
+        await ws.send_text(json.dumps({
+            "type": "chat_ack",
+            "data": {"conv_id": conv_id, "msg_id": msg_id},
+        }))
+
+        # Parse and execute
+        parsed = _parse_chat_input(text)
+
+        if parsed["action"] == "run":
+            threading.Thread(
+                target=_run_function_in_thread,
+                args=(parsed["function"], parsed["kwargs"], conv_id, msg_id),
+                daemon=True,
+            ).start()
+        elif parsed["action"] == "query":
+            threading.Thread(
+                target=_run_general_query,
+                args=(parsed["raw"], conv_id, msg_id),
+                daemon=True,
+            ).start()
+
+    elif action == "load_conversation":
+        conv_id = cmd.get("conv_id")
+        with _conversations_lock:
+            conv = _conversations.get(conv_id)
+        if conv:
+            # Send full conversation but filter out transient status messages
+            filtered_messages = [
+                m for m in conv["messages"]
+                if m.get("type") != "status"
+            ]
+            filtered_conv = {**conv, "messages": filtered_messages}
+            await ws.send_text(json.dumps({
+                "type": "conversation_loaded",
+                "data": filtered_conv,
+            }, default=str))
+        else:
+            # Conversation not found on server; tell frontend
+            await ws.send_text(json.dumps({
+                "type": "conversation_loaded",
+                "data": {"id": conv_id, "title": "New conversation", "messages": []},
+            }, default=str))
+
+
+# ---------------------------------------------------------------------------
 # FastAPI app
 # ---------------------------------------------------------------------------
 
@@ -572,64 +678,6 @@ def create_app():
     # WebSocket — use Starlette's raw WebSocketRoute to avoid FastAPI routing issues
     from starlette.routing import WebSocketRoute
     app.routes.insert(0, WebSocketRoute("/ws", _websocket_handler))
-
-    async def _handle_ws_command(ws, cmd: dict):
-        """Handle a WebSocket command from the client."""
-        action = cmd.get("action")
-
-        if action == "chat":
-            text = cmd.get("text", "").strip()
-            conv_id = cmd.get("conv_id")
-            if not text:
-                return
-
-            conv = _get_or_create_conversation(conv_id)
-            conv_id = conv["id"]
-            msg_id = str(uuid.uuid4())[:8]
-
-            # Update title if first message
-            if not conv["messages"]:
-                conv["title"] = text[:50] + ("..." if len(text) > 50 else "")
-
-            # Store user message
-            conv["messages"].append({
-                "role": "user",
-                "id": msg_id,
-                "content": text,
-                "timestamp": time.time(),
-            })
-
-            # Send acknowledgment with conv_id
-            await ws.send_text(json.dumps({
-                "type": "chat_ack",
-                "data": {"conv_id": conv_id, "msg_id": msg_id},
-            }))
-
-            # Parse and execute
-            parsed = _parse_chat_input(text)
-
-            if parsed["action"] == "run":
-                threading.Thread(
-                    target=_run_function_in_thread,
-                    args=(parsed["function"], parsed["kwargs"], conv_id, msg_id),
-                    daemon=True,
-                ).start()
-            elif parsed["action"] == "query":
-                threading.Thread(
-                    target=_run_general_query,
-                    args=(parsed["raw"], conv_id, msg_id),
-                    daemon=True,
-                ).start()
-
-        elif action == "load_conversation":
-            conv_id = cmd.get("conv_id")
-            with _conversations_lock:
-                conv = _conversations.get(conv_id)
-            if conv:
-                await ws.send_text(json.dumps({
-                    "type": "conversation_loaded",
-                    "data": conv,
-                }, default=str))
 
     # REST endpoints
     @app.get("/api/tree")
