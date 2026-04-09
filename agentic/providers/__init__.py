@@ -42,7 +42,7 @@ import shutil
 # Maps provider name -> (class_name, module_path, default_model)
 PROVIDERS = {
     "claude-code":  ("ClaudeCodeRuntime",  "agentic.providers.claude_code",  "sonnet"),
-    "codex":        ("CodexRuntime",       "agentic.providers.codex",        "o4-mini"),
+    "codex":        ("CodexRuntime",       "agentic.providers.codex",        None),
     "gemini-cli":   ("GeminiCLIRuntime",   "agentic.providers.gemini_cli",   "gemini-2.5-flash"),
     "anthropic":    ("AnthropicRuntime",    "agentic.providers.anthropic",    "claude-sonnet-4-6"),
     "openai":       ("OpenAIRuntime",       "agentic.providers.openai",       "gpt-4.1"),
@@ -72,7 +72,7 @@ def detect_provider() -> tuple[str, str]:
     if shutil.which("claude"):
         return "claude-code", "sonnet"
     if shutil.which("codex"):
-        return "codex", "o4-mini"
+        return "codex", None
     if shutil.which("gemini"):
         return "gemini-cli", "gemini-2.5-flash"
 

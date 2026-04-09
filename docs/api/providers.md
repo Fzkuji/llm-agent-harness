@@ -273,7 +273,7 @@ codex login
 | `model` | `str \| None` | `None` | 默认模型；`None` 时使用 CLI 默认值 |
 | `timeout` | `int` | `120` | 单次 CLI 调用超时秒数 |
 | `cli_path` | `str \| None` | `None` | Codex CLI 可执行文件路径；为空时自动查找 |
-| `session_id` | `str \| None` | 自动生成 | 会话 ID；保留时支持后续 `resume` |
+| `session_id` | `str \| None` | `"auto"` | `"auto"` 会在首次调用后捕获 CLI 的真实线程 ID；`None` 表示无状态 |
 | `workdir` | `str \| None` | `None` | 通过 `--cd` 指定工作目录 |
 | `full_auto` | `bool` | `True` | 是否添加 `--full-auto` |
 | `sandbox` | `str` | `"workspace-write"` | CLI sandbox 模式 |

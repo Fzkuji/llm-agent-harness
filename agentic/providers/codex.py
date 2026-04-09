@@ -1,7 +1,8 @@
 """
 Codex CLI provider — routes LLM calls through the OpenAI Codex CLI.
 
-Uses `codex exec` (non-interactive mode) with full-auto sandbox.
+Uses `codex exec` (non-interactive mode) with configurable sandbox,
+approval policy, and optional web search.
 No API key needed in the harness — Codex CLI uses its own auth.
 
 Supports:
@@ -36,7 +37,6 @@ import os
 import shutil
 import subprocess
 import tempfile
-import uuid
 from typing import Optional
 
 from agentic.runtime import Runtime
@@ -53,26 +53,33 @@ class CodexRuntime(Runtime):
     Supports session continuity via `codex exec resume`.
 
     Args:
-        model:      Model to use (default: "o4-mini"). Passed to --model flag.
+        model:      Model to use (default: None = let CLI choose). Passed to --model flag.
         timeout:    Max seconds per CLI call (default: 300).
         cli_path:   Path to codex CLI binary (auto-detected if not specified).
-        session_id: Session ID for continuity. "auto" = generate UUID.
-                    None = stateless (each call independent).
+        session_id: Session ID for continuity. "auto" = capture the CLI's
+                    thread id after the first call. None = stateless.
         workdir:    Working directory for codex. None = current directory.
         sandbox:    Sandbox mode: "read-only", "workspace-write", or
                     "danger-full-access" (default: "workspace-write").
         full_auto:  Use --full-auto flag (default: True).
+        approval_policy:
+                    Root-level approval policy for non-interactive exec
+                    (default: "never").
+        search:     Enable Codex web search tool for live/current queries
+                    (default: False).
     """
 
     def __init__(
         self,
-        model: str = "o4-mini",
+        model: str = None,
         timeout: int = 300,
         cli_path: str = None,
         session_id: str = "auto",
         workdir: str = None,
         sandbox: str = "workspace-write",
         full_auto: bool = True,
+        approval_policy: Optional[str] = "never",
+        search: bool = False,
     ):
         super().__init__(model=model)
         self.timeout = timeout
@@ -80,14 +87,14 @@ class CodexRuntime(Runtime):
         self.workdir = workdir
         self.sandbox = sandbox
         self.full_auto = full_auto
+        self.approval_policy = approval_policy
+        self.search = search
         self._turn_count = 0
+        self._auto_session = session_id == "auto"
 
-        if session_id == "auto":
-            self._session_id = str(uuid.uuid4())
-        else:
-            self._session_id = session_id
+        self._session_id = None if self._auto_session else session_id
 
-        # If session is active, CLI manages context — skip summarize()
+        # Once a real Codex thread id is known, the CLI manages context.
         self.has_session = self._session_id is not None
 
         if self.cli_path is None:
@@ -98,7 +105,24 @@ class CodexRuntime(Runtime):
                 "  codex auth"
             )
 
-    def _call(self, content: list[dict], model: str = "o4-mini", response_format: dict = None) -> str:
+    def list_models(self) -> list[str]:
+        """Return available models based on login method."""
+        try:
+            result = subprocess.run(
+                [self.cli_path, "login", "status"],
+                capture_output=True, text=True, timeout=5,
+            )
+            output = (result.stdout + result.stderr).strip()
+            if "ChatGPT" in output:
+                return ["gpt-5.4", "gpt-5.4-mini"]
+            else:
+                # API key mode — all models available
+                return ["o3-pro", "o3", "o4-mini", "gpt-5.4", "gpt-5.4-mini",
+                        "gpt-5.4-nano", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"]
+        except Exception:
+            return ["gpt-5.4", "gpt-5.4-mini"]
+
+    def _call(self, content: list[dict], model: str = None, response_format: dict = None) -> str:
         """Call Codex CLI with the content list.
 
         Images are passed via -i flag (file paths). Base64 data is
@@ -201,12 +225,18 @@ class CodexRuntime(Runtime):
 
     def _run_codex(self, prompt: str, image_paths: list[str], model: str) -> str:
         """Build and run the codex exec command."""
-        is_resume = self._session_id and self._turn_count > 0
+        is_resume = bool(self._session_id and self._turn_count > 0)
+
+        cmd = [self.cli_path]
+        if self.search:
+            cmd.append("--search")
+        if self.approval_policy:
+            cmd.extend(["-a", self.approval_policy])
 
         if is_resume:
-            cmd = [self.cli_path, "exec", "resume", self._session_id]
+            cmd.extend(["exec", "resume", self._session_id])
         else:
-            cmd = [self.cli_path, "exec"]
+            cmd.append("exec")
 
         # Common flags
         if model:
@@ -230,14 +260,17 @@ class CodexRuntime(Runtime):
         fd, output_file = tempfile.mkstemp(suffix=".txt", prefix="codex_out_")
         os.close(fd)
         try:
+            cmd.append("--json")
             cmd.extend(["-o", output_file])
 
-            # Prompt goes last
-            cmd.append(prompt)
+            # Pass prompt via stdin for long prompts (CLI arg has OS limits),
+            # use "-" to signal stdin mode.
+            cmd.append("-")
 
             try:
                 proc = subprocess.run(
                     cmd,
+                    input=prompt,
                     capture_output=True,
                     text=True,
                     timeout=self.timeout,
@@ -247,6 +280,11 @@ class CodexRuntime(Runtime):
 
             if proc.returncode != 0:
                 self._handle_error(proc)
+
+            session_id = self._extract_thread_id(proc.stdout)
+            if session_id:
+                self._session_id = session_id
+                self.has_session = True
 
             # Read output from the -o file
             try:
@@ -266,17 +304,42 @@ class CodexRuntime(Runtime):
             except OSError:
                 pass
 
+    def _extract_thread_id(self, stdout: str) -> Optional[str]:
+        """Extract the Codex thread id from JSONL exec output."""
+        for line in stdout.splitlines():
+            line = line.strip()
+            if not line or not line.startswith("{"):
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            if event.get("type") in {"thread.started", "thread.resumed"}:
+                thread_id = event.get("thread_id")
+                if thread_id:
+                    return thread_id
+
+        return None
+
     def _handle_error(self, result):
         """Handle CLI errors."""
         error_msg = result.stderr.strip() or result.stdout.strip() or "Unknown error"
-        if "auth" in error_msg.lower() or "login" in error_msg.lower() or "api key" in error_msg.lower():
+        error_lower = error_msg.lower()
+        if "auth" in error_lower or "login" in error_lower or "api key" in error_lower:
             raise ConnectionError(
                 f"Codex CLI authentication error. Run: codex auth\n"
+                f"Error: {error_msg}"
+            )
+        if "quota" in error_lower or "rate limit" in error_lower:
+            raise ConnectionError(
+                f"Codex CLI quota/rate limit exceeded.\n"
                 f"Error: {error_msg}"
             )
         raise RuntimeError(f"Codex CLI error (exit {result.returncode}): {error_msg}")
 
     def reset(self):
         """Start a new session."""
-        self._session_id = str(uuid.uuid4())
+        self._session_id = None
         self._turn_count = 0
+        self.has_session = False

@@ -783,11 +783,15 @@ class TestCodexRuntime:
         assert result == "mock codex reply"
         cmd = self._mock_run.call_args[0][0]
         assert cmd[0] == "/usr/bin/codex"
-        assert cmd[1] == "exec"
+        assert "exec" in cmd
+        assert "-a" in cmd
+        assert cmd[cmd.index("-a") + 1] == "never"
         assert "--full-auto" in cmd
         assert "--skip-git-repo-check" in cmd
-        # Prompt should be last
-        assert cmd[-1] == "hello"
+        # Prompt passed via stdin, "-" is the stdin marker
+        assert cmd[-1] == "-"
+        prompt_input = self._mock_run.call_args[1].get("input", "")
+        assert prompt_input == "hello"
 
     def test_model_flag(self):
         """Model is passed via --model flag."""
@@ -828,8 +832,9 @@ class TestCodexRuntime:
         cmd = self._mock_run.call_args[0][0]
         # No -i flag for URL
         assert "-i" not in cmd
-        # URL should appear in prompt text
-        assert "https://example.com/img.png" in cmd[-1]
+        # URL should appear in prompt text (passed via stdin)
+        prompt_input = self._mock_run.call_args[1].get("input", "")
+        assert "https://example.com/img.png" in prompt_input
 
     def test_session_resume(self):
         """Second call uses 'resume' subcommand."""
@@ -840,8 +845,57 @@ class TestCodexRuntime:
 
         rt._call([{"type": "text", "text": "second"}])
         cmd2 = self._mock_run.call_args[0][0]
-        assert cmd2[2] == "resume"
+        assert "resume" in cmd2
         assert "test-session" in cmd2
+
+    def test_auto_session_captures_thread_id_and_resumes(self):
+        """Auto sessions resume only after Codex reports a real thread id."""
+        replies = iter([
+            '{"type":"thread.started","thread_id":"thread-123"}',
+            '{"type":"thread.resumed","thread_id":"thread-123"}',
+        ])
+
+        def run_with_thread_id(cmd, **kwargs):
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = next(replies)
+            result.stderr = ""
+            for i, arg in enumerate(cmd):
+                if arg == "-o" and i + 1 < len(cmd):
+                    with open(cmd[i + 1], "w") as f:
+                        f.write("mock codex reply")
+                    break
+            return result
+
+        self._mock_run.side_effect = run_with_thread_id
+        rt = self._make_runtime()
+
+        assert rt.has_session is False
+        assert rt._session_id is None
+
+        rt._call([{"type": "text", "text": "first"}])
+        assert rt.has_session is True
+        assert rt._session_id == "thread-123"
+        cmd1 = self._mock_run.call_args[0][0]
+        assert "resume" not in cmd1
+
+        rt._call([{"type": "text", "text": "second"}])
+        cmd2 = self._mock_run.call_args[0][0]
+        assert "resume" in cmd2
+        assert "thread-123" in cmd2
+
+    def test_auto_session_without_thread_id_stays_stateless(self):
+        """If Codex does not report a thread id, later calls should not resume."""
+        rt = self._make_runtime()
+
+        assert rt.has_session is False
+        assert rt._session_id is None
+
+        rt._call([{"type": "text", "text": "first"}])
+        rt._call([{"type": "text", "text": "second"}])
+        cmd = self._mock_run.call_args[0][0]
+        assert "resume" not in cmd
+        assert rt._session_id is None
 
     def test_stateless_mode(self):
         """session_id=None never uses resume."""
@@ -859,13 +913,30 @@ class TestCodexRuntime:
         idx = cmd.index("--cd")
         assert cmd[idx + 1] == "/tmp/myproject"
 
+    def test_search_flag(self):
+        """search=True adds the root-level --search flag."""
+        rt = self._make_runtime(search=True)
+        rt._call([{"type": "text", "text": "weather"}])
+        cmd = self._mock_run.call_args[0][0]
+        assert "--search" in cmd
+        assert cmd.index("--search") < cmd.index("exec")
+
+    def test_custom_approval_policy(self):
+        """Custom approval policy is passed as a root-level flag."""
+        rt = self._make_runtime(approval_policy="on-request")
+        rt._call([{"type": "text", "text": "hi"}])
+        cmd = self._mock_run.call_args[0][0]
+        idx = cmd.index("-a")
+        assert cmd[idx + 1] == "on-request"
+
     def test_response_format_appended(self):
         """response_format is appended to prompt text."""
         rt = self._make_runtime()
         schema = {"type": "object", "properties": {"name": {"type": "string"}}}
         rt._call([{"type": "text", "text": "test"}], response_format=schema)
-        cmd = self._mock_run.call_args[0][0]
-        assert "JSON" in cmd[-1]
+        # Prompt is passed via stdin
+        prompt_input = self._mock_run.call_args[1].get("input", "")
+        assert "JSON" in prompt_input
 
     def test_cli_not_found(self, monkeypatch):
         """Missing CLI raises FileNotFoundError."""
@@ -914,12 +985,27 @@ class TestCodexRuntime:
 
     def test_reset(self):
         """reset() creates new session and resets turn count."""
+        def run_with_thread_id(cmd, **kwargs):
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = '{"type":"thread.started","thread_id":"thread-reset"}'
+            result.stderr = ""
+            for i, arg in enumerate(cmd):
+                if arg == "-o" and i + 1 < len(cmd):
+                    with open(cmd[i + 1], "w") as f:
+                        f.write("mock codex reply")
+                    break
+            return result
+
+        self._mock_run.side_effect = run_with_thread_id
         rt = self._make_runtime()
         rt._call([{"type": "text", "text": "first"}])
         old_session = rt._session_id
         rt.reset()
-        assert rt._session_id != old_session
+        assert old_session == "thread-reset"
+        assert rt._session_id is None
         assert rt._turn_count == 0
+        assert rt.has_session is False
 
     def test_sandbox_mode(self):
         """Custom sandbox mode without full_auto."""
@@ -959,6 +1045,28 @@ class TestCodexRuntime:
             rt._call([{"type": "text", "text": "hi"}, {"type": "file", "path": "test.pdf"}])
             file_warnings = [x for x in w if "file" in str(x.message).lower()]
             assert len(file_warnings) == 1
+
+
+def test_visualizer_codex_runtime_enables_search(monkeypatch):
+    """Visualizer chat uses stateless Codex with native web search enabled."""
+    from agentic.visualize import server
+
+    captured = {}
+
+    def fake_create_runtime(provider=None, model=None, **kwargs):
+        captured["provider"] = provider
+        captured["model"] = model
+        captured["kwargs"] = kwargs
+        return object()
+
+    monkeypatch.setattr("agentic.providers.create_runtime", fake_create_runtime)
+
+    server._create_runtime_for_visualizer("codex")
+
+    assert captured["provider"] == "codex"
+    assert captured["kwargs"]["session_id"] is None
+    assert captured["kwargs"]["search"] is True
+
 
 
 # ══════════════════════════════════════════════════════════════

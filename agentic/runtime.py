@@ -113,12 +113,20 @@ class Runtime:
             )
 
         # --- Read: auto-generate context from the tree ---
-        # Skip if runtime manages its own session (e.g. CLI with resume)
-        if context is None and ctx is not None and not self.has_session:
-            if ctx._summarize_kwargs:
-                context = ctx.summarize(**ctx._summarize_kwargs)
+        if context is None and ctx is not None:
+            if self.has_session:
+                # Session-based runtimes (e.g. Claude Code CLI) manage their
+                # own conversation history, so we skip the full context tree.
+                # But the current function's docstring IS the prompt/instruction
+                # — it must always be injected, otherwise the LLM doesn't know
+                # what task to perform.
+                if ctx.prompt:
+                    context = ctx.prompt
             else:
-                context = ctx.summarize()
+                if ctx._summarize_kwargs:
+                    context = ctx.summarize(**ctx._summarize_kwargs)
+                else:
+                    context = ctx.summarize()
 
         # --- Build full content: context + user content ---
         full_content = []
@@ -165,11 +173,15 @@ class Runtime:
                 f"Split into separate @agentic_function calls."
             )
 
-        if context is None and ctx is not None and not self.has_session:
-            if ctx._summarize_kwargs:
-                context = ctx.summarize(**ctx._summarize_kwargs)
+        if context is None and ctx is not None:
+            if self.has_session:
+                if ctx.prompt:
+                    context = ctx.prompt
             else:
-                context = ctx.summarize()
+                if ctx._summarize_kwargs:
+                    context = ctx.summarize(**ctx._summarize_kwargs)
+                else:
+                    context = ctx.summarize()
 
         full_content = []
         if context:

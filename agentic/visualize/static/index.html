@@ -148,19 +148,19 @@ html, body {
 /* Sidebar panels (collapsible + resizable) */
 .sidebar-panels {
   flex: 1;
-  position: relative;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   min-height: 0;
 }
 
 .sidebar-panel {
-  position: absolute;
-  left: 0;
-  right: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
   min-height: 32px;
+  overflow: hidden;
+  position: relative;
+  flex: 0 0 auto;
 }
 
 .panel-header {
@@ -1253,7 +1253,7 @@ textarea.retry-field-input { min-height: 50px; max-height: 200px; resize: vertic
 
     <div class="sidebar-panels">
       <!-- Conversations -->
-      <div class="sidebar-panel" id="convPanel" data-panel="conv">
+      <div class="sidebar-panel" id="convPanel" data-panel="conv" style="height:40%">
         <div class="panel-header" onclick="togglePanel('conv')">
           <span class="panel-chevron" id="convChevron">&#9660;</span>
           <span class="sidebar-section-title" style="padding:0">Conversations</span>
@@ -1263,7 +1263,7 @@ textarea.retry-field-input { min-height: 50px; max-height: 200px; resize: vertic
       </div>
 
       <!-- Programs -->
-      <div class="sidebar-panel" id="fnPanel" data-panel="fn">
+      <div class="sidebar-panel" id="fnPanel" data-panel="fn" style="height:30%">
         <div class="panel-header" onclick="togglePanel('fn')">
           <span class="panel-chevron" id="fnChevron">&#9660;</span>
           <span class="sidebar-section-title" style="padding:0">Programs</span>
@@ -1273,7 +1273,7 @@ textarea.retry-field-input { min-height: 50px; max-height: 200px; resize: vertic
       </div>
 
       <!-- Provider Selector -->
-      <div class="sidebar-panel" id="provPanel" data-panel="prov">
+      <div class="sidebar-panel" id="provPanel" data-panel="prov" style="height:30%">
         <div class="panel-header" onclick="togglePanel('prov')">
           <span class="panel-chevron" id="provChevron">&#9660;</span>
           <span class="sidebar-section-title" style="padding:0">Provider</span>
@@ -2666,140 +2666,63 @@ function togglePanel(name) {
   var panel = document.querySelector('[data-panel="' + name + '"]');
   if (!panel) return;
   panel.classList.toggle('panel-collapsed');
-  layoutPanels();
 }
 
-// Drag-to-resize panels
+// Drag-to-resize panels (split-pane: handle adjusts two adjacent panels)
 (function() {
-  // Split ratios: [conv, fn, prov] as fractions of total height
-  var splits = [0.5, 0.3, 0.2];
-  var dragIdx = -1; // which divider: 0 = between conv/fn, 1 = between fn/prov
+  var dragPanel = null;   // the panel ABOVE the handle
+  var siblingPanel = null; // the panel BELOW the handle
   var startY = 0;
-  var startSplits = null;
-  var MIN_PX = 40;
+  var startH = 0;
+  var sibStartH = 0;
+  var MIN_H = 60;
 
-  function layoutPanels() {
-    var container = document.querySelector('.sidebar-panels');
-    if (!container) return;
-    var totalH = container.offsetHeight;
-    var handleH = 4;
-    var COLLAPSED_H = 32;
-    var panels = [
-      document.getElementById('convPanel'),
-      document.getElementById('fnPanel'),
-      document.getElementById('provPanel')
-    ];
-    var handles = container.querySelectorAll('.panel-resize[data-divider]');
-
-    // Calculate collapsed panels and available space
-    var collapsedH = 0;
-    var expandedIdxs = [];
-    for (var i = 0; i < 3; i++) {
-      if (panels[i] && panels[i].classList.contains('panel-collapsed')) {
-        collapsedH += COLLAPSED_H;
-      } else {
-        expandedIdxs.push(i);
-      }
+  // On first load, convert % heights to px so they don't recalculate
+  window.addEventListener('DOMContentLoaded', function() {
+    var panels = document.querySelectorAll('.sidebar-panel');
+    for (var i = 0; i < panels.length; i++) {
+      panels[i].style.height = panels[i].offsetHeight + 'px';
     }
-    // Number of visible dividers = between expanded panels that are adjacent
-    var numHandles = 0;
-    for (var hi = 0; hi < 2; hi++) {
-      var above = panels[hi] && !panels[hi].classList.contains('panel-collapsed');
-      var below = panels[hi+1] && !panels[hi+1].classList.contains('panel-collapsed');
-      if (above && below) numHandles++;
-    }
-    var usable = totalH - collapsedH - numHandles * handleH;
-
-    // Distribute usable among expanded panels by their split ratios
-    var expandedTotal = 0;
-    for (var ei = 0; ei < expandedIdxs.length; ei++) expandedTotal += splits[expandedIdxs[ei]];
-
-    var y = 0;
-    for (var pi = 0; pi < 3; pi++) {
-      var collapsed = panels[pi] && panels[pi].classList.contains('panel-collapsed');
-      var h = collapsed ? COLLAPSED_H : Math.round(usable * splits[pi] / (expandedTotal || 1));
-      if (panels[pi]) {
-        panels[pi].style.top = y + 'px';
-        panels[pi].style.height = h + 'px';
-      }
-      y += h;
-      // Show divider between this panel and next, only if both are expanded
-      if (pi < 2 && handles.length > pi) {
-        var nextCollapsed = panels[pi+1] && panels[pi+1].classList.contains('panel-collapsed');
-        if (!collapsed && !nextCollapsed) {
-          handles[pi].style.display = '';
-          handles[pi].style.position = 'absolute';
-          handles[pi].style.left = '0';
-          handles[pi].style.right = '0';
-          handles[pi].style.top = y + 'px';
-          handles[pi].style.height = handleH + 'px';
-          handles[pi].style.cursor = 'ns-resize';
-          handles[pi].style.zIndex = '5';
-          y += handleH;
-        } else {
-          handles[pi].style.display = 'none';
-        }
-      }
-    }
-  }
-
-  // Move resize handles OUT of panels and into sidebar-panels container
-  (function() {
-    var container = document.querySelector('.sidebar-panels');
-    if (!container) return;
-    // Remove existing handles from inside panels
-    var oldHandles = container.querySelectorAll('.sidebar-panel .panel-resize');
-    for (var i = 0; i < oldHandles.length; i++) oldHandles[i].remove();
-    // Add two handles directly to container
-    for (var j = 0; j < 2; j++) {
-      var h = document.createElement('div');
-      h.className = 'panel-resize';
-      h.setAttribute('data-divider', j);
-      container.appendChild(h);
-    }
-    layoutPanels();
-  })();
-
-  window.addEventListener('resize', layoutPanels);
+  });
 
   document.addEventListener('mousedown', function(e) {
-    var handle = e.target.closest('.panel-resize[data-divider]');
+    var handle = e.target.closest('.panel-resize');
     if (!handle) return;
     e.preventDefault();
-    dragIdx = parseInt(handle.getAttribute('data-divider'));
+    dragPanel = handle.closest('.sidebar-panel');
+    if (!dragPanel || dragPanel.classList.contains('panel-collapsed')) { dragPanel = null; return; }
+    // Find the next visible sibling panel
+    var next = dragPanel.nextElementSibling;
+    while (next && !next.classList.contains('sidebar-panel')) next = next.nextElementSibling;
+    if (!next || next.classList.contains('panel-collapsed')) { dragPanel = null; return; }
+    siblingPanel = next;
     startY = e.clientY;
-    startSplits = splits.slice();
+    startH = dragPanel.offsetHeight;
+    sibStartH = siblingPanel.offsetHeight;
     handle.classList.add('dragging');
     document.body.style.cursor = 'ns-resize';
     document.body.style.userSelect = 'none';
   });
 
   document.addEventListener('mousemove', function(e) {
-    if (dragIdx < 0) return;
+    if (!dragPanel || !siblingPanel) return;
     e.preventDefault();
-    var container = document.querySelector('.sidebar-panels');
-    var totalH = container.offsetHeight - 8; // minus two handles
     var dy = e.clientY - startY;
-    var frac = dy / totalH;
-    var s = startSplits.slice();
-    // Divider dragIdx sits between panel[dragIdx] and panel[dragIdx+1]
-    // Dragging down: panel[dragIdx] grows, panel[dragIdx+1] shrinks
-    var minFrac = MIN_PX / totalH;
-    var newA = s[dragIdx] + frac;
-    var newB = s[dragIdx + 1] - frac;
-    if (newA < minFrac) { newA = minFrac; newB = s[dragIdx] + s[dragIdx + 1] - minFrac; }
-    if (newB < minFrac) { newB = minFrac; newA = s[dragIdx] + s[dragIdx + 1] - minFrac; }
-    splits[dragIdx] = newA;
-    splits[dragIdx + 1] = newB;
-    // Third panel unchanged
-    layoutPanels();
+    var newH = startH + dy;
+    var newSibH = sibStartH - dy;
+    // Clamp both to minimum
+    if (newH < MIN_H) { dy = MIN_H - startH; newH = MIN_H; newSibH = sibStartH - dy; }
+    if (newSibH < MIN_H) { dy = sibStartH - MIN_H; newH = startH + dy; newSibH = MIN_H; }
+    dragPanel.style.height = newH + 'px';
+    siblingPanel.style.height = newSibH + 'px';
   });
 
   document.addEventListener('mouseup', function() {
-    if (dragIdx < 0) return;
-    var handles = document.querySelectorAll('.panel-resize[data-divider]');
-    for (var i = 0; i < handles.length; i++) handles[i].classList.remove('dragging');
-    dragIdx = -1;
+    if (!dragPanel) return;
+    var handle = dragPanel.querySelector('.panel-resize');
+    if (handle) handle.classList.remove('dragging');
+    dragPanel = null;
+    siblingPanel = null;
     document.body.style.cursor = '';
     document.body.style.userSelect = '';
   });

@@ -317,6 +317,115 @@ def test_content_types():
     assert "file" in all_types
 
 
+def test_has_session_injects_docstring():
+    """has_session=True skips full context tree but still injects docstring."""
+    received = []
+
+    def capture_call(content, model="test", response_format=None):
+        received.extend(content)
+        return "ok"
+
+    runtime = Runtime(call=capture_call)
+    runtime.has_session = True
+
+    @agentic_function
+    def my_func():
+        """This is the instruction prompt."""
+        return runtime.exec(content=[
+            {"type": "text", "text": "user input"},
+        ])
+
+    my_func()
+    # Should have 2 blocks: docstring + user input
+    assert len(received) == 2
+    assert received[0]["type"] == "text"
+    assert "This is the instruction prompt." in received[0]["text"]
+    assert received[1]["text"] == "user input"
+
+
+def test_has_session_skips_context_tree():
+    """has_session=True should NOT include 'Execution Context' from summarize()."""
+    received = []
+
+    def capture_call(content, model="test", response_format=None):
+        received.extend(content)
+        return "ok"
+
+    runtime = Runtime(call=capture_call)
+    runtime.has_session = True
+
+    @agentic_function
+    def parent():
+        """Parent doc."""
+        return child()
+
+    @agentic_function
+    def child():
+        """Child doc."""
+        return runtime.exec(content=[
+            {"type": "text", "text": "data"},
+        ])
+
+    parent()
+    texts = [b.get("text", "") for b in received if b["type"] == "text"]
+    # Should NOT have "Execution Context" (full tree)
+    assert not any("Execution Context" in t for t in texts)
+    # Should have the child's docstring
+    assert any("Child doc." in t for t in texts)
+
+
+def test_has_session_false_injects_full_context():
+    """has_session=False should inject full context tree including 'Execution Context'."""
+    received = []
+
+    def capture_call(content, model="test", response_format=None):
+        received.extend(content)
+        return "ok"
+
+    runtime = Runtime(call=capture_call)
+    # has_session defaults to False
+
+    @agentic_function
+    def parent():
+        """Parent doc."""
+        return child()
+
+    @agentic_function
+    def child():
+        """Child doc."""
+        return runtime.exec(content=[
+            {"type": "text", "text": "data"},
+        ])
+
+    parent()
+    texts = [b.get("text", "") for b in received if b["type"] == "text"]
+    # Should have "Execution Context" from summarize()
+    assert any("Execution Context" in t for t in texts)
+
+
+def test_has_session_no_docstring():
+    """has_session=True with no docstring should not inject empty context."""
+    received = []
+
+    def capture_call(content, model="test", response_format=None):
+        received.extend(content)
+        return "ok"
+
+    runtime = Runtime(call=capture_call)
+    runtime.has_session = True
+
+    @agentic_function
+    def no_doc():
+        return runtime.exec(content=[
+            {"type": "text", "text": "bare input"},
+        ])
+
+    no_doc()
+    # Should only have user content, no empty context block
+    assert len(received) == 1
+    assert received[0]["text"] == "bare input"
+
+
 def test_runtime_retry_error_report_outside_function():
     """Retry errors outside @agentic_function still include attempt history."""
     def always_fail(content, model="test", response_format=None):
