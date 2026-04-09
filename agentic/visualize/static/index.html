@@ -2668,40 +2668,58 @@ setInterval(function() {
 
 // ===== Panel Collapse & Resize (Split.js) =====
 var _splitInstance = null;
-var _savedSizes = [40, 30, 30]; // remember sizes for restore
+var _savedSizes = [40, 30, 30]; // percentages when all expanded
+var _panelIds = ['#convPanel', '#fnPanel', '#provPanel'];
+var _COLLAPSED_PX = 32; // collapsed panel = header only
 
 function _initSplit() {
-  if (_splitInstance) _splitInstance.destroy();
-  var ids = [];
-  var sizes = [];
-  var panels = document.querySelectorAll('.sidebar-panels > .sidebar-panel');
-  var expandedCount = 0;
-  for (var i = 0; i < panels.length; i++) {
-    if (!panels[i].classList.contains('panel-collapsed')) {
-      ids.push('#' + panels[i].id);
-      sizes.push(_savedSizes[i]);
-      expandedCount++;
+  if (_splitInstance) { _splitInstance.destroy(); _splitInstance = null; }
+
+  var container = document.querySelector('.sidebar-panels');
+  if (!container) return;
+  var totalH = container.offsetHeight;
+  if (totalH <= 0) return;
+
+  var panels = [
+    document.getElementById('convPanel'),
+    document.getElementById('fnPanel'),
+    document.getElementById('provPanel')
+  ];
+  var collapsed = panels.map(function(p) { return p.classList.contains('panel-collapsed'); });
+
+  // Calculate sizes: collapsed panels get fixed px converted to %, rest share remaining
+  var collapsedPct = 0;
+  var expandedTotal = 0;
+  for (var i = 0; i < 3; i++) {
+    if (collapsed[i]) {
+      collapsedPct += (_COLLAPSED_PX / totalH) * 100;
+    } else {
+      expandedTotal += _savedSizes[i];
     }
   }
-  if (expandedCount < 2) { _splitInstance = null; return; }
-  // Normalize sizes to 100
-  var total = 0;
-  for (var s = 0; s < sizes.length; s++) total += sizes[s];
-  for (var s2 = 0; s2 < sizes.length; s2++) sizes[s2] = sizes[s2] / total * 100;
+  var remainPct = 100 - collapsedPct;
+  var sizes = [];
+  var minSizes = [];
+  for (var j = 0; j < 3; j++) {
+    if (collapsed[j]) {
+      sizes.push((_COLLAPSED_PX / totalH) * 100);
+      minSizes.push(_COLLAPSED_PX);
+    } else {
+      sizes.push(expandedTotal > 0 ? _savedSizes[j] / expandedTotal * remainPct : remainPct / 3);
+      minSizes.push(40);
+    }
+  }
 
-  _splitInstance = Split(ids, {
+  _splitInstance = Split(_panelIds, {
     direction: 'vertical',
     sizes: sizes,
-    minSize: 40,
+    minSize: minSizes,
     gutterSize: 4,
+    snapOffset: 0,
     onDragEnd: function(newSizes) {
-      // Save sizes back to _savedSizes for expanded panels
-      var si = 0;
-      for (var pi = 0; pi < panels.length; pi++) {
-        if (!panels[pi].classList.contains('panel-collapsed')) {
-          _savedSizes[pi] = newSizes[si];
-          si++;
-        }
+      // Save only expanded panel sizes
+      for (var k = 0; k < 3; k++) {
+        if (!collapsed[k]) _savedSizes[k] = newSizes[k];
       }
     }
   });
@@ -2716,6 +2734,7 @@ function togglePanel(name) {
 
 // Init on load
 window.addEventListener('DOMContentLoaded', function() { _initSplit(); });
+window.addEventListener('resize', function() { _initSplit(); });
 
 // ===== Provider Info =====
 function formatProviderLabel(info) {
