@@ -709,14 +709,17 @@ html, body {
   background: rgba(198,120,221,0.2);
 }
 .model-dropdown {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
+  position: fixed;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 3px;
-  z-index: 100;
+  z-index: 1000;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
 }
 .model-dropdown .runtime-badge.model {
   background: rgba(75,82,99,0.3);
@@ -2818,11 +2821,14 @@ function toggleModelDropdown() {
     dropdown.appendChild(item);
   });
 
-  badge.style.position = 'relative';
-  badge.appendChild(dropdown);
+  // Position dropdown below the badge using fixed coordinates
+  var rect = badge.getBoundingClientRect();
+  dropdown.style.top = (rect.bottom + 4) + 'px';
+  dropdown.style.left = rect.left + 'px';
+  document.body.appendChild(dropdown);
 
   var close = function(e) {
-    if (!badge.contains(e.target)) {
+    if (e.target !== badge && !dropdown.contains(e.target)) {
       dropdown.remove();
       document.removeEventListener('click', close);
     }
