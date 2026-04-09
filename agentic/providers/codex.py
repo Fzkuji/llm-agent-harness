@@ -106,7 +106,8 @@ class CodexRuntime(Runtime):
             )
 
     def list_models(self) -> list[str]:
-        """Return available models based on login method."""
+        """Return available models by querying OpenAI API (for API key mode)
+        or returning subscription models (for ChatGPT login mode)."""
         try:
             result = subprocess.run(
                 [self.cli_path, "login", "status"],
@@ -115,12 +116,35 @@ class CodexRuntime(Runtime):
             output = (result.stdout + result.stderr).strip()
             if "ChatGPT" in output:
                 return ["gpt-5.4", "gpt-5.4-mini"]
-            else:
-                # API key mode — all models available
-                return ["o3-pro", "o3", "o4-mini", "gpt-5.4", "gpt-5.4-mini",
-                        "gpt-5.4-nano", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"]
         except Exception:
-            return ["gpt-5.4", "gpt-5.4-mini"]
+            pass
+
+        # API key mode — query OpenAI API for real available models
+        try:
+            import openai
+            client = openai.OpenAI()
+            all_models = client.models.list()
+            # Filter: only chat-capable models, exclude audio/realtime/image/search/transcribe/tts/instruct
+            skip = ("audio", "realtime", "image", "search", "transcribe", "tts",
+                    "instruct", "embed", "davinci", "babbage", "whisper", "dall-e",
+                    "moderation", "codex", "chat-latest", "chatgpt", "deep-research",
+                    "diarize", "gpt-3.5")
+            models = []
+            for m in all_models:
+                mid = m.id
+                if not any(mid.startswith(p) for p in ("gpt-", "o1-", "o3-", "o4-")):
+                    continue
+                if any(s in mid for s in skip):
+                    continue
+                # Skip dated variants (e.g. gpt-5-2025-08-07)
+                parts = mid.split("-")
+                if len(parts) >= 3 and any(p.startswith(("2024", "2025", "2026")) for p in parts):
+                    continue
+                models.append(mid)
+            models.sort(key=lambda x: (not x.startswith("o"), x))
+            return models if models else ["o4-mini", "gpt-4.1", "gpt-4.1-mini"]
+        except Exception:
+            return ["o4-mini", "gpt-4.1", "gpt-4.1-mini"]
 
     def _call(self, content: list[dict], model: str = None, response_format: dict = None) -> str:
         """Call Codex CLI with the content list.
