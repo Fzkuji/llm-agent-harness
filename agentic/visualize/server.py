@@ -1291,44 +1291,23 @@ def create_app():
     @app.get("/api/models")
     async def list_models():
         """List available models for the current provider."""
-        # Static fallback lists for providers without auto-detection
-        static_models = {
-            "claude-code": ["sonnet", "opus", "haiku"],
-            "codex": ["gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.3-codex-spark", "gpt-5.2"],
-            "gemini-cli": ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"],
-            "anthropic": [
-                "claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5-20251001",
-            ],
-            "openai": ["o4-mini", "o3", "gpt-5.4", "gpt-5.4-mini", "gpt-4.1", "gpt-4.1-mini"],
-            "gemini": ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"],
-        }
         # Ensure runtime is initialized
         global _default_provider, _default_runtime
         with _runtime_lock:
             if _default_runtime is None:
                 _default_provider, _default_runtime = _detect_default_provider()
 
-        conv_id = None  # Could be passed as query param in future
         provider = _default_provider or "unknown"
-        current_model = _default_runtime.model if _default_runtime else "default"
-
-        # Check conversation-specific runtime
-        if conv_id:
-            with _conversations_lock:
-                conv = _conversations.get(conv_id)
-            if conv and conv.get("runtime"):
-                current_model = conv["runtime"].model
-                provider = conv.get("provider_name", provider)
-
-        # Auto-detect models if the runtime supports it
         runtime = _default_runtime
-        if hasattr(runtime, 'list_models'):
+        current_model = runtime.model if runtime else "default"
+
+        # Auto-detect models from the runtime
+        model_list = []
+        if runtime and hasattr(runtime, 'list_models'):
             try:
                 model_list = runtime.list_models()
-            except Exception:
-                model_list = static_models.get(provider, [])
-        else:
-            model_list = static_models.get(provider, [])
+            except Exception as e:
+                print(f"[list_models] {provider} error: {e}")
         # Ensure current model is in the list
         if current_model and current_model not in model_list:
             model_list = [current_model] + model_list
