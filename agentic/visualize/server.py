@@ -1289,7 +1289,7 @@ def create_app():
             return JSONResponse(content={"error": str(e)}, status_code=400)
 
     @app.get("/api/models")
-    async def list_models(conv_id: Optional[str] = None):
+    async def list_models():
         """List available models for the current provider."""
         # Ensure runtime is initialized
         global _default_provider, _default_runtime
@@ -1299,12 +1299,6 @@ def create_app():
 
         provider = _default_provider or "unknown"
         runtime = _default_runtime
-        if conv_id:
-            with _conversations_lock:
-                conv = _conversations.get(conv_id)
-            if conv and conv.get("runtime"):
-                runtime = conv["runtime"]
-                provider = conv.get("provider_name", provider)
         current_model = runtime.model if runtime else "default"
 
         # Auto-detect models from the runtime
@@ -1331,26 +1325,21 @@ def create_app():
             return JSONResponse(content={"error": "Missing model"}, status_code=400)
         model = body["model"].strip()
         conv_id = body.get("conv_id")
-        with _runtime_lock:
-            runtime = None
-            provider_info_conv_id = None
-            if conv_id:
-                with _conversations_lock:
-                    conv = _conversations.get(conv_id)
-                if conv and conv.get("runtime"):
-                    runtime = conv["runtime"]
-                    provider_info_conv_id = conv_id
-            if runtime is None:
-                runtime = _default_runtime
-            if runtime is None:
-                return JSONResponse(content={"error": "No active runtime"}, status_code=400)
-            if runtime.model == model:
-                return JSONResponse(content={"switched": True, "model": model, "unchanged": True})
-
-            runtime.model = model
-            info = _get_provider_info(provider_info_conv_id)
-        _broadcast(json.dumps({"type": "provider_changed", "data": info}))
-        return JSONResponse(content={"switched": True, "model": model})
+        if conv_id:
+            with _conversations_lock:
+                conv = _conversations.get(conv_id)
+            if conv and conv.get("runtime"):
+                conv["runtime"].model = model
+                info = _get_provider_info(conv_id)
+                _broadcast(json.dumps({"type": "provider_changed", "data": info}))
+                return JSONResponse(content={"switched": True, "model": model})
+        # Update default runtime
+        if _default_runtime:
+            _default_runtime.model = model
+            info = _get_provider_info()
+            _broadcast(json.dumps({"type": "provider_changed", "data": info}))
+            return JSONResponse(content={"switched": True, "model": model})
+        return JSONResponse(content={"error": "No active runtime"}, status_code=400)
 
     @app.get("/api/config")
     async def get_config():

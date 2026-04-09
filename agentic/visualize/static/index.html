@@ -714,20 +714,12 @@ html, body {
   flex-direction: column;
   align-items: flex-start;
   gap: 3px;
-  z-index: 4000;
+  z-index: 1000;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 6px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.35);
-  width: max-content;
-  max-width: calc(100vw - 16px);
-  max-height: calc(100vh - 16px);
-  overflow-x: hidden;
-  overflow-y: auto;
-  box-sizing: border-box;
-  pointer-events: auto;
-  visibility: hidden;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
 }
 .model-dropdown .runtime-badge.model {
   background: rgba(75,82,99,0.3);
@@ -1383,10 +1375,6 @@ var isRunning = false;
 var execLogStartTime = 0;
 var _modelList = [];
 var _currentModel = '';
-var _modelDropdown = null;
-var _modelDropdownCloseHandler = null;
-var _modelSwitchInFlight = false;
-var _lastProviderChangeKey = '';
 var programsMeta = { favorites: [], folders: {} };
 
 // ===== WebSocket =====
@@ -1466,11 +1454,7 @@ function handleMessage(msg) {
       updateProviderBadge(msg.data);
       loadProviders();
       if (msg.type === 'provider_changed') {
-        var providerKey = getProviderChangeKey(msg.data);
-        if (providerKey !== _lastProviderChangeKey) {
-          _lastProviderChangeKey = providerKey;
-          addSystemMessage('Switched to ' + formatProviderLabel(msg.data));
-        }
+        addSystemMessage('Switched to ' + formatProviderLabel(msg.data));
       }
       break;
     case 'pong':
@@ -2401,7 +2385,6 @@ function clickFunction(name, category) {
 function switchConversation(convId) {
   currentConvId = convId;
   localStorage.setItem('agentic_conv_id', convId);
-  _lastProviderChangeKey = '';
   renderConversations();
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ action: 'load_conversation', conv_id: convId }));
@@ -2523,7 +2506,6 @@ function renderConversationMessages(conv) {
 function newConversation() {
   currentConvId = null;
   localStorage.removeItem('agentic_conv_id');
-  _lastProviderChangeKey = '';
   pendingResponses = {};
   trees = [];
   var container = document.getElementById('chatMessages');
@@ -2792,11 +2774,7 @@ function updateProviderBadge(info) {
 
 async function loadModelPills() {
   try {
-    var url = '/api/models';
-    if (currentConvId) {
-      url += '?conv_id=' + encodeURIComponent(currentConvId);
-    }
-    var resp = await fetch(url);
+    var resp = await fetch('/api/models');
     var data = await resp.json();
     _modelList = data.models || [];
     _currentModel = data.current || _modelList[0] || '';
@@ -2809,70 +2787,14 @@ async function loadModelPills() {
   badge.onclick = toggleModelDropdown;
 }
 
-function closeModelDropdown() {
-  if (_modelDropdownCloseHandler) {
-    document.removeEventListener('click', _modelDropdownCloseHandler);
-    _modelDropdownCloseHandler = null;
-  }
-  if (_modelDropdown) {
-    _modelDropdown.remove();
-    _modelDropdown = null;
-  }
-}
-
-function getProviderChangeKey(info) {
-  if (!info) return '';
-  return [
-    info.provider || '',
-    info.type || '',
-    info.model || '',
-    info.runtime || ''
-  ].join('|');
-}
-
-function positionModelDropdown(dropdown, badge) {
-  var rect = badge.getBoundingClientRect();
-  var margin = 8;
-  var gap = 6;
-
-  dropdown.style.minWidth = Math.max(160, Math.round(rect.width)) + 'px';
-  dropdown.style.left = '0px';
-  dropdown.style.top = '0px';
-  dropdown.style.visibility = 'hidden';
-
-  document.documentElement.appendChild(dropdown);
-
-  var dropdownWidth = dropdown.offsetWidth;
-  var dropdownHeight = dropdown.offsetHeight;
-  var left = Math.min(Math.max(rect.left, margin), Math.max(margin, window.innerWidth - dropdownWidth - margin));
-  var top = rect.bottom + gap;
-
-  if (top + dropdownHeight > window.innerHeight - margin) {
-    top = Math.max(margin, rect.top - dropdownHeight - gap);
-  }
-  if (top < margin) {
-    top = margin;
-  }
-
-  dropdown.style.left = Math.round(left) + 'px';
-  dropdown.style.top = Math.round(top) + 'px';
-  dropdown.style.visibility = 'visible';
-}
-
-function toggleModelDropdown(event) {
-  if (event && event.stopPropagation) event.stopPropagation();
+function toggleModelDropdown() {
   var badge = document.getElementById('modelBadge');
-  if (!badge) return;
   var existing = document.getElementById('modelDropdown');
-  if (existing) {
-    closeModelDropdown();
-    return;
-  }
+  if (existing) { existing.remove(); return; }
 
   var dropdown = document.createElement('div');
   dropdown.id = 'modelDropdown';
   dropdown.className = 'model-dropdown';
-  dropdown.addEventListener('click', function(e) { e.stopPropagation(); });
 
   _modelList.forEach(function(m) {
     var item = document.createElement('span');
@@ -2881,12 +2803,7 @@ function toggleModelDropdown(event) {
     item.style.cursor = 'pointer';
     item.addEventListener('click', async function(e) {
       e.stopPropagation();
-      if (_modelSwitchInFlight) return;
-      if (m === _currentModel) {
-        closeModelDropdown();
-        return;
-      }
-      _modelSwitchInFlight = true;
+      if (m === _currentModel) { dropdown.remove(); return; }
       try {
         var resp = await fetch('/api/model', {
           method: 'POST',
@@ -2899,24 +2816,24 @@ function toggleModelDropdown(event) {
           badge.textContent = m;
         }
       } catch(err) {}
-      _modelSwitchInFlight = false;
-      closeModelDropdown();
+      dropdown.remove();
     });
     dropdown.appendChild(item);
   });
 
-  _modelDropdown = dropdown;
-  requestAnimationFrame(function() {
-    if (!_modelDropdown || !_modelDropdown.isConnected) return;
-    positionModelDropdown(_modelDropdown, badge);
-  });
+  // Position dropdown below the badge using fixed coordinates
+  var rect = badge.getBoundingClientRect();
+  dropdown.style.top = (rect.bottom + 4) + 'px';
+  dropdown.style.left = rect.left + 'px';
+  document.body.appendChild(dropdown);
 
-  _modelDropdownCloseHandler = function(e) {
-    if (!_modelDropdown) return;
-    if (e.target === badge || _modelDropdown.contains(e.target)) return;
-    closeModelDropdown();
+  var close = function(e) {
+    if (e.target !== badge && !dropdown.contains(e.target)) {
+      dropdown.remove();
+      document.removeEventListener('click', close);
+    }
   };
-  document.addEventListener('click', _modelDropdownCloseHandler);
+  setTimeout(function() { document.addEventListener('click', close); }, 0);
 }
 
 function addSystemMessage(text) {
