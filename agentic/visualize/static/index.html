@@ -2675,8 +2675,21 @@ var _COLLAPSED_PX = 32; // collapsed panel = header only
 function _initSplit() {
   if (_splitInstance) { _splitInstance.destroy(); _splitInstance = null; }
 
+  // Clean up any residual inline styles from previous Split instance
+  var allPanels = document.querySelectorAll('.sidebar-panels > .sidebar-panel');
+  for (var ci = 0; ci < allPanels.length; ci++) {
+    allPanels[ci].style.removeProperty('height');
+    allPanels[ci].style.removeProperty('min-height');
+    allPanels[ci].style.removeProperty('max-height');
+    allPanels[ci].style.removeProperty('flex-basis');
+  }
+  // Remove leftover gutters
+  var oldGutters = document.querySelectorAll('.sidebar-panels > .gutter');
+  for (var gi = 0; gi < oldGutters.length; gi++) oldGutters[gi].remove();
+
   var container = document.querySelector('.sidebar-panels');
   if (!container) return;
+  // Force reflow so container height is accurate
   var totalH = container.offsetHeight;
   if (totalH <= 0) return;
 
