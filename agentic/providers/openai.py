@@ -87,6 +87,15 @@ class OpenAIRuntime(Runtime):
 
         self.client = openai.OpenAI(api_key=api_key, **client_kwargs_final)
 
+    def list_models(self) -> list[str]:
+        """Return available OpenAI chat completion models."""
+        try:
+            models = self.client.models.list()
+            prefixes = ("gpt-", "o1-", "o3-", "o4-")
+            return sorted([m.id for m in models if m.id.startswith(prefixes)])
+        except Exception:
+            return ["gpt-4o", "gpt-4o-mini", "o4-mini"]
+
     def _call(
         self,
         content: list[dict],

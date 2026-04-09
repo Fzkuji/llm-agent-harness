@@ -236,6 +236,10 @@ class Runtime:
             "or subclass Runtime and override _call()."
         )
 
+    def list_models(self) -> list[str]:
+        """Return available models for this runtime. Override in subclasses."""
+        return [self.model] if self.model and self.model != "default" else []
+
     async def _async_call(self, content: list[dict], model: str = "default", response_format: dict = None) -> str:
         """Async version of _call(). Override for async providers."""
         if self._call_fn is not None:

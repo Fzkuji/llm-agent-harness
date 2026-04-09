@@ -114,6 +114,10 @@ class ClaudeCodeRuntime(Runtime):
                 "  claude login"
             )
 
+    def list_models(self) -> list[str]:
+        """Return available Claude Code CLI models."""
+        return ["sonnet", "opus", "haiku"]
+
     def _ensure_process(self):
         """Start the persistent claude process if not already running.
 

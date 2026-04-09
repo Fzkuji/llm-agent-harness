@@ -86,6 +86,10 @@ class GeminiCLIRuntime(Runtime):
                 "  gemini"
             )
 
+    def list_models(self) -> list[str]:
+        """Return available Gemini CLI models."""
+        return ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"]
+
     def _call(self, content: list[dict], model: str = "default", response_format: dict = None) -> str:
         """Call Gemini CLI with the content list.
 

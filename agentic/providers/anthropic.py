@@ -78,6 +78,14 @@ class AnthropicRuntime(Runtime):
             )
         self.client = anthropic.Anthropic(api_key=api_key, **client_kwargs)
 
+    def list_models(self) -> list[str]:
+        """Return available Anthropic Claude models."""
+        try:
+            response = self.client.models.list(limit=100)
+            return sorted([m.id for m in response.data])
+        except Exception:
+            return ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"]
+
     def _call(
         self,
         content: list[dict],

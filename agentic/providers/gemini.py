@@ -84,6 +84,22 @@ class GeminiRuntime(Runtime):
             )
         self.client = genai.Client(api_key=api_key)
 
+    def list_models(self) -> list[str]:
+        """Return available Gemini models that support generateContent."""
+        try:
+            models = self.client.models.list()
+            result = []
+            for m in models:
+                methods = getattr(m, "supported_generation_methods", None) or []
+                if "generateContent" in methods:
+                    name = m.name
+                    if name.startswith("models/"):
+                        name = name[len("models/"):]
+                    result.append(name)
+            return sorted(result)
+        except Exception:
+            return ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"]
+
     def _call(
         self,
         content: list[dict],
