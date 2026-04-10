@@ -50,17 +50,63 @@ PROVIDERS = {
 }
 
 
+def _detect_caller_env() -> tuple[str, str] | None:
+    """Detect if we're running inside a known LLM agent environment.
+
+    Returns (provider, model) if detected, None otherwise.
+    """
+    # Running inside Claude Code?
+    if os.environ.get("CLAUDECODE") == "1" or os.environ.get("CLAUDE_CODE_ENTRYPOINT"):
+        if shutil.which("claude"):
+            return "claude-code", "sonnet"
+
+    # Running inside Codex CLI?
+    if os.environ.get("CODEX_CLI") or os.environ.get("CODEX_SANDBOX_TYPE"):
+        if shutil.which("codex"):
+            return "codex", None
+
+    return None
+
+
+def _load_provider_config() -> tuple[str, str] | None:
+    """Load provider preference from env vars or ~/.agentic/config.json.
+
+    Priority: env vars > config file.
+    Returns (provider, model) if configured, None otherwise.
+    """
+    # Environment variables
+    provider = os.environ.get("AGENTIC_PROVIDER")
+    model = os.environ.get("AGENTIC_MODEL")
+    if provider:
+        default_model = PROVIDERS.get(provider, (None, None, None))[2]
+        return provider, model or default_model
+
+    # Config file
+    try:
+        config_path = os.path.join(os.path.expanduser("~"), ".agentic", "config.json")
+        import json
+        with open(config_path) as f:
+            config = json.load(f)
+        provider = config.get("default_provider")
+        model = config.get("default_model")
+        if provider:
+            default_model = PROVIDERS.get(provider, (None, None, None))[2]
+            return provider, model or default_model
+    except (FileNotFoundError, json.JSONDecodeError, KeyError):
+        pass
+
+    return None
+
+
 def detect_provider() -> tuple[str, str]:
     """Auto-detect the best available LLM provider.
 
-    Detection priority (CLI-first, then API keys):
-      1. Claude Code CLI  (`claude` in PATH)       — subscription, no per-token cost
-      2. Codex CLI         (`codex` in PATH)        — uses codex auth
-      3. Gemini CLI        (`gemini` in PATH)       — uses Google account
-      4. Anthropic API     (ANTHROPIC_API_KEY set)  — pay per token
-      5. OpenAI API        (OPENAI_API_KEY set)     — pay per token
-      6. Gemini API        (GOOGLE_API_KEY or GOOGLE_GENERATIVE_AI_API_KEY set)
-                                                   — pay per token
+    Detection priority:
+      1. Env vars (AGENTIC_PROVIDER / AGENTIC_MODEL)
+      2. Config file (~/.agentic/config.json → default_provider / default_model)
+      3. Caller environment (inside Claude Code? Codex? → use the same)
+      4. Available CLI providers (claude → codex → gemini)
+      5. Available API keys (ANTHROPIC_API_KEY → OPENAI_API_KEY → GOOGLE_API_KEY)
 
     Returns:
         (provider_name, default_model) — e.g. ("claude-code", "sonnet")
@@ -68,7 +114,17 @@ def detect_provider() -> tuple[str, str]:
     Raises:
         RuntimeError if no provider is found.
     """
-    # CLI providers (no API key needed)
+    # 1-2. User config (env vars or config file)
+    result = _load_provider_config()
+    if result:
+        return result
+
+    # 3. Caller environment detection
+    result = _detect_caller_env()
+    if result:
+        return result
+
+    # 4. CLI providers (no API key needed)
     if shutil.which("claude"):
         return "claude-code", "sonnet"
     if shutil.which("codex"):
@@ -76,7 +132,7 @@ def detect_provider() -> tuple[str, str]:
     if shutil.which("gemini"):
         return "gemini-cli", "gemini-2.5-flash"
 
-    # API providers (need keys)
+    # 5. API providers (need keys)
     if os.environ.get("ANTHROPIC_API_KEY"):
         return "anthropic", "claude-sonnet-4-6"
     if os.environ.get("OPENAI_API_KEY"):
@@ -97,7 +153,63 @@ def detect_provider() -> tuple[str, str]:
         "    5. OpenAI:     export OPENAI_API_KEY=sk-...\n"
         "    6. Gemini:     export GOOGLE_API_KEY=...\n"
         "                    (or GOOGLE_GENERATIVE_AI_API_KEY=...)\n"
+        "\n"
+        "  Or set explicitly:\n"
+        "    export AGENTIC_PROVIDER=openai\n"
+        "    export AGENTIC_MODEL=gpt-5.4\n"
     )
+
+
+def check_providers() -> dict:
+    """Check availability of all providers.
+
+    Returns a dict with status of each provider:
+        {
+            "claude-code": {"available": True, "method": "CLI", "model": "sonnet"},
+            "openai": {"available": True, "method": "API", "model": "gpt-4.1"},
+            ...
+        }
+    """
+    results = {}
+    cli_checks = {
+        "claude-code": "claude",
+        "codex": "codex",
+        "gemini-cli": "gemini",
+    }
+    api_checks = {
+        "anthropic": "ANTHROPIC_API_KEY",
+        "openai": "OPENAI_API_KEY",
+        "gemini": ["GOOGLE_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY"],
+    }
+
+    for name, binary in cli_checks.items():
+        _, _, default_model = PROVIDERS[name]
+        results[name] = {
+            "available": shutil.which(binary) is not None,
+            "method": "CLI",
+            "model": default_model,
+        }
+
+    for name, env_vars in api_checks.items():
+        _, _, default_model = PROVIDERS[name]
+        if isinstance(env_vars, str):
+            env_vars = [env_vars]
+        has_key = any(os.environ.get(v) for v in env_vars)
+        results[name] = {
+            "available": has_key,
+            "method": "API",
+            "model": default_model,
+        }
+
+    # Mark which one would be auto-selected
+    try:
+        detected, _ = detect_provider()
+        if detected in results:
+            results[detected]["default"] = True
+    except RuntimeError:
+        pass
+
+    return results
 
 
 def create_runtime(provider: str = None, model: str = None, **kwargs):

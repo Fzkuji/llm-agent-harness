@@ -652,6 +652,30 @@ class Context:
             "children": [c._to_dict() for c in self.children],
         }
 
+    @classmethod
+    def from_dict(cls, data: dict, parent: Optional["Context"] = None) -> "Context":
+        """Deserialize a Context tree from a dict (inverse of _to_dict)."""
+        ctx = cls(
+            name=data.get("name", "unknown"),
+            prompt=data.get("prompt", ""),
+            params=data.get("params"),
+            parent=parent,
+            render=data.get("render", "default"),
+            compress=data.get("compress", False),
+            start_time=data.get("start_time"),
+        )
+        ctx.output = data.get("output")
+        ctx.raw_reply = data.get("raw_reply")
+        ctx.attempts = data.get("attempts", [])
+        ctx.error = data.get("error")
+        ctx.status = data.get("status", "idle")
+        if data.get("duration_ms") is not None and ctx.start_time:
+            ctx.end_time = ctx.start_time + data["duration_ms"] / 1000.0
+        for child_data in data.get("children", []):
+            child = cls.from_dict(child_data, parent=ctx)
+            ctx.children.append(child)
+        return ctx
+
     def _to_records(self, tree_depth: int = 0) -> list[dict]:
         """Flatten the tree into a list of dicts for JSONL export."""
         node = self._to_dict()

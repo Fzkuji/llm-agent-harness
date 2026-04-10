@@ -203,6 +203,83 @@ def _get_provider_info(conv_id: str = None) -> dict:
 
 
 _CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".agentic", "config.json")
+_SESSIONS_PATH = os.path.join(os.path.expanduser("~"), ".agentic", "visualizer_sessions.json")
+
+
+def _save_sessions():
+    """Persist all conversations to disk so they survive restarts."""
+    data = {}
+    with _conversations_lock:
+        for conv_id, conv in _conversations.items():
+            root_ctx = conv.get("root_context")
+            if root_ctx is None:
+                continue
+            runtime = conv.get("runtime")
+            session_id = getattr(runtime, '_session_id', None)
+            model = getattr(runtime, 'model', None)
+            data[conv_id] = {
+                "id": conv_id,
+                "title": conv.get("title", "Untitled"),
+                "provider_name": conv.get("provider_name"),
+                "session_id": session_id,
+                "model": model,
+                "created_at": conv.get("created_at"),
+                "context_tree": root_ctx._to_dict(),
+            }
+    try:
+        os.makedirs(os.path.dirname(_SESSIONS_PATH), exist_ok=True)
+        with open(_SESSIONS_PATH, "w") as f:
+            json.dump(data, f, ensure_ascii=False, default=str, indent=2)
+    except Exception as e:
+        _log(f"[save_sessions] error: {e}")
+
+
+def _restore_sessions():
+    """Restore conversations from disk on startup."""
+    global _default_provider, _default_runtime
+    try:
+        with open(_SESSIONS_PATH) as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return
+
+    for conv_id, conv_data in data.items():
+        try:
+            root_ctx = Context.from_dict(conv_data.get("context_tree", {}))
+            root_ctx.status = "idle"
+
+            provider_name = conv_data.get("provider_name")
+            session_id = conv_data.get("session_id")
+            model = conv_data.get("model")
+
+            # Recreate runtime with the saved session_id so it can resume
+            runtime = None
+            if provider_name:
+                try:
+                    runtime = _create_runtime_for_visualizer(provider_name)
+                    if model:
+                        runtime.model = model
+                    # Restore Codex session state
+                    if session_id and hasattr(runtime, '_session_id'):
+                        runtime._session_id = session_id
+                        runtime._turn_count = 1  # so next call uses resume
+                        runtime.has_session = True
+                except Exception:
+                    pass
+
+            with _conversations_lock:
+                _conversations[conv_id] = {
+                    "id": conv_id,
+                    "title": conv_data.get("title", "Untitled"),
+                    "root_context": root_ctx,
+                    "runtime": runtime,
+                    "provider_name": provider_name,
+                    "created_at": conv_data.get("created_at", time.time()),
+                    "_titled": True,
+                }
+            _log(f"[restore] conv {conv_id}: {conv_data.get('title')} (session={session_id})")
+        except Exception as e:
+            _log(f"[restore] failed for {conv_id}: {e}")
 
 
 def _load_config() -> dict:
@@ -831,6 +908,9 @@ def _execute_in_context(conv_id: str, msg_id: str, action: str,
                 conv["title"] = title + ("..." if len(title) >= 50 else "")
                 conv["_titled"] = True
 
+        # Persist sessions to disk after each execution
+        _save_sessions()
+
     except Exception as e:
         _broadcast_chat_response(conv_id, msg_id, {
             "type": "error",
@@ -1084,6 +1164,7 @@ async def _handle_ws_command(ws, cmd: dict):
                 conv = _conversations.pop(conv_id, None)
             if conv and conv.get("runtime") and hasattr(conv["runtime"], 'reset'):
                 conv["runtime"].reset()
+            _save_sessions()
 
     elif action == "clear_conversations":
         with _conversations_lock:
@@ -1091,6 +1172,7 @@ async def _handle_ws_command(ws, cmd: dict):
                 if conv.get("runtime") and hasattr(conv["runtime"], 'reset'):
                     conv["runtime"].reset()
             _conversations.clear()
+        _save_sessions()
 
     elif action == "load_conversation":
         conv_id = cmd.get("conv_id")
@@ -1118,6 +1200,22 @@ async def _handle_ws_command(ws, cmd: dict):
                     "provider_info": _get_provider_info(),
                 },
             }, default=str))
+
+
+    elif action == "list_conversations":
+        conv_list = []
+        with _conversations_lock:
+            for cid, conv in _conversations.items():
+                conv_list.append({
+                    "id": cid,
+                    "title": conv.get("title", "Untitled"),
+                    "created_at": conv.get("created_at"),
+                })
+        conv_list.sort(key=lambda c: c.get("created_at") or 0)
+        await ws.send_text(json.dumps({
+            "type": "conversations_list",
+            "data": conv_list,
+        }, default=str))
 
 
 # ---------------------------------------------------------------------------
@@ -1688,6 +1786,9 @@ def start_server(port: int = 8765, open_browser: bool = True) -> threading.Threa
     if _server_thread is not None and _server_thread.is_alive():
         print(f"Visualizer already running")
         return _server_thread
+
+    # Restore saved sessions from disk
+    _restore_sessions()
 
     # Register our event callback
     on_event(_on_context_event)

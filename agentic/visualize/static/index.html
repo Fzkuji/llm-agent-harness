@@ -1394,7 +1394,9 @@ function connect() {
   ws.onopen = function() {
     updateStatus('connected');
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-    // Restore conversation from localStorage on reconnect
+    // Request all saved conversations from server
+    ws.send(JSON.stringify({ action: 'list_conversations' }));
+    // Restore current conversation from localStorage
     var savedId = localStorage.getItem('agentic_conv_id');
     if (savedId) {
       currentConvId = savedId;
@@ -1453,6 +1455,18 @@ function handleMessage(msg) {
       break;
     case 'conversation_loaded':
       loadConversationData(msg.data);
+      break;
+    case 'conversations_list':
+      // Populate sidebar with server-known conversations
+      if (msg.data && msg.data.length > 0) {
+        for (var ci = 0; ci < msg.data.length; ci++) {
+          var c = msg.data[ci];
+          if (!conversations[c.id]) {
+            conversations[c.id] = { id: c.id, title: c.title, messages: [], created_at: c.created_at };
+          }
+        }
+        renderConversations();
+      }
       break;
     case 'status':
       isPaused = msg.paused;
