@@ -124,23 +124,23 @@ def compile_function(code: str, runtime: Runtime, name: str = None) -> callable:
             f"Generated code failed to execute:\n{code}\n\nError: {e}"
         ) from e
 
-    fn = find_function(namespace)
-    if fn is None:
+    compiled_func = find_function(namespace)
+    if compiled_func is None:
         raise ValueError(
             f"Generated code does not contain an @agentic_function:\n{code}"
         )
     if name:
-        fn.__name__ = name
-        fn.__qualname__ = name
+        compiled_func.__name__ = name
+        compiled_func.__qualname__ = name
 
     # Bind runtime and any approved imports into the generated function's globals
     target_globals = None
-    if hasattr(fn, '__wrapped__'):
-        target_globals = fn.__wrapped__.__globals__
-    elif hasattr(fn, '_fn') and fn._fn:
-        target_globals = fn._fn.__globals__
-    elif hasattr(fn, '__globals__'):
-        target_globals = fn.__globals__
+    if hasattr(compiled_func, '__wrapped__'):
+        target_globals = compiled_func.__wrapped__.__globals__
+    elif hasattr(compiled_func, '_fn') and compiled_func._fn:
+        target_globals = compiled_func._fn.__globals__
+    elif hasattr(compiled_func, '__globals__'):
+        target_globals = compiled_func.__globals__
 
     if target_globals is not None:
         for key, value in namespace.items():
@@ -148,7 +148,7 @@ def compile_function(code: str, runtime: Runtime, name: str = None) -> callable:
                 target_globals[key] = value
         target_globals['runtime'] = runtime
 
-    return fn
+    return compiled_func
 
 
 def find_function(namespace: dict) -> Optional[callable]:
@@ -268,3 +268,308 @@ def _collect_attempt_info(ctx, lines: list, depth: int = 0):
         lines.append(f"{prefix}{ctx.name}: error: {ctx.error}")
     for child in ctx.children:
         _collect_attempt_info(child, lines, depth + 1)
+
+
+# ── Base meta function ────────────────────────────────────────
+
+@agentic_function
+def generate_code(task: str, runtime: Runtime) -> str:
+    """Generate or modify Python code following the Agentic Programming specification.
+
+    This is the base meta function. All code generation/modification meta functions
+    (create, fix, improve, etc.) call this function. The design specification below
+    is the single source of truth.
+
+    ── Framework basics ──
+
+    In Agentic Programming, the function's docstring IS the LLM prompt.
+    When runtime.exec() is called, the framework automatically sends:
+    1. The full execution context (parent functions, sibling results)
+    2. The current function's docstring
+    3. The current function's parameters and their values
+    4. Whatever the function passes in content=[...]
+
+    So the docstring tells the LLM what to do; content ONLY carries data.
+
+    ── Function type decision ──
+
+    | Condition                     | Type                | @agentic_function? | runtime.exec()? |
+    |-------------------------------|---------------------|--------------------|-----------------|
+    | Needs LLM reasoning           | agentic function    | Yes                | Yes             |
+    | Purely deterministic logic    | plain Python        | No                 | No              |
+
+    ── Core rules ──
+
+    - One @agentic_function calls runtime.exec() AT MOST once.
+    - If you need multiple LLM calls, split into multiple @agentic_function
+      and have one function call the others.
+    - `agentic_function` and `runtime` are already available in scope.
+    - Standard library imports allowed (os, json, re, pathlib, math, etc.).
+    - No async/await.
+    - Type hints on all parameters and return type.
+    - Google-style docstring: one-line summary, Args, Returns.
+    - Docstrings must contain only actionable instructions (output format,
+      constraints, requirements). Never write filler like
+      "You are a helpful assistant" or "Complete the task".
+
+    ── Three usage patterns ──
+
+    Pattern 1: Single task (leaf function)
+    One function, one exec(), returns result. Most common case.
+
+        @agentic_function
+        def sentiment(text: str, runtime: Runtime) -> str:
+            \"\"\"Analyze the sentiment of the given text.
+            Return exactly one word: positive, negative, or neutral.
+
+            Args:
+                text: The text to analyze.
+
+            Returns:
+                One of: positive, negative, neutral.
+            \"\"\"
+            return runtime.exec(content=[
+                {"type": "text", "text": text},
+            ])
+
+    Pattern 2: Fixed sequence (orchestrator function)
+    Calls multiple @agentic_function in a fixed order decided by Python code.
+    May optionally call exec() once for a final summary.
+
+        @agentic_function
+        def research_pipeline(task: str, runtime: Runtime) -> dict:
+            \"\"\"Execute research pipeline: survey -> gaps -> ideas.
+
+            Args:
+                task: The research topic.
+                runtime: LLM runtime instance.
+
+            Returns:
+                Dict with survey, gaps, and ideas.
+            \"\"\"
+            survey = survey_topic(topic=task, runtime=runtime)
+            gaps = identify_gaps(survey=survey, runtime=runtime)
+            ideas = generate_ideas(gaps=gaps, runtime=runtime)
+            return {"survey": survey, "gaps": gaps, "ideas": ideas}
+
+    Pattern 3: LLM-driven dispatch (LLM chooses which function to call)
+    The function calls exec() once to let the LLM analyze the task and
+    choose which sub-function to invoke. Python code then parses the
+    LLM's choice and executes it. This requires:
+    - A function registry (available dict)
+    - build_catalog() to generate what the LLM sees
+    - parse_action() to extract the LLM's choice
+    - prepare_args() to merge all parameter sources
+
+    Imports needed:
+        from agentic.functions.build_catalog import build_catalog
+        from agentic.functions.parse_action import parse_action
+        from agentic.functions.prepare_args import prepare_args
+
+    Full example:
+
+        @agentic_function
+        def summarize_text(text: str, runtime: Runtime) -> str:
+            \"\"\"Summarize the given text into a concise paragraph.
+
+            Args:
+                text: The text to summarize.
+
+            Returns:
+                A concise summary.
+            \"\"\"
+            return runtime.exec(content=[
+                {"type": "text", "text": text},
+            ])
+
+        @agentic_function
+        def polish_text(text: str, style: str, runtime: Runtime) -> str:
+            \"\"\"Polish text in the specified style.
+
+            Args:
+                text: The text to polish.
+                style: One of "academic", "casual", "concise".
+
+            Returns:
+                Polished text.
+            \"\"\"
+            return runtime.exec(content=[
+                {"type": "text", "text": f"Polish in {style} style:\\n\\n{text}"},
+            ])
+
+        @agentic_function
+        def fix_call_params(func_name: str, missing: list, runtime: Runtime) -> dict:
+            \"\"\"Fill in missing function call parameters.
+
+            Args:
+                func_name: Name of the function being called.
+                missing: List of missing parameter names.
+
+            Returns:
+                Dict of parameter name -> value.
+            \"\"\"
+            reply = runtime.exec(content=[
+                {"type": "text", "text": (
+                    f"Function {func_name} is missing parameters: {missing}\\n"
+                    "Provide them as JSON."
+                )},
+            ])
+            from agentic.functions.parse_action import parse_action
+            result = parse_action(reply)
+            return result.get("args", result) if result else {}
+
+        @agentic_function
+        def research_assistant(task: str, runtime: Runtime) -> str:
+            \"\"\"Analyze the task and choose the right sub-function.
+
+            Args:
+                task: User's task description.
+                runtime: LLM runtime instance.
+
+            Returns:
+                Sub-function result, or LLM's direct reply.
+            \"\"\"
+            from agentic.functions.build_catalog import build_catalog
+            from agentic.functions.parse_action import parse_action
+            from agentic.functions.prepare_args import prepare_args
+
+            # Function registry
+            available = {
+                "summarize_text": {
+                    "function": summarize_text,
+                    "description": "Summarize text into a concise paragraph",
+                    "input": {
+                        "text": {"source": "context"},
+                    },
+                    "output": {"summary": str},
+                },
+                "polish_text": {
+                    "function": polish_text,
+                    "description": "Polish text in a specified style",
+                    "input": {
+                        "text": {"source": "context"},
+                        "style": {
+                            "source": "llm",
+                            "type": str,
+                            "options": ["academic", "casual", "concise"],
+                            "description": "Writing style",
+                        },
+                    },
+                    "output": {"polished_text": str},
+                },
+            }
+
+            catalog = build_catalog(available)
+
+            reply = runtime.exec(content=[
+                {"type": "text", "text": (
+                    f"{task}\\n\\n"
+                    "== Functions ==\\n"
+                    "To call a function, append the JSON at the end.\\n"
+                    "If no function is needed, reply directly.\\n\\n"
+                    f"{catalog}"
+                )},
+            ])
+
+            action = parse_action(reply)
+            if not action or action["call"] not in available:
+                return reply
+
+            args = prepare_args(
+                action=action,
+                available=available,
+                runtime=runtime,
+                context={"text": task},
+                fix_fn=fix_call_params,
+            )
+            result = available[action["call"]]["function"](**args)
+            return result
+
+    ── Function registry structure (for Pattern 3) ──
+
+    available = {
+        "function_name": {
+            "function": the_callable,         # The actual function object
+            "description": "What it does",    # Shown to LLM
+            "input": {
+                "param_name": {
+                    "source": "context",      # Auto-filled by code, hidden from LLM
+                },
+                "other_param": {
+                    "source": "llm",          # LLM must decide this
+                    "type": str,              # Optional, for display
+                    "options": ["a", "b"],    # Optional, constrain choices
+                    "description": "...",     # Optional, shown to LLM
+                },
+            },
+            "output": {"field": type},        # What the function returns
+        },
+    }
+
+    Parameter sources:
+    | source    | Who provides   | LLM sees it? |
+    |-----------|----------------|--------------|
+    | "context" | Python code    | No           |
+    | "llm"     | LLM decides    | Yes          |
+    | runtime   | Auto-injected  | No           |
+
+    The LLM only outputs what it needs to decide. Everything else is
+    auto-filled by code.
+
+    ── Docstring rules ──
+
+    Must include:
+    - One-line summary of what the function does
+    - Specific instructions (output format, constraints)
+    - Args section with parameter descriptions
+    - Returns section
+
+    Must NOT include:
+    - Role-playing ("You are a helpful assistant")
+    - Empty directives ("Complete the task", "Do your best")
+    - Data that's already in content
+
+    ── Content rules ──
+
+    runtime.exec(content=[...]) only carries data, never instructions:
+
+        # CORRECT: data only
+        runtime.exec(content=[{"type": "text", "text": text}])
+
+        # WRONG: instructions in content
+        runtime.exec(content=[{"type": "text", "text": f"Please analyze: {text}. Return one word."}])
+
+    ── Robustness rules ──
+
+    - Specific output format: define precisely in docstring, don't let LLM guess.
+    - Text input: handle special characters, escaping, edge cases.
+    - External state (files, APIs): validate inputs, clear error messages.
+    - Result used by other functions: prefer structured data (dict/JSON).
+    - Formatting matters: include example in docstring.
+
+    ── Error handling for dispatch (Pattern 3) ──
+
+    | Situation                     | Handling                              |
+    |-------------------------------|---------------------------------------|
+    | Function name not in registry | Return LLM's raw reply                |
+    | Extra parameters from LLM    | Filter out, keep only valid ones      |
+    | Missing required parameters   | Call fix_call_params to fill them in  |
+    | JSON parse failure            | Return LLM's raw reply                |
+
+    ── Output format ──
+
+    Respond with ONLY the Python code inside a ```python code fence.
+    No explanation, no commentary outside the fence.
+    If unsure about the task, respond with ONLY "QUESTION: <your question>".
+
+    Args:
+        task: Complete task description including all necessary data
+              (source code, errors, instructions, etc.).
+        runtime: LLM runtime instance.
+
+    Returns:
+        LLM's raw reply (containing code fence or question).
+    """
+    return runtime.exec(content=[
+        {"type": "text", "text": task},
+    ])
