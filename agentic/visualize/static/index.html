@@ -2859,11 +2859,11 @@ function updateProviderBadge(info) {
     if (sessBadge) sessBadge.style.display = 'none';
     return;
   }
-  provBadge.textContent = info.provider + (info.type ? ' \u00b7 ' + info.type : '') + (_hasActiveSession ? ' \ud83d\udd12' : '');
-  provBadge.style.display = '';
-  // Show session ID badge (short form)
+  // Update session state BEFORE rendering text
   var hadSession = _hasActiveSession;
   _hasActiveSession = !!info.session_id;
+  provBadge.textContent = info.provider + (info.type ? ' \u00b7 ' + info.type : '') + (_hasActiveSession ? ' \ud83d\udd12' : '');
+  provBadge.style.display = '';
   if (hadSession !== _hasActiveSession) loadProviders();
   if (sessBadge) {
     if (info.session_id) {
