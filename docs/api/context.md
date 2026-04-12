@@ -191,12 +191,14 @@ Context.save(path: str)
 | 扩展名 | 格式 |
 |--------|------|
 | `.md` | 人类可读（同 `tree()` 输出） |
-| `.jsonl` | 每行一个 JSON 对象，包含所有字段 |
+| `.json` | 单个嵌套 JSON 对象，保留完整树结构 |
+| `.jsonl` | 每行一个 JSON 对象，适合流式处理或逐行分析 |
 
 #### 示例
 
 ```python
-login_flow.context.save("logs/run.jsonl")  # 机器可读
+login_flow.context.save("logs/run.json")   # 完整嵌套树
+login_flow.context.save("logs/run.jsonl")  # 机器可读（逐行）
 login_flow.context.save("logs/run.md")     # 人类可读
 ```
 
