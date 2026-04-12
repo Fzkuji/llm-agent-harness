@@ -24,6 +24,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Stderr pipe buffer deadlock in CLI providers
 - Per-call readline thread replaced with persistent queue-based stdout reader
 - Context branch indentation
+- `pytest tests/` now works from a fresh checkout without manually exporting `PYTHONPATH`
 
 ## [0.3.0] - 2025-04-04
 
