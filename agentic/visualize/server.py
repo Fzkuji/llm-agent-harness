@@ -831,7 +831,8 @@ def _format_result(result) -> str:
             params = []
         msg = f"Created function `{result_name}`."
         if params:
-            msg += f"\nUsage: `run {result_name} {' '.join(f'{p}=\"...\"' for p in params)}`"
+            param_str = ' '.join(p + '="..."' for p in params)
+            msg += f"\nUsage: `run {result_name} {param_str}`"
         if result_doc:
             msg += f"\nDescription: {result_doc}"
         functions = _discover_functions()
