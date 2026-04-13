@@ -2437,6 +2437,8 @@ function renderFollowUpIfNeeded(content, funcName) {
 }
 
 function submitFollowUpAnswer(funcName) {
+  // This is called from the RESULT card (fix() already returned follow_up).
+  // The execution thread is gone, so we must retry_overwrite with original cmd + Q&A.
   var inp = document.getElementById('followUpResultInput');
   if (!inp) return;
   var answer = inp.value.trim();
@@ -2459,38 +2461,34 @@ function submitFollowUpAnswer(funcName) {
       '<div style="color:var(--text-secondary)">' + escHtml(answer) + '</div>';
   }
 
-  // Find the original run command and append Q&A to instruction
-  var runCmd = '';
+  // Find the ORIGINAL run command
+  var originalCmd = '';
   if (currentConvId && conversations[currentConvId]) {
     var msgs = conversations[currentConvId].messages || [];
     for (var i = msgs.length - 1; i >= 0; i--) {
       if (msgs[i].role === 'user' && msgs[i].display === 'runtime') {
-        runCmd = msgs[i].content || '';
+        originalCmd = msgs[i].original_content || msgs[i].content || '';
         break;
       }
     }
   }
 
-  // Simple approach: parse the command into parts, modify instruction, rebuild
+  // Build new command: original + Q&A appended to instruction
   var qaText = question
     ? ('Q: ' + question + ' A: ' + answer)
     : ('Additional info: ' + answer);
 
-  // Use parseRunCommandForDisplay to get funcName, then rebuild with modified instruction
-  var parsed = parseRunCommandForDisplay(runCmd);
+  var runCmd = originalCmd;
+  var parsed = parseRunCommandForDisplay(originalCmd);
   if (parsed.funcName) {
-    // Re-parse kwargs from original command (simple key=value extraction)
     var kwargs = {};
-    var paramStr = runCmd.replace(/^run\s+\S+\s*/, ''); // remove "run funcName"
-    // Parse key=value pairs, respecting quotes
+    var paramStr = originalCmd.replace(/^run\s+\S+\s*/, '');
     var paramRegex = /(\w+)=(?:"([^"]*)"|'([^']*)'|(\S+))/g;
     var pm;
     while ((pm = paramRegex.exec(paramStr)) !== null) {
       kwargs[pm[1]] = pm[2] !== undefined ? pm[2] : (pm[3] !== undefined ? pm[3] : pm[4]);
     }
-    // Append Q&A to instruction
     kwargs['instruction'] = (kwargs['instruction'] || '') + ' [' + qaText + ']';
-    // Rebuild command
     var parts = ['run', parsed.funcName];
     for (var k in kwargs) {
       var v = kwargs[k];
@@ -2519,19 +2517,15 @@ function submitFollowUpAnswer(funcName) {
   }
   setRunning(true);
 
-  // Re-run via retry_overwrite
-  console.log('[followUp] ws ready:', ws && ws.readyState === 1, 'runCmd:', runCmd.substring(0, 100));
+  // Re-run via retry_overwrite (execution thread is gone, must restart)
   if (ws && ws.readyState === 1) {
-    var payload = {
+    ws.send(JSON.stringify({
       action: 'retry_overwrite',
       conv_id: currentConvId,
       function: funcName,
       text: runCmd,
-    };
-    console.log('[followUp] sending:', JSON.stringify(payload).substring(0, 200));
-    ws.send(JSON.stringify(payload));
-  } else {
-    console.error('[followUp] ws not connected! readyState:', ws ? ws.readyState : 'null');
+      original_content: originalCmd,
+    }));
   }
 }
 
@@ -2566,14 +2560,14 @@ function retryCurrentBlock(funcName) {
     return;
   }
 
-  // Find the user command for this function
+  // Find the ORIGINAL user command for this function (ignoring retry modifications)
   var msgs = conversations[currentConvId].messages || [];
   var userCmd = null;
   for (var i = msgs.length - 1; i >= 0; i--) {
     if (msgs[i].role === 'user' && msgs[i].display === 'runtime') {
       var parsed = parseRunCommandForDisplay(msgs[i].content || '');
       if (parsed.funcName === funcName || !funcName) {
-        userCmd = msgs[i].content;
+        userCmd = msgs[i].original_content || msgs[i].content;
         break;
       }
     }
@@ -2921,10 +2915,13 @@ function handleChatResponse(data) {
           var treeId = 'itree_live_' + (data.function || 'run').replace(/[^a-zA-Z0-9]/g, '_');
           // First time: build full structure
           if (!content.querySelector('.inline-tree')) {
+            // Preserve any existing follow-up container (ask_user input)
+            var existingFU = content.querySelector('.follow-up-container');
             content.innerHTML =
               '<div class="runtime-result"><span class="runtime-return-label">return:</span></div>' +
               '<div class="typing-indicator"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>' +
               renderInlineTree(data.tree, treeId);
+            if (existingFU) content.appendChild(existingFU);
           } else {
             // Subsequent updates: only update tree body and status icon
             var treeBody = content.querySelector('.inline-tree-body');

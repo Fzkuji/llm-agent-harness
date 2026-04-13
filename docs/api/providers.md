@@ -34,7 +34,7 @@ npm install -g @google/gemini-cli
 
 ## AnthropicRuntime
 
-Anthropic Claude API。支持 text + image content blocks，自动 prompt caching。
+Anthropic Claude API。支持 text + image content blocks、`response_format` JSON 约束，自动 prompt caching。
 
 ```python
 from agentic.providers import AnthropicRuntime
@@ -73,6 +73,26 @@ rt.exec(content=[
     {"type": "text", "text": "...", "cache_control": {"type": "ephemeral"}},
     {"type": "text", "text": "..."},
 ])
+```
+
+### response_format
+
+Anthropic API 本身没有像 OpenAI 那样的原生 JSON schema 参数，这里采用文本约束方式追加一条“只返回匹配 schema 的 JSON”指令：
+
+```python
+result = rt.exec(
+    content=[{"type": "text", "text": "Extract title and authors"}],
+    response_format={
+        "type": "object",
+        "properties": {
+            "title": {"type": "string"},
+            "authors": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+        },
+    },
+)
 ```
 
 ### Image 支持

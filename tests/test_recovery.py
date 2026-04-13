@@ -5,6 +5,7 @@ Tests for error recovery: attempts tracking, fix() with new API.
 import pytest
 from agentic import agentic_function, Runtime
 from agentic.meta_functions import fix
+from agentic.meta_functions._helpers import clarify
 
 
 # ── attempts tracking ──────────────────────────────────────────
@@ -236,6 +237,48 @@ def test_fix_follow_up():
     assert "recursion" in result["question"]
 
 
+def test_clarify_treats_answered_qna_as_ready():
+    """clarify() should not re-ask once a Q/A clarification block exists."""
+    call_count = [0]
+
+    def mock_call(content, model="test", response_format=None):
+        call_count[0] += 1
+        return '{"ready": false, "question": "Should never be used."}'
+
+    runtime = Runtime(call=mock_call)
+    task = (
+        "Current code:\n```python\nprint('hi')\n```\n\n"
+        "Instruction: improve the prompt\n\n"
+        "Q: What should I change?\n"
+        "A: Just inspect the code and fix any issues."
+    )
+
+    result = clarify(task=task, runtime=runtime)
+    assert result == {"ready": True}
+    assert call_count[0] == 0
+
+
+def test_clarify_treats_retry_feedback_as_ready():
+    """clarify() should not re-ask when retry feedback is already present."""
+    call_count = [0]
+
+    def mock_call(content, model="test", response_format=None):
+        call_count[0] += 1
+        return '{"ready": false, "question": "Should never be used."}'
+
+    runtime = Runtime(call=mock_call)
+    task = (
+        "Current code:\n```python\nprint('hi')\n```\n\n"
+        "Instruction: improve the prompt\n\n"
+        "── Previous attempt feedback ──\n"
+        "Need clearer output format."
+    )
+
+    result = clarify(task=task, runtime=runtime)
+    assert result == {"ready": True}
+    assert call_count[0] == 0
+
+
 def test_fix_produces_code_directly():
     """fix() returns compiled function when LLM produces code."""
     def mock_call(content, model="test", response_format=None):
@@ -308,6 +351,90 @@ def restored():
     assert fixed_fn() == "ok"
     assert "Source not available for original" in prompts[0]
     assert "Original docstring" in prompts[0]
+
+
+def test_fix_omits_builtin_docstring_bloat():
+    """fix() keeps built-in fallbacks concise instead of dumping API docs."""
+    prompts = []
+
+    def mock_call(content, model="test", response_format=None):
+        prompts.append(content[-1]["text"] if content else "")
+        return '''@agentic_function
+def restored():
+    """Fixed."""
+    return "ok"'''
+
+    runtime = Runtime(call=mock_call)
+
+    fixed_fn = fix(fn=str, runtime=runtime)
+    assert fixed_fn() == "ok"
+    assert "Source not available for str" in prompts[0]
+    assert "Create a new string object" not in prompts[0]
+
+
+def test_fix_omits_api_style_docstring_bloat():
+    """fix() keeps source-less API-style callable docs out of the prompt."""
+    prompts = []
+
+    class MysteryCallable:
+        __doc__ = str.__doc__
+
+        def __call__(self):
+            return "broken"
+
+    def mock_call(content, model="test", response_format=None):
+        prompts.append(content[-1]["text"] if content else "")
+        if len(prompts) == 1:
+            return '{"ready": true}'
+        return '''@agentic_function
+def restored():
+    """Fixed."""
+    return "ok"'''
+
+    runtime = Runtime(call=mock_call)
+
+    fixed_fn = fix(fn=MysteryCallable(), runtime=runtime, instruction="improve the prompt")
+    assert callable(fixed_fn)
+    assert fixed_fn() == "ok"
+    assert "Source not available for unknown" in prompts[0]
+    assert "Create a new string object" not in prompts[0]
+
+
+def test_fix_uses_follow_up_answer_without_reasking():
+    """fix() should continue after an answered follow-up without re-clarifying."""
+    from agentic.context import set_ask_user
+
+    call_count = [0]
+    prompts = []
+
+    def mock_call(content, model="test", response_format=None):
+        call_count[0] += 1
+        prompts.append(content[-1]["text"] if content else "")
+        if call_count[0] == 1:
+            return '{"ready": false, "question": "What output format should I use?"}'
+        return '''@agentic_function
+def restored():
+    """Fixed."""
+    return "ok"'''
+
+    runtime = Runtime(call=mock_call)
+
+    @agentic_function
+    def original():
+        """Do something."""
+        return "original"
+
+    set_ask_user(lambda question: "Return plain text.")
+    try:
+        fixed_fn = fix(fn=original, runtime=runtime)
+    finally:
+        set_ask_user(None)
+
+    assert callable(fixed_fn)
+    assert fixed_fn() == "ok"
+    assert call_count[0] == 4  # clarify, generate, verify, conclude
+    assert "Q: What output format should I use?" in prompts[1]
+    assert "A: Return plain text." in prompts[1]
 
 
 def test_fix_includes_nested_child_errors():

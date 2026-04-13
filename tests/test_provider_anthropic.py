@@ -134,6 +134,25 @@ class TestAnthropicRuntime:
         decoded = base64.b64decode(content[0]["source"]["data"])
         assert decoded[:4] == b"\x89PNG"
 
+    def test_response_format_appended_as_json_instruction(self):
+        """response_format is appended as a JSON-only text instruction."""
+        rt = self._make_runtime()
+        schema = {"type": "object", "properties": {"answer": {"type": "string"}}}
+
+        rt._call(
+            [{"type": "text", "text": "Return JSON"}],
+            model="claude-sonnet-4-20250514",
+            response_format=schema,
+        )
+
+        call_kwargs = self.mock_client.messages.create.call_args[1]
+        content = call_kwargs["messages"][0]["content"]
+        assert len(content) == 2
+        assert content[-1]["type"] == "text"
+        assert "ONLY valid JSON" in content[-1]["text"]
+        assert '"answer"' in content[-1]["text"]
+        assert content[-1]["cache_control"] == {"type": "ephemeral"}
+
     def test_system_prompt_with_cache(self):
         """System prompt with cache_system=True adds cache_control."""
         rt = self._make_runtime(system="You are a helper.", cache_system=True)

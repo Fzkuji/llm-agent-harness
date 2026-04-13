@@ -9,7 +9,8 @@
     "sentiment",
     "_research_step",
     "gui_agent",
-    "research_agent"
+    "research_agent",
+    "test_framework"
   ],
   "folders": {}
 }

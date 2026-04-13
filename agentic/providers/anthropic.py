@@ -26,6 +26,7 @@ Usage:
 from __future__ import annotations
 
 import base64
+import json
 import mimetypes
 import os
 from typing import Optional
@@ -112,6 +113,12 @@ class AnthropicRuntime(Runtime):
             converted = self._convert_block(block)
             if converted:
                 messages_content.append(converted)
+
+        if response_format:
+            messages_content.append({
+                "type": "text",
+                "text": f"\n\nRespond with ONLY valid JSON matching: {json.dumps(response_format)}",
+            })
 
         # Enable prompt caching on the last content block
         if messages_content:

@@ -9,6 +9,7 @@ from agentic.runtime import Runtime
 from agentic.meta_functions._helpers import (
     extract_code, validate_code, compile_function,
     save_function, save_skill_template, guess_name,
+    _canonicalize_function_code,
     clarify, generate_code,
 )
 
@@ -61,6 +62,7 @@ def create(description: str, runtime: Runtime, name: str = None, as_skill: bool 
     response = generate_code(task=task, runtime=runtime)
     code = extract_code(response)
     fn_name = name or guess_name(code) or "generated"
+    code = _canonicalize_function_code(code, fn_name)
 
     save_function(code, fn_name, description)
     if as_skill:

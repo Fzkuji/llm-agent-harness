@@ -9,6 +9,7 @@ from agentic.runtime import Runtime
 from agentic.meta_functions._helpers import (
     extract_code, validate_code, compile_function,
     save_function, get_source,
+    _canonicalize_function_code,
     clarify, generate_code,
 )
 
@@ -52,10 +53,24 @@ def improve(
         callable — the improved function, or
         dict — {"type": "follow_up", "question": "..."} if LLM needs more info.
     """
+    import inspect as _inspect
+
     code = get_source(fn)
     fn_name = name or getattr(fn, '__name__', 'improved')
 
+    # Resolve file path for context
+    try:
+        _inner = getattr(fn, '__wrapped__', fn)
+        fn_filepath = _inspect.getfile(_inner)
+    except (TypeError, OSError):
+        fn_filepath = None
+
+    header = f"Function: {fn_name}"
+    if fn_filepath:
+        header += f"\nFile: {fn_filepath}"
+
     task = (
+        f"{header}\n\n"
         f"Improve the following function:\n\n"
         f"```python\n{code}\n```\n\n"
         f"Improvement goal: {goal}\n\n"
@@ -70,6 +85,12 @@ def improve(
     # Step 2: Generate code
     response = generate_code(task=task, runtime=runtime)
     improved_code = extract_code(response)
-    save_function(improved_code, fn_name, f"Improved: {goal}")
+    improved_code = _canonicalize_function_code(improved_code, fn_name)
+    save_function(
+        improved_code,
+        fn_name,
+        f"Improved: {goal}",
+        source_path=fn_filepath,
+    )
     validate_code(improved_code, response)
     return compile_function(improved_code, runtime, fn_name)

@@ -12,6 +12,7 @@ Loop pattern:
 
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 from agentic.function import agentic_function
@@ -19,8 +20,60 @@ from agentic.runtime import Runtime
 from agentic.meta_functions._helpers import (
     extract_code, validate_code, compile_function,
     save_function, get_source, get_error_log,
+    _canonicalize_function_code,
     clarify, generate_code,
 )
+
+
+_INLINE_FOLLOW_UP_RE = re.compile(
+    r"^(?P<instruction>.*?)(?:\s*\[(?P<follow_up>Q:.*)\]\s*)$",
+    re.DOTALL,
+)
+_FOLLOW_UP_QA_RE = re.compile(
+    r"Q:\s*(?P<question>.*?)\s+A:\s*(?P<answer>.*)$",
+    re.DOTALL,
+)
+
+
+def _split_follow_up_instruction(instruction: str | None) -> tuple[str, Optional[str]]:
+    """Split a trailing inline follow-up block off an instruction string.
+
+    The visualizer currently serializes follow-up answers as:
+        "<instruction> [Q: ... A: ...]"
+
+    That inline form is easy to misread as part of the main instruction, so
+    we normalize it into a separate prompt section before calling the LLM.
+    """
+    if not instruction:
+        return "", None
+
+    text = instruction.strip()
+    match = _INLINE_FOLLOW_UP_RE.match(text)
+    if not match:
+        return text, None
+
+    main_instruction = match.group("instruction").strip()
+    follow_up = match.group("follow_up").strip()
+    if not main_instruction or "Q:" not in follow_up or "A:" not in follow_up:
+        return text, None
+    return main_instruction, follow_up
+
+
+def _format_follow_up_context(follow_up: str) -> str:
+    """Render follow-up context in a clearer, multi-line form."""
+    follow_up = follow_up.strip()
+    if not follow_up:
+        return ""
+
+    match = _FOLLOW_UP_QA_RE.search(follow_up)
+    if not match:
+        return follow_up
+
+    question = match.group("question").strip()
+    answer = match.group("answer").strip()
+    if question and answer:
+        return f"Q: {question}\nA: {answer}"
+    return follow_up
 
 
 # ---------------------------------------------------------------------------
@@ -34,6 +87,7 @@ def _fix_round(
     error_log: str,
     instruction: str,
     round_num: int,
+    fn_name: str,
     runtime: Runtime,
 ) -> dict:
     """Execute one round of fix: clarify → generate code → validate → compile → verify.
@@ -66,8 +120,9 @@ def _fix_round(
     # Step 3: Extract, validate, compile
     try:
         fixed_code = extract_code(response)
+        fixed_code = _canonicalize_function_code(fixed_code, fn_name)
         validate_code(fixed_code, response)
-        compiled_fn = compile_function(fixed_code, runtime, None)
+        compiled_fn = compile_function(fixed_code, runtime, fn_name)
     except (SyntaxError, ValueError, RuntimeError) as e:
         return {"status": "error", "feedback": f"Code failed: {e}"}
 
@@ -216,17 +271,36 @@ def fix(
         (e.g. in the visualizer), the loop blocks until the user answers.
         If no handler, returns {"type": "follow_up", "question": "..."}.
     """
+    import inspect as _inspect
+
     description = getattr(fn, '__doc__', '') or getattr(fn, '__name__', 'unknown')
     code = get_source(fn)
     error_log = get_error_log(fn)
     fn_name = name or getattr(fn, '__name__', 'fixed')
+    instruction_text, follow_up_context = _split_follow_up_instruction(instruction)
+
+    # Resolve file path for context
+    try:
+        _inner = getattr(fn, '__wrapped__', fn)
+        fn_filepath = _inspect.getfile(_inner)
+    except (TypeError, OSError):
+        fn_filepath = getattr(fn, '__file__', None)
 
     # Base task — fixed context that doesn't change between rounds
-    base_parts = [f"Current code:\n```python\n{code}\n```"]
+    header = f"Function: {fn_name}"
+    if fn_filepath:
+        header += f"\nFile: {fn_filepath}"
+    base_parts = [f"{header}\n\nCurrent code:\n```python\n{code}\n```"]
     if error_log:
         base_parts.append(f"Error log:\n{error_log}")
-    if instruction:
-        base_parts.append(f"Instruction: {instruction}")
+    if instruction_text:
+        base_parts.append(f"Instruction:\n{instruction_text}")
+    if follow_up_context:
+        base_parts.append(
+            "Follow-up context:\n"
+            f"{_format_follow_up_context(follow_up_context)}\n"
+            "Treat this as prior clarification context, not as a new instruction."
+        )
     base_task = "\n\n".join(base_parts)
 
     compiled_fn = None
@@ -247,8 +321,9 @@ def fix(
             task=task,
             original_code=code,
             error_log=error_log or "",
-            instruction=instruction or "",
+            instruction=instruction_text or "",
             round_num=round_num,
+            fn_name=fn_name,
             runtime=runtime,
         )
 
@@ -271,7 +346,12 @@ def fix(
             if fn_name and compiled_fn:
                 compiled_fn.__name__ = fn_name
                 compiled_fn.__qualname__ = fn_name
-            save_function(fixed_code, fn_name, f"Fixed: {description}")
+            save_function(
+                fixed_code,
+                fn_name,
+                f"Fixed: {description}",
+                source_path=fn_filepath,
+            )
             break
 
         # "error" or "rejected" — use feedback for next round
@@ -282,7 +362,7 @@ def fix(
         raise RuntimeError(f"fix() could not produce valid code after {max_rounds} rounds.")
 
     # Conclude — summary recorded in context tree
-    conclude_task = f"Fix task for '{fn_name}': {instruction or description}"
+    conclude_task = f"Fix task for '{fn_name}': {instruction_text or description}"
     conclude_fix(task=conclude_task, runtime=runtime)
 
     return compiled_fn

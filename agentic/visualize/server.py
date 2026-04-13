@@ -648,10 +648,11 @@ def _extract_function_info(filepath: str, name: Optional[str], category: str) ->
             content = f.read()
 
         # If name not given, find the first public @agentic_function
+        # Use [\s\S]*? to support multi-line decorator arguments
         if name is None:
             # Prefer public functions (not starting with _)
             for match in re.finditer(
-                r"@agentic_function[^\n]*\s*def\s+(\w+)\s*\(",
+                r"@agentic_function[\s\S]*?def\s+(\w+)\s*\(",
                 content,
             ):
                 if not match.group(1).startswith("_"):
@@ -660,7 +661,7 @@ def _extract_function_info(filepath: str, name: Optional[str], category: str) ->
             # Fallback to first @agentic_function (even private)
             if name is None:
                 match = re.search(
-                    r"@agentic_function[^\n]*\s*def\s+(\w+)\s*\(",
+                    r"@agentic_function[\s\S]*?def\s+(\w+)\s*\(",
                     content,
                 )
                 if not match:
@@ -913,6 +914,12 @@ def _retry_node(conv_id: str, msg_id: str, node_path: str, params_override: dict
 
         exec_rt = _get_exec_runtime()
         call_kwargs = dict(params)
+        # Resolve string function-name parameters to actual function objects
+        for param_key in ("fn", "function"):
+            if param_key in call_kwargs and isinstance(call_kwargs[param_key], str):
+                resolved_function = _load_function(call_kwargs[param_key])
+                if resolved_function is not None:
+                    call_kwargs[param_key] = resolved_function
         _inject_runtime(loaded_func, call_kwargs, exec_rt)
         try:
             result = _format_result(loaded_func(**call_kwargs))
@@ -1041,10 +1048,57 @@ def _find_in_tree(tree: dict, path: str) -> dict | None:
     return None
 
 
+class _FunctionStub:
+    """Lightweight stand-in for a function whose module cannot be imported.
+
+    Carries enough attributes (__name__, __doc__, __file__, __source__)
+    for fix()/improve() to read source code and file path without needing
+    a working import.
+    """
+    def __init__(self, name: str, source: str, filepath: str, doc: str = ""):
+        self.__name__ = name
+        self.__qualname__ = name
+        self.__doc__ = doc
+        self.__file__ = filepath
+        self.__source__ = source
+
+    def __call__(self, *args, **kwargs):
+        raise RuntimeError(f"Function '{self.__name__}' cannot be called — its module failed to import.")
+
+
+def _make_stub_from_file(func_name: str, filepath: str):
+    """Read a .py file and build a _FunctionStub for the named function."""
+    try:
+        with open(filepath, "r") as fh:
+            source = fh.read()
+    except OSError:
+        return None
+
+    # Check the function is actually defined in this file
+    if f"def {func_name}" not in source:
+        return None
+
+    # Try to extract the function's docstring (first triple-quoted string after def line)
+    doc = ""
+    import re as _re
+    pattern = _re.compile(
+        rf'def\s+{_re.escape(func_name)}\s*\([^)]*\)[^:]*:\s*'
+        r'(?:\n\s+)?"""(.*?)"""',
+        _re.DOTALL,
+    )
+    match = pattern.search(source)
+    if match:
+        doc = match.group(1).strip()
+
+    return _FunctionStub(name=func_name, source=source, filepath=filepath, doc=doc)
+
+
 def _load_function(func_name: str):
     """Load a function by name from meta_functions, functions, or subdirectory apps.
 
     Always reloads modules to pick up file changes without server restart.
+    If a module fails to import (e.g. broken code), falls back to a stub
+    that carries the source code so fix() can still work on it.
     """
     meta_names = ["create", "fix", "create_app", "create_skill"]
     if func_name in meta_names:
@@ -1064,6 +1118,13 @@ def _load_function(func_name: str):
         return getattr(mod, func_name)
     except (ImportError, AttributeError):
         pass
+    except Exception:
+        # Module exists but has errors (e.g. NameError) — try stub fallback
+        mod_file = os.path.join(fn_dir, f"{func_name}.py")
+        if os.path.isfile(mod_file):
+            stub = _make_stub_from_file(func_name, mod_file)
+            if stub is not None:
+                return stub
     # Scan all .py files in functions/ for the function name
     if os.path.isdir(fn_dir):
         for f in sorted(os.listdir(fn_dir)):
@@ -1076,8 +1137,12 @@ def _load_function(func_name: str):
                     fn = getattr(mod, func_name, None)
                     if fn is not None:
                         return fn
-                except ImportError:
-                    pass
+                except Exception:
+                    # Module failed to import — check if it contains the function
+                    fpath = os.path.join(fn_dir, f)
+                    stub = _make_stub_from_file(func_name, fpath)
+                    if stub is not None:
+                        return stub
     # Try subdirectory projects — scan functions/ and apps/ for main.py at any depth
     import importlib.util as _imputil
     base = os.path.dirname(os.path.dirname(__file__))
@@ -1284,6 +1349,13 @@ def _execute_in_context(conv_id: str, msg_id: str, action: str,
                     _broadcast_chat_response(conv_id, msg_id, {"type": "error", "content": f"Function '{func_name}' not found."})
                     return
                 call_kwargs = dict(kwargs or {})
+                # Resolve string function-name parameters to actual function objects
+                # (e.g. fix(function="sentiment") → fix(function=<sentiment function>))
+                for param_key in ("fn", "function"):
+                    if param_key in call_kwargs and isinstance(call_kwargs[param_key], str):
+                        resolved_function = _load_function(call_kwargs[param_key])
+                        if resolved_function is not None:
+                            call_kwargs[param_key] = resolved_function
                 # Use exec runtime (separate from chat runtime)
                 exec_rt = _get_exec_runtime()
                 _inject_runtime(loaded_func, call_kwargs, exec_rt)
@@ -1728,11 +1800,15 @@ async def _handle_ws_command(ws, cmd: dict):
 
         msg_id = str(uuid.uuid4())[:8]
 
+        # Preserve original_content from the command payload (for Answer & Retry tracking)
+        original_content = cmd.get("original_content", text)
+
         # Store new user message
         conv["messages"].append({
             "role": "user",
             "id": msg_id,
             "content": text,
+            "original_content": original_content,
             "display": "runtime",
             "timestamp": time.time(),
         })
@@ -1861,8 +1937,8 @@ async def _handle_ws_command(ws, cmd: dict):
 
     elif action == "follow_up_answer":
         # User answered a follow-up question from a running function
-        fq_conv_id = data.get("conv_id", "")
-        answer = data.get("answer", "")
+        fq_conv_id = cmd.get("conv_id", "")
+        answer = cmd.get("answer", "")
         with _follow_up_lock:
             fq = _follow_up_queues.get(fq_conv_id)
         if fq is not None:
