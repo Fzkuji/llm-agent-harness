@@ -2,6 +2,13 @@
 
 from agentic.function import agentic_function
 
+
+@agentic_function(input={
+    "text": {
+        "description": "Text to count words in",
+        "placeholder": "e.g. Hello world, how are you?",
+    },
+})
 def word_count(text: str) -> int:
     """Count the number of words in a text string.
 

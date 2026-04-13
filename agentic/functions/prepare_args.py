@@ -1,57 +1,70 @@
-"""prepare_args — merge LLM-selected args with context-provided values."""
+"""prepare_args — prepare function call arguments from LLM action + context."""
 
 from __future__ import annotations
 
 import inspect
-from collections.abc import Callable
+
+from agentic.runtime import Runtime
+
+_AUTO_PARAMS = {"runtime", "exec_runtime", "review_runtime"}
 
 
-def prepare_args(
-    action: dict,
-    available: dict[str, dict],
-    runtime=None,
-    context: dict | None = None,
-    fix_fn: Callable | None = None,
-) -> dict:
-    """Prepare kwargs for a dispatch-selected function call.
+def prepare_args(action: dict, available: dict, runtime: Runtime,
+                 context: dict = None, fix_fn=None) -> dict:
+    """Prepare complete arguments for a function call.
 
-    Rules:
-    - start from LLM-provided args
-    - fill `source=context` params from context
-    - inject `runtime` when the target function accepts it
-    - optionally call fix_fn for still-missing required params
-    - drop unknown args before returning
+    Merges three sources:
+        1. LLM-provided args from action["args"]
+        2. Context-filled args (e.g. text from task)
+        3. Framework-injected args (runtime)
+
+    Also validates and fixes missing required params.
+
+    Args:
+        action: Parsed LLM action, e.g. {"call": "polish_text", "args": {"style": "academic"}}.
+        available: Function registry dict.
+        runtime: Runtime instance to inject.
+        context: Auto-fill values, e.g. {"text": task}.
+        fix_fn: Optional @agentic_function to call when required params
+                are missing. Signature: (func_name, missing, runtime) -> dict.
+
+    Returns:
+        Complete args dict ready for fn(**args).
     """
-    context = context or {}
-    call_name = action.get("call")
-    spec = available.get(call_name) or {}
-    fn = spec.get("function")
-    if fn is None:
-        return dict(action.get("args") or {})
+    func_name = action["call"]
+    spec = available[func_name]
+    target_func = spec["function"]
+    input_spec = spec.get("input", {})
 
-    input_spec = spec.get("input") or {}
-    args = dict(action.get("args") or {})
+    # Start with LLM-provided args
+    args = dict(action.get("args", {}))
 
-    for param, meta in input_spec.items():
-        if meta.get("source") == "context" and param not in args and param in context:
-            args[param] = context[param]
+    # Fill source="context" params from context
+    if context:
+        for param_name, param_info in input_spec.items():
+            if param_info.get("source") == "context" and param_name not in args:
+                if param_name in context:
+                    args[param_name] = context[param_name]
 
-    signature = inspect.signature(fn)
-    if "runtime" in signature.parameters and "runtime" not in args and runtime is not None:
-        args["runtime"] = runtime
+    # Inject runtime
+    unwrapped_func = getattr(target_func, '_fn', target_func)
+    sig = inspect.signature(unwrapped_func)
+    for p in _AUTO_PARAMS:
+        if p in sig.parameters:
+            args[p] = runtime
 
-    missing: list[str] = []
-    for name, param in signature.parameters.items():
-        if name in args:
-            continue
-        if name == "runtime" and runtime is not None:
-            continue
-        if param.default is inspect._empty:
-            missing.append(name)
+    # Filter out params the function doesn't accept
+    valid_params = set(sig.parameters.keys())
+    args = {k: v for k, v in args.items() if k in valid_params}
 
-    if missing and fix_fn is not None:
-        fixed = fix_fn(func_name=call_name, missing=missing, runtime=runtime)
-        if isinstance(fixed, dict):
-            args.update({k: v for k, v in fixed.items() if k in signature.parameters})
+    # Check for missing required params
+    missing = [
+        name for name, param in sig.parameters.items()
+        if param.default is inspect.Parameter.empty and name not in args
+    ]
+    if missing and fix_fn:
+        extra = fix_fn(func_name=func_name, missing=missing, runtime=runtime)
+        if isinstance(extra, dict):
+            args.update({k: v for k, v in extra.items() if k in valid_params})
 
-    return {name: args[name] for name in signature.parameters if name in args}
+    return args

@@ -42,7 +42,7 @@ import shutil
 # Maps provider name -> (class_name, module_path, default_model)
 PROVIDERS = {
     "claude-code":  ("ClaudeCodeRuntime",  "agentic.providers.claude_code",  "sonnet"),
-    "codex":        ("CodexRuntime",       "agentic.providers.codex",        None),
+    "codex":        ("CodexRuntime",       "agentic.providers.codex",        "gpt-5.4-mini"),
     "gemini-cli":   ("GeminiCLIRuntime",   "agentic.providers.gemini_cli",   "gemini-2.5-flash"),
     "anthropic":    ("AnthropicRuntime",    "agentic.providers.anthropic",    "claude-sonnet-4-6"),
     "openai":       ("OpenAIRuntime",       "agentic.providers.openai",       "gpt-4.1"),

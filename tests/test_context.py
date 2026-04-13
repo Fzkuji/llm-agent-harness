@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 from agentic import agentic_function, Runtime
+from agentic.context import Context
 
 
 def mock_call(content, model="test", response_format=None):
@@ -223,6 +224,26 @@ def test_save_json_tree(tmp_path):
     assert obj["name"] == "task"
     assert obj["children"][0]["name"] == "step"
     assert obj["children"][0]["output"] == "step done"
+
+
+def test_context_json_roundtrip_preserves_timing():
+    """Context JSON roundtrip preserves timing fields used by visualization."""
+    @agentic_function
+    def task():
+        step()
+        return "done"
+
+    @agentic_function
+    def step():
+        return "step done"
+
+    task()
+    restored = Context.from_dict(task.context._to_dict())
+
+    assert restored.start_time == task.context.start_time
+    assert restored.end_time == task.context.end_time
+    assert restored.children[0].end_time == task.context.children[0].end_time
+    assert restored.duration_ms == pytest.approx(task.context.duration_ms)
 
 
 def test_save_accepts_pathlike_md(tmp_path):

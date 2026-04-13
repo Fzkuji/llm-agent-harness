@@ -6,7 +6,10 @@
     "fix",
     "deep_work",
     "agentic_research",
-    "sentiment"
+    "sentiment",
+    "_research_step",
+    "gui_agent",
+    "research_agent"
   ],
   "folders": {}
 }

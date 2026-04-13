@@ -279,6 +279,8 @@ def _save_sessions():
                 "model": model,
                 "created_at": conv.get("created_at"),
                 "context_tree": root_ctx._to_dict(),
+                "messages": conv.get("messages", []),
+                "function_trees": conv.get("function_trees", []),
             }
     try:
         os.makedirs(os.path.dirname(_SESSIONS_PATH), exist_ok=True)
@@ -328,6 +330,8 @@ def _restore_sessions():
                     "root_context": root_ctx,
                     "runtime": runtime,
                     "provider_name": provider_name,
+                    "messages": conv_data.get("messages", []),
+                    "function_trees": conv_data.get("function_trees", []),
                     "created_at": conv_data.get("created_at", time.time()),
                     "_titled": True,
                 }
@@ -587,6 +591,41 @@ def _discover_functions() -> list[dict]:
     return result
 
 
+def _extract_input_meta(source: str, func_name: str) -> dict | None:
+    """Extract input={...} from @agentic_function(input={...}) decorator via AST.
+
+    Returns the input dict if found, None otherwise.
+    """
+    import ast
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return None
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef) or node.name != func_name:
+            continue
+        for dec in node.decorator_list:
+            # @agentic_function(input={...})
+            if isinstance(dec, ast.Call):
+                callee = dec.func
+                # Match agentic_function or x.agentic_function
+                callee_name = ""
+                if isinstance(callee, ast.Name):
+                    callee_name = callee.id
+                elif isinstance(callee, ast.Attribute):
+                    callee_name = callee.attr
+                if callee_name != "agentic_function":
+                    continue
+                for kw in dec.keywords:
+                    if kw.arg == "input":
+                        try:
+                            return ast.literal_eval(kw.value)
+                        except (ValueError, TypeError):
+                            return None
+    return None
+
+
 def _extract_function_info(filepath: str, name: Optional[str], category: str) -> Optional[dict]:
     """Extract function name and docstring from a .py file.
 
@@ -622,16 +661,19 @@ def _extract_function_info(filepath: str, name: Optional[str], category: str) ->
                 name = match.group(1)
 
         doc = ""
+        full_doc = ""
         # Try to find the docstring of the specific function
         func_doc_pattern = rf'def\s+{re.escape(name)}\s*\([^)]*\)[^:]*:\s*\n\s*(?:\'\'\'|""")(.+?)(?:\'\'\'|""")'
         func_doc_match = re.search(func_doc_pattern, content, re.DOTALL)
         if func_doc_match:
-            doc = func_doc_match.group(1).strip().split("\n")[0]
+            full_doc = func_doc_match.group(1).strip()
+            doc = full_doc.split("\n")[0]
         elif '"""' in content:
             # Fallback: first docstring in file (module-level)
             start = content.index('"""') + 3
             end = content.index('"""', start)
-            doc = content[start:end].strip().split("\n")[0]
+            full_doc = content[start:end].strip()
+            doc = full_doc.split("\n")[0]
 
         # Auto-generated functions get their own category
         effective_category = category
@@ -640,6 +682,7 @@ def _extract_function_info(filepath: str, name: Optional[str], category: str) ->
 
         # Try to extract parameter names from function signature
         params = []
+        params_detail = []
         pattern = rf"def\s+{re.escape(name)}\s*\(([^)]*)\)"
         match = re.search(pattern, content)
         if match:
@@ -650,12 +693,64 @@ def _extract_function_info(filepath: str, name: Optional[str], category: str) ->
                     pname = p.split(":")[0].split("=")[0].strip()
                     if pname:
                         params.append(pname)
+                        # Extract type hint
+                        ptype = ""
+                        if ":" in p:
+                            type_part = p.split(":", 1)[1]
+                            if "=" in type_part:
+                                ptype = type_part.split("=", 1)[0].strip()
+                            else:
+                                ptype = type_part.strip()
+                        # Extract default value
+                        pdefault = None
+                        has_default = False
+                        if "=" in p:
+                            default_str = p.rsplit("=", 1)[1].strip()
+                            has_default = True
+                            pdefault = default_str
+                        params_detail.append({
+                            "name": pname,
+                            "type": ptype,
+                            "default": pdefault,
+                            "required": not has_default,
+                            "description": "",
+                        })
+
+        # Extract per-param descriptions from docstring Args: section
+        if full_doc:
+            args_match = re.search(r'Args:\s*\n((?:\s+\w+.*\n?)+)', full_doc)
+            if args_match:
+                args_block = args_match.group(1)
+                for pd in params_detail:
+                    arg_pat = rf'^\s+{re.escape(pd["name"])}(?:\s*\([^)]*\))?\s*:\s*(.+)'
+                    arg_m = re.search(arg_pat, args_block, re.MULTILINE)
+                    if arg_m:
+                        pd["description"] = arg_m.group(1).strip()
+
+        # Extract input= metadata from @agentic_function(input={...}) via AST
+        input_meta = _extract_input_meta(content, name)
+        if input_meta:
+            for pd in params_detail:
+                if pd["name"] in input_meta:
+                    meta = input_meta[pd["name"]]
+                    # Merge: input_meta overrides docstring-derived values
+                    if "description" in meta:
+                        pd["description"] = meta["description"]
+                    if "placeholder" in meta:
+                        pd["placeholder"] = meta["placeholder"]
+                    if "multiline" in meta:
+                        pd["multiline"] = meta["multiline"]
+                    if "options" in meta:
+                        pd["options"] = meta["options"]
+                    if "hidden" in meta:
+                        pd["hidden"] = meta["hidden"]
 
         return {
             "name": name,
             "category": effective_category,
             "description": doc,
             "params": params,
+            "params_detail": params_detail,
             "filepath": filepath,
             "mtime": os.path.getmtime(filepath),
         }
@@ -698,6 +793,16 @@ def _extract_all_functions(filepath: str, category: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Agentic chat functions — the visualizer eats its own dog food
 # ---------------------------------------------------------------------------
+
+def _get_last_ctx(func):
+    """Get _last_ctx from a function, checking wrapper for @agentic_function instances."""
+    ctx = getattr(func, '_last_ctx', None)
+    if ctx is None and hasattr(func, '_wrapper'):
+        ctx = getattr(func._wrapper, '_last_ctx', None)
+    if ctx is None and hasattr(func, 'context'):
+        ctx = getattr(func, 'context', None)
+    return ctx
+
 
 def _inject_runtime(loaded_func, kwargs: dict, runtime: Runtime):
     """Inject runtime into function kwargs if the function accepts it."""
@@ -742,102 +847,188 @@ def _format_result(result) -> str:
 
 
 def _retry_node(conv_id: str, msg_id: str, node_path: str, params_override: dict = None):
-    """Re-execute a function at a specific node, creating a new sibling under the same parent.
+    """Re-execute a function from the function_trees.
 
-    Removes all sibling nodes that came AFTER the target (rollback),
-    then re-runs the function with original or overridden params.
+    Finds the target node in function_trees (not root_context),
+    re-runs with original or overridden params, and replaces the old tree.
     """
     try:
-        _log(f"[retry] _retry_node started: conv_id={conv_id}, node_path={node_path}")
+        _log(f"[retry] started: conv_id={conv_id}, node_path={node_path}")
         conv = _conversations.get(conv_id)
         if not conv:
-            _log(f"[retry] conversation not found: {conv_id}")
-            _log(f"[retry] available conversations: {list(_conversations.keys())}")
-            _broadcast_chat_response(conv_id, msg_id, {"type": "error", "content": f"Conversation not found: {conv_id}. Try sending a message first."})
+            _broadcast_chat_response(conv_id, msg_id, {"type": "error", "content": f"Conversation not found: {conv_id}"})
             return
 
-        root_ctx = conv["root_context"]
-        _log(f"[retry] root context: {root_ctx.name}, path: {root_ctx.path}, children: {[c.name for c in root_ctx.children]}")
-        target = root_ctx.find_by_path(node_path)
-        if not target:
-            # Debug: list all paths in tree
-            all_paths = []
-            def _collect_paths(node):
-                all_paths.append(node.path)
-                for c in node.children:
-                    _collect_paths(c)
-            _collect_paths(root_ctx)
-            _log(f"[retry] node not found: {node_path}")
-            _log(f"[retry] available paths: {all_paths}")
-            _broadcast_chat_response(conv_id, msg_id, {"type": "error", "content": f"Node not found: {node_path}\nAvailable: {', '.join(all_paths[:10])}"})
+        # Find target in function_trees
+        func_trees = conv.get("function_trees", [])
+        target_tree = None
+        target_idx = None
+
+        # Search: exact path match, or root name match, or nested path
+        for i, ft in enumerate(func_trees):
+            if _find_in_tree(ft, node_path):
+                target_tree = ft
+                target_idx = i
+                break
+
+        if target_tree is None:
+            available = [ft.get("path") or ft.get("name", "?") for ft in func_trees]
+            _broadcast_chat_response(conv_id, msg_id, {
+                "type": "error",
+                "content": f"Node not found: {node_path}\nAvailable trees: {', '.join(available)}",
+            })
             return
 
-        parent = target.parent
-        if parent is None:
-            _log(f"[retry] cannot retry root node")
-            _broadcast_chat_response(conv_id, msg_id, {"type": "error", "content": "Cannot retry root node"})
-            return
-
-        # Rollback: remove the target node AND all siblings after it
-        target_idx = next((i for i, c in enumerate(parent.children) if c is target), None)
-        if target_idx is not None:
-            removed = [c.name for c in parent.children[target_idx:]]
-            parent.children = parent.children[:target_idx]
-            _log(f"[retry] rolled back {len(removed)} nodes (including target): {removed}")
-
-        func_name = target.name
-        # Use overridden params if provided, otherwise original (minus internal keys)
+        # Get function name and params from the target node
+        target_node = _find_in_tree(target_tree, node_path)
+        func_name = target_node.get("name", node_path.split("/")[-1])
         if params_override:
             params = {k: v for k, v in params_override.items() if k not in ("runtime", "callback")}
         else:
-            params = {k: v for k, v in (target.params or {}).items() if k not in ("runtime", "callback")}
-        _log(f"[retry] func_name={func_name}, params keys={list(params.keys())}")
-        runtime = _get_conv_runtime(conv_id, msg_id=msg_id)
+            orig_params = target_node.get("params", {})
+            params = {k: v for k, v in orig_params.items() if k not in ("runtime", "callback")}
 
-        root_ctx.status = "running"
+        _log(f"[retry] func={func_name}, params={list(params.keys())}")
 
-        # Broadcast the tree state AFTER rollback so frontend is in sync
         _broadcast_chat_response(conv_id, msg_id, {
             "type": "status",
             "content": f"Retrying {func_name}...",
-            "context_tree": root_ctx._to_dict(),
         })
-        token = _current_ctx.set(parent)
+
+        # Load and execute
+        loaded_func = _load_function(func_name)
+        if loaded_func is None or not callable(loaded_func):
+            _broadcast_chat_response(conv_id, msg_id, {"type": "error", "content": f"Function '{func_name}' not found."})
+            return
+
+        exec_rt = _get_exec_runtime()
+        call_kwargs = dict(params)
+        _inject_runtime(loaded_func, call_kwargs, exec_rt)
         try:
-            # Look up function: user functions first, then server-internal ones
-            fn = _load_function(func_name)
-            if fn is None:
-                loaded_func = globals().get(func_name)
-            if loaded_func is None or not callable(loaded_func):
-                _log(f"[retry] function not found: {func_name}")
-                _broadcast_chat_response(conv_id, msg_id, {"type": "error", "content": f"Function '{func_name}' not found."})
-                return
+            result = _format_result(loaded_func(**call_kwargs))
+        finally:
+            if hasattr(exec_rt, 'close'):
+                exec_rt.close()
 
-            _log(f"[retry] found function: {loaded_func}, calling with {list(params.keys())}")
+        _log(f"[retry] completed, result length: {len(result)}")
 
-            _inject_runtime(loaded_func, params, runtime)
-            result = loaded_func(**params)
-            result_str = _format_result(result)
-            _log(f"[retry] function completed successfully, result length: {len(result_str)}")
+        # Build new tree
+        func_ctx = _get_last_ctx(loaded_func)
+        if func_ctx:
+            new_tree = func_ctx._to_dict()
+        else:
+            new_tree = {
+                "path": func_name, "name": func_name,
+                "params": {k: v for k, v in call_kwargs.items() if k != "runtime"},
+                "output": result, "status": "success",
+            }
+
+        # Replace old tree with new one
+        if target_idx is not None and new_tree.get("path") or new_tree.get("name"):
+            func_trees[target_idx] = new_tree
+
+        # Find existing assistant message for this function and append attempt
+        now = time.time()
+        attempt_entry = {
+            "content": result,
+            "tree": new_tree,
+            "timestamp": now,
+            "subsequent_messages": [],  # new branch, no subsequent yet
+        }
+
+        # Find existing assistant message for this function
+        messages = conv.get("messages", [])
+        existing_msg = None
+        existing_idx = None
+        for i in range(len(messages) - 1, -1, -1):
+            m = messages[i]
+            if (m.get("role") == "assistant"
+                    and m.get("type") == "result"
+                    and m.get("function") == func_name):
+                existing_msg = m
+                existing_idx = i
+                break
+
+        if existing_msg:
+            # Save subsequent messages into current attempt before branching
+            subsequent = messages[existing_idx + 1:]
+
+            if "attempts" in existing_msg:
+                cur_idx = existing_msg.get("current_attempt", len(existing_msg["attempts"]) - 1)
+                existing_msg["attempts"][cur_idx]["subsequent_messages"] = subsequent
+                # Append new attempt
+                existing_msg["attempts"].append(attempt_entry)
+                existing_msg["current_attempt"] = len(existing_msg["attempts"]) - 1
+            else:
+                # Upgrade old message to attempts format
+                old_attempt = {
+                    "content": existing_msg.get("content", ""),
+                    "tree": target_tree,
+                    "timestamp": existing_msg.get("timestamp", now),
+                    "subsequent_messages": subsequent,
+                }
+                existing_msg["attempts"] = [old_attempt, attempt_entry]
+                existing_msg["current_attempt"] = 1
+
+            # Truncate messages after this one (new branch)
+            conv["messages"] = messages[:existing_idx + 1]
+            _log(f"[retry] saved {len(subsequent)} subsequent messages to attempt, new branch")
+
+            # Truncate function_trees after this one too
+            if target_idx is not None:
+                conv["function_trees"] = func_trees[:target_idx + 1]
+
+            existing_msg["content"] = result
+            existing_msg["timestamp"] = now
 
             _broadcast_chat_response(conv_id, msg_id, {
-                "type": "result",
-                "content": result_str,
+                "type": "retry_result",
+                "content": result,
                 "function": func_name,
-                "context_tree": root_ctx._to_dict(),
+                "context_tree": new_tree,
+                "attempts": existing_msg["attempts"],
+                "current_attempt": existing_msg["current_attempt"],
+                "is_retry": True,
+                "truncated": len(subsequent) > 0,
+            })
+        else:
+            # No existing message found — append new one
+            conv["messages"].append({
+                "role": "assistant", "type": "result",
+                "id": msg_id + "_retry", "content": result,
+                "function": func_name, "timestamp": now,
+                "attempts": [attempt_entry],
+                "current_attempt": 0,
+            })
+
+            _broadcast_chat_response(conv_id, msg_id, {
+                "type": "result", "content": result,
+                "function": func_name, "context_tree": new_tree,
                 "is_retry": True,
             })
-        finally:
-            _current_ctx.reset(token)
-            root_ctx.status = "idle"
+        _save_sessions()
 
     except Exception as e:
-        import traceback
         _log(f"[retry] exception: {e}\n{traceback.format_exc()}")
         _broadcast_chat_response(conv_id, msg_id, {
             "type": "error",
             "content": f"Retry failed: {e}\n\n{traceback.format_exc()}",
         })
+
+
+def _find_in_tree(tree: dict, path: str) -> dict | None:
+    """Find a node in a tree dict by path. Returns the node dict or None."""
+    if not tree or not path:
+        return None
+    # Direct match
+    if tree.get("path") == path or tree.get("name") == path:
+        return tree
+    # Search children
+    for child in tree.get("children", []):
+        found = _find_in_tree(child, path)
+        if found:
+            return found
+    return None
 
 
 def _load_function(func_name: str):
@@ -933,8 +1124,83 @@ def _get_or_create_conversation(conv_id: str = None) -> dict:
         return _conversations[conv_id]
 
 
+# Provider-specific thinking effort configurations
+_THINKING_CONFIGS = {
+    "claude-code": {
+        "label": "effort",
+        "options": [
+            {"value": "low", "desc": "Quick responses"},
+            {"value": "medium", "desc": "Balanced"},
+            {"value": "high", "desc": "Deep reasoning"},
+            {"value": "max", "desc": "Maximum effort"},
+        ],
+        "default": "medium",
+    },
+    "codex": {
+        "label": "reasoning effort",
+        "options": [
+            {"value": "none", "desc": "No reasoning"},
+            {"value": "low", "desc": "Quick reasoning"},
+            {"value": "medium", "desc": "Balanced"},
+            {"value": "high", "desc": "Deep reasoning"},
+            {"value": "xhigh", "desc": "Maximum effort"},
+        ],
+        "default": "medium",
+    },
+    "anthropic": {
+        "label": "thinking",
+        "options": [
+            {"value": "off", "desc": "No extended thinking"},
+            {"value": "low", "desc": "Brief thinking"},
+            {"value": "medium", "desc": "Balanced"},
+            {"value": "high", "desc": "Extended thinking"},
+        ],
+        "default": "medium",
+    },
+    "openai": {
+        "label": "reasoning effort",
+        "options": [
+            {"value": "low", "desc": "Quick reasoning"},
+            {"value": "medium", "desc": "Balanced"},
+            {"value": "high", "desc": "Deep reasoning"},
+        ],
+        "default": "medium",
+    },
+}
+
+
+def _get_thinking_config(provider: str) -> dict:
+    """Get thinking effort config for a provider."""
+    return _THINKING_CONFIGS.get(provider, _THINKING_CONFIGS.get("codex"))
+
+
+def _apply_thinking_effort(runtime, effort: str):
+    """Apply thinking effort setting to a runtime based on its provider type.
+
+    Maps effort levels to provider-specific parameters:
+      - Codex CLI:       --reasoning-effort flag (none/low/medium/high/xhigh)
+      - Claude Code CLI: --effort flag (requires process restart if changed)
+      - Anthropic API:   thinking budget parameter
+      - OpenAI API:      reasoning_effort parameter
+    """
+    rt_type = type(runtime).__name__
+
+    if rt_type == "CodexRuntime":
+        runtime._reasoning_effort = effort
+    elif rt_type == "ClaudeCodeRuntime":
+        old_effort = getattr(runtime, '_thinking_effort', 'medium')
+        if effort != old_effort:
+            runtime._thinking_effort = effort
+            # Claude Code CLI needs process restart for effort change
+            if hasattr(runtime, '_restart_process'):
+                runtime._restart_process()
+    else:
+        runtime._thinking_effort = effort
+
+
 def _execute_in_context(conv_id: str, msg_id: str, action: str,
-                        func_name: str = None, kwargs: dict = None, query: str = None):
+                        func_name: str = None, kwargs: dict = None, query: str = None,
+                        thinking_effort: str = "medium"):
     """Execute a chat query or function call within the conversation's Context tree.
 
     This is the core execution engine. Everything runs under the conversation's
@@ -944,10 +1210,13 @@ def _execute_in_context(conv_id: str, msg_id: str, action: str,
         conv = _get_or_create_conversation(conv_id)
         runtime = _get_conv_runtime(conv_id, msg_id=msg_id)
 
+        # Apply thinking effort to chat runtime
+        _apply_thinking_effort(runtime, thinking_effort)
+
         try:
             if action == "query":
                 # Direct chat — no context tree, just talk to the LLM
-                _log(f"[exec] query: {query[:80]}...")
+                _log(f"[exec] query: {query[:80]}... (thinking={thinking_effort})")
                 _broadcast_chat_response(conv_id, msg_id, {
                     "type": "status", "content": "Thinking...",
                 })
@@ -1009,32 +1278,61 @@ def _execute_in_context(conv_id: str, msg_id: str, action: str,
                 exec_rt = _get_exec_runtime()
                 _inject_runtime(loaded_func, call_kwargs, exec_rt)
 
-                # Create a fresh context tree for this function call
-                func_ctx = Context(name=func_name, status="running", start_time=time.time())
-                func_token = _current_ctx.set(func_ctx)
                 try:
                     result = _format_result(loaded_func(**call_kwargs))
-                    func_ctx.status = "success"
                 finally:
-                    func_ctx.end_time = time.time()
-                    if func_ctx.status != "success":
-                        func_ctx.status = "error"
-                    _current_ctx.reset(func_token)
                     if hasattr(exec_rt, 'close'):
                         exec_rt.close()
+
+                # Get the context tree from @agentic_function's wrapper
+                func_ctx = _get_last_ctx(loaded_func)
+                if func_ctx:
+                    tree_dict = func_ctx._to_dict()
+                else:
+                    # Plain function without @agentic_function — build minimal tree
+                    tree_dict = {
+                        "path": func_name,
+                        "name": func_name,
+                        "params": {k: v for k, v in call_kwargs.items() if k != "runtime"},
+                        "output": result,
+                        "status": "success",
+                    }
 
                 # Store this function's context tree in conversation
                 if "function_trees" not in conv:
                     conv["function_trees"] = []
-                conv["function_trees"].append(func_ctx._to_dict())
+                conv["function_trees"].append(tree_dict)
 
                 _log(f"[exec] {func_name} completed, result length: {len(str(result))}")
+
+                # Store assistant reply with attempts array
+                now = time.time()
+                attempt_entry = {
+                    "content": str(result),
+                    "tree": tree_dict,
+                    "timestamp": now,
+                }
+                reply_msg = {
+                    "role": "assistant",
+                    "type": "result",
+                    "id": msg_id + "_reply",
+                    "content": str(result),
+                    "function": func_name,
+                    "display": "runtime",
+                    "timestamp": now,
+                    "attempts": [attempt_entry],
+                    "current_attempt": 0,
+                }
+                conv["messages"].append(reply_msg)
 
                 _broadcast_chat_response(conv_id, msg_id, {
                     "type": "result",
                     "content": str(result),
                     "function": func_name,
-                    "context_tree": func_ctx._to_dict(),
+                    "display": "runtime",
+                    "context_tree": tree_dict,
+                    "attempts": reply_msg["attempts"],
+                    "current_attempt": 0,
                 })
 
         finally:
@@ -1047,13 +1345,43 @@ def _execute_in_context(conv_id: str, msg_id: str, action: str,
                 conv["title"] = title + ("..." if len(title) >= 50 else "")
                 conv["_titled"] = True
 
+        # Broadcast updated chat session info (session_id may have been set)
+        chat_session_id = getattr(runtime, '_session_id', None) if runtime else None
+        if chat_session_id:
+            _broadcast(json.dumps({
+                "type": "chat_session_update",
+                "data": {"session_id": chat_session_id},
+            }, default=str))
+
         # Persist sessions to disk after each execution
         _save_sessions()
 
     except Exception as e:
+        error_content = f"Error: {e}\n\n{traceback.format_exc()}"
+        # Persist error to conversation messages
+        try:
+            conv = _get_or_create_conversation(conv_id)
+            now = time.time()
+            error_msg = {
+                "role": "assistant",
+                "type": "error",
+                "id": msg_id + "_reply",
+                "content": error_content,
+                "function": func_name,
+                "display": "runtime",
+                "timestamp": now,
+                "attempts": [{"content": error_content, "timestamp": now}],
+                "current_attempt": 0,
+            }
+            conv["messages"].append(error_msg)
+            _save_sessions()
+        except Exception:
+            pass
         _broadcast_chat_response(conv_id, msg_id, {
             "type": "error",
-            "content": f"Error: {e}\n\n{traceback.format_exc()}",
+            "content": error_content,
+            "function": func_name,
+            "display": "runtime",
         })
 
 
@@ -1215,8 +1543,9 @@ async def _websocket_handler(ws):
                 except json.JSONDecodeError:
                     pass
 
-    except Exception:
-        pass
+    except Exception as e:
+        import traceback
+        print(f"[ws] connection error: {e}\n{traceback.format_exc()}")
     finally:
         with _ws_lock:
             try:
@@ -1232,10 +1561,12 @@ async def _websocket_handler(ws):
 async def _handle_ws_command(ws, cmd: dict):
     """Handle a WebSocket command from the client."""
     action = cmd.get("action")
+    print(f"[ws] command received: action={action}")
 
     if action == "chat":
         text = cmd.get("text", "").strip()
         conv_id = cmd.get("conv_id")
+        thinking_effort = cmd.get("thinking_effort", "medium")
         if not text:
             return
 
@@ -1248,13 +1579,19 @@ async def _handle_ws_command(ws, cmd: dict):
             conv["title"] = text[:50] + ("..." if len(text) > 50 else "")
             conv["_titled"] = True
 
-        # Store user message
-        conv["messages"].append({
+        # Parse and execute
+        parsed = _parse_chat_input(text)
+
+        # Store user message (mark "run" commands with display: "runtime")
+        user_msg = {
             "role": "user",
             "id": msg_id,
             "content": text,
             "timestamp": time.time(),
-        })
+        }
+        if parsed["action"] == "run":
+            user_msg["display"] = "runtime"
+        conv["messages"].append(user_msg)
 
         # Send acknowledgment with conv_id
         await ws.send_text(json.dumps({
@@ -1262,21 +1599,18 @@ async def _handle_ws_command(ws, cmd: dict):
             "data": {"conv_id": conv_id, "msg_id": msg_id},
         }))
 
-        # Parse and execute
-        parsed = _parse_chat_input(text)
-
         if parsed["action"] == "run":
             threading.Thread(
                 target=_execute_in_context,
                 args=(conv_id, msg_id, "run"),
-                kwargs={"func_name": parsed["function"], "kwargs": parsed["kwargs"]},
+                kwargs={"func_name": parsed["function"], "kwargs": parsed["kwargs"], "thinking_effort": thinking_effort},
                 daemon=True,
             ).start()
         elif parsed["action"] == "query":
             threading.Thread(
                 target=_execute_in_context,
                 args=(conv_id, msg_id, "query"),
-                kwargs={"query": parsed["raw"]},
+                kwargs={"query": parsed["raw"], "thinking_effort": thinking_effort},
                 daemon=True,
             ).start()
 
@@ -1303,6 +1637,123 @@ async def _handle_ws_command(ws, cmd: dict):
             args=(conv_id, msg_id, node_path, params_override),
             daemon=True,
         ).start()
+
+    elif action == "retry_overwrite":
+        # Overwrite retry: remove old user+assistant messages for this function, re-run
+        conv_id = cmd.get("conv_id")
+        func_name = cmd.get("function")
+        text = cmd.get("text", "").strip()
+        thinking_effort = cmd.get("thinking_effort", "medium")
+        if not conv_id or not text:
+            return
+
+        conv = _get_or_create_conversation(conv_id)
+        messages = conv.get("messages", [])
+
+        # Remove old user (runtime) + assistant messages for this function
+        new_messages = []
+        skip_next_assistant = False
+        for m in messages:
+            if skip_next_assistant and m.get("role") == "assistant":
+                skip_next_assistant = False
+                continue
+            if (m.get("role") == "user" and m.get("display") == "runtime"):
+                parsed_check = _parse_chat_input(m.get("content", ""))
+                if parsed_check.get("function") == func_name:
+                    skip_next_assistant = True
+                    continue
+            new_messages.append(m)
+        conv["messages"] = new_messages
+
+        # Remove old function_trees for this function
+        conv["function_trees"] = [
+            ft for ft in conv.get("function_trees", [])
+            if ft.get("name") != func_name and ft.get("path") != func_name
+        ]
+
+        msg_id = str(uuid.uuid4())[:8]
+
+        # Store new user message
+        conv["messages"].append({
+            "role": "user",
+            "id": msg_id,
+            "content": text,
+            "display": "runtime",
+            "timestamp": time.time(),
+        })
+
+        await ws.send_text(json.dumps({
+            "type": "chat_ack",
+            "data": {"conv_id": conv_id, "msg_id": msg_id},
+        }))
+
+        # Parse and execute
+        parsed = _parse_chat_input(text)
+        if parsed["action"] == "run":
+            threading.Thread(
+                target=_execute_in_context,
+                args=(conv_id, msg_id, "run"),
+                kwargs={"func_name": parsed["function"], "kwargs": parsed["kwargs"], "thinking_effort": thinking_effort},
+                daemon=True,
+            ).start()
+
+    elif action == "switch_attempt":
+        conv_id = cmd.get("conv_id")
+        func_name = cmd.get("function")
+        attempt_idx = cmd.get("attempt_index", 0)
+        conv = _conversations.get(conv_id)
+        if conv:
+            messages = conv.get("messages", [])
+            msg_idx = None
+            target_msg = None
+            for i in range(len(messages) - 1, -1, -1):
+                m = messages[i]
+                if (m.get("role") == "assistant"
+                        and m.get("type") == "result"
+                        and m.get("function") == func_name
+                        and "attempts" in m):
+                    target_msg = m
+                    msg_idx = i
+                    break
+
+            if target_msg and 0 <= attempt_idx < len(target_msg["attempts"]):
+                old_idx = target_msg.get("current_attempt", 0)
+                attempts = target_msg["attempts"]
+
+                # Save current subsequent messages to current attempt
+                subsequent_now = messages[msg_idx + 1:]
+                if old_idx < len(attempts):
+                    attempts[old_idx]["subsequent_messages"] = subsequent_now
+
+                # Switch to target attempt
+                target_msg["current_attempt"] = attempt_idx
+                target_msg["content"] = attempts[attempt_idx]["content"]
+
+                # Restore target attempt's subsequent messages
+                restored = attempts[attempt_idx].get("subsequent_messages", [])
+                conv["messages"] = messages[:msg_idx + 1] + restored
+
+                # Update function_trees to match selected attempt's tree
+                selected_tree = attempts[attempt_idx].get("tree")
+                if selected_tree:
+                    func_trees = conv.get("function_trees", [])
+                    for ti, ft in enumerate(func_trees):
+                        if ft.get("name") == func_name or ft.get("path") == func_name:
+                            func_trees[ti] = selected_tree
+                            break
+
+                _save_sessions()
+                await ws.send_text(json.dumps({
+                    "type": "attempt_switched",
+                    "data": {
+                        "function": func_name,
+                        "attempt_index": attempt_idx,
+                        "content": attempts[attempt_idx]["content"],
+                        "tree": attempts[attempt_idx].get("tree"),
+                        "total": len(attempts),
+                        "subsequent_messages": restored,
+                    },
+                }, default=str))
 
     elif action == "delete_conversation":
         conv_id = cmd.get("conv_id")
@@ -1335,6 +1786,7 @@ async def _handle_ws_command(ws, cmd: dict):
                     "title": conv["title"],
                     "messages": conv.get("messages", []),
                     "context_tree": tree_data,
+                    "function_trees": conv.get("function_trees", []),
                     "provider_info": _get_provider_info(conv_id),
                 },
             }, default=str))
@@ -1379,6 +1831,11 @@ def create_app():
     from fastapi.responses import HTMLResponse, JSONResponse
 
     app = FastAPI(title="Agentic Visualizer", docs_url=None, redoc_url=None)
+
+    @app.on_event("startup")
+    async def _capture_loop():
+        global _loop
+        _loop = asyncio.get_running_loop()
 
     # Serve the HTML frontend
     @app.get("/", response_class=HTMLResponse)
@@ -1474,14 +1931,16 @@ def create_app():
         if not conv["messages"]:
             conv["title"] = text[:50]
 
-        conv["messages"].append({
+        parsed = _parse_chat_input(text)
+        user_msg = {
             "role": "user",
             "id": msg_id,
             "content": text,
             "timestamp": time.time(),
-        })
-
-        parsed = _parse_chat_input(text)
+        }
+        if parsed["action"] == "run":
+            user_msg["display"] = "runtime"
+        conv["messages"].append(user_msg)
 
         if parsed["action"] == "run":
             threading.Thread(
@@ -1662,13 +2121,43 @@ def create_app():
     # --- Agent settings (chat + exec) ---
 
     @app.get("/api/agent_settings")
-    async def get_agent_settings():
-        """Get current chat and exec agent provider/model settings."""
+    async def get_agent_settings(conv_id: str = None):
+        """Get current chat and exec agent provider/model settings.
+
+        If conv_id is provided, returns lock state and session_id for that
+        specific conversation. Otherwise returns unlocked defaults.
+        """
         _init_providers()
+
+        chat_session_id = None
+        chat_locked = False
+        chat_provider = _chat_provider
+        chat_model = _chat_model
+
+        if conv_id:
+            with _conversations_lock:
+                conv = _conversations.get(conv_id)
+            if conv:
+                # Locked if conversation has messages
+                if conv.get("messages") and len(conv["messages"]) > 0:
+                    chat_locked = True
+                # Get session_id from conversation runtime
+                rt = conv.get("runtime")
+                if rt:
+                    chat_session_id = getattr(rt, '_session_id', None)
+                # Use conversation's provider/model if set
+                if conv.get("provider_name"):
+                    chat_provider = conv["provider_name"]
+                if rt and getattr(rt, 'model', None):
+                    chat_model = rt.model
+
         return JSONResponse(content={
             "chat": {
-                "provider": _chat_provider,
-                "model": _chat_model,
+                "provider": chat_provider,
+                "model": chat_model,
+                "session_id": chat_session_id,
+                "locked": chat_locked,
+                "thinking": _get_thinking_config(chat_provider),
             },
             "exec": {
                 "provider": _exec_provider,

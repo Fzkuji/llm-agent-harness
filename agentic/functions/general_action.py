@@ -29,7 +29,14 @@ from agentic.functions._utils import parse_json
 _MISSING_RUNTIME = object()
 
 
-@agentic_function(summarize={"depth": 0, "siblings": 0})
+@agentic_function(summarize={"depth": 0, "siblings": 0}, input={
+    "instruction": {
+        "description": "Task to complete",
+        "placeholder": "e.g. Install numpy and verify it imports",
+        "multiline": True,
+    },
+    "runtime": {"hidden": True},
+})
 def general_action(instruction: str, runtime: Runtime = _MISSING_RUNTIME) -> dict:
     """Execute a task using any available tools.
 

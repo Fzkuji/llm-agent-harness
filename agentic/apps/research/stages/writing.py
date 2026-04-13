@@ -60,11 +60,14 @@ def gather_context(project_dir: str, section: str) -> str:
         with open(outline_path, "r") as f:
             parts.append(f"## Outline\n{f.read()[:3000]}")
 
-    # Section-specific notes
+    # Section-specific notes (text files only)
+    _TEXT_EXTS = {".md", ".txt", ".tex", ".csv", ".json", ".py", ".bib", ".yaml", ".yml"}
     section_dir = os.path.join(project_dir, section)
     if os.path.isdir(section_dir):
         for fname in sorted(os.listdir(section_dir)):
-            if fname == "README.md":
+            if fname.startswith(".") or fname == "README.md":
+                continue
+            if not any(fname.endswith(ext) for ext in _TEXT_EXTS):
                 continue
             fpath = os.path.join(section_dir, fname)
             if os.path.isfile(fpath):

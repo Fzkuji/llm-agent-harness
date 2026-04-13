@@ -133,6 +133,33 @@ class agentic_function:
                     save() always show everything. compress only affects summarize().
 
                     Default: False.
+
+        input:      UI metadata for function parameters (used by the visualizer
+                    to render structured input forms).
+
+                    Dict mapping parameter names to their UI config:
+                    {
+                        "text": {
+                            "description": "The text to analyze",
+                            "placeholder": "e.g. I love this product!",
+                            "multiline": True,
+                        },
+                        "style": {
+                            "description": "Output style",
+                            "placeholder": "academic",
+                            "options": ["academic", "casual", "concise"],
+                        },
+                    }
+
+                    Supported fields per parameter:
+                      description  — short label shown next to the parameter name
+                      placeholder  — example text shown in the input field
+                      multiline    — True for textarea, False for single-line input
+                      options      — list of allowed values (renders as dropdown)
+                      hidden       — True to hide from the form (e.g. runtime)
+
+                    Parameters not listed inherit defaults from the function
+                    signature (type hints, defaults, docstring Args:).
     """
 
     def __init__(
@@ -142,10 +169,12 @@ class agentic_function:
         render: str = "summary",
         summarize: Optional[dict] = None,
         compress: bool = False,
+        input: Optional[dict] = None,
     ):
         self.render = render
         self.summarize_kwargs = summarize
         self.compress = compress
+        self.input_meta = input or {}
 
         self.context = None  # Last executed Context tree (set after top-level call)
 
@@ -289,6 +318,7 @@ class agentic_function:
                 raise
             finally:
                 ctx.end_time = time.time()
+                wrapper._last_ctx = ctx
                 _emit_event("node_completed", ctx)
                 _current_ctx.reset(ctx_token)
                 # Clean up runtime if we created it

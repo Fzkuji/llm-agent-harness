@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import re
 
+from agentic.functions._utils import _extract_first_json_object
+
 
 def parse_action(text: str) -> dict | None:
     """Extract {"call": "name", "args": {...}} from LLM output, or None.
@@ -21,17 +23,9 @@ def parse_action(text: str) -> dict | None:
         except json.JSONDecodeError:
             pass
 
-    # Try bare JSON (supports nested objects like args: {...})
-    match = re.search(r"\{[^{}]*\"call\".*\}", text, re.DOTALL)
-    if match:
-        # Find the balanced JSON by trying progressively shorter substrings
-        candidate = match.group(0)
-        for end in range(len(candidate), 0, -1):
-            try:
-                obj = json.loads(candidate[:end])
-                if isinstance(obj, dict) and "call" in obj:
-                    return obj
-            except json.JSONDecodeError:
-                continue
+    # Try balanced JSON extraction (handles nested objects correctly)
+    obj = _extract_first_json_object(text)
+    if isinstance(obj, dict) and "call" in obj:
+        return obj
 
     return None

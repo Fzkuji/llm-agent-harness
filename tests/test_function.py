@@ -190,3 +190,57 @@ def test_separate_trees():
 
     assert task_a.context.name == "task_a"
     assert task_b.context.name == "task_b"
+
+
+# ===== input= parameter tests =====
+
+def test_input_meta_stored():
+    """input= metadata is stored on the decorator instance."""
+    @agentic_function(input={
+        "text": {"description": "Input text", "placeholder": "e.g. hello"},
+        "runtime": {"hidden": True},
+    })
+    def my_func(text: str, runtime=None):
+        return text
+
+    assert my_func.input_meta == {
+        "text": {"description": "Input text", "placeholder": "e.g. hello"},
+        "runtime": {"hidden": True},
+    }
+
+
+def test_input_meta_default_empty():
+    """Without input=, input_meta defaults to empty dict."""
+    @agentic_function
+    def plain_func(x):
+        return x
+
+    assert plain_func.input_meta == {}
+
+
+def test_input_meta_with_other_params():
+    """input= works alongside render, summarize, compress."""
+    @agentic_function(
+        render="detail",
+        compress=True,
+        input={"task": {"description": "A task"}},
+    )
+    def combined(task: str):
+        return task
+
+    assert combined.render == "detail"
+    assert combined.compress is True
+    assert combined.input_meta == {"task": {"description": "A task"}}
+
+
+def test_input_meta_does_not_affect_execution():
+    """input= is purely metadata — doesn't change function behavior."""
+    @agentic_function(input={
+        "x": {"description": "A number", "placeholder": "42"},
+        "y": {"hidden": True},
+    })
+    def add(x: int, y: int = 0):
+        return x + y
+
+    assert add(x=3, y=7) == 10
+    assert add.context.output == 10

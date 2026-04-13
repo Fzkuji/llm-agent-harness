@@ -13,18 +13,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Session continuity** for CLI providers (Claude Code, Codex, Gemini CLI)
 - **Interactive mode** for Claude Code CLI with full tool access
 - **Nested JSON export** for Context trees (`.json` format)
+- **`input` parameter for `@agentic_function`** — UI metadata for Visualizer structured input forms
+  - Supports `description`, `placeholder`, `multiline`, `options`, `hidden` per parameter
+  - Bool params auto-render as Yes/No toggle, `options` as clickable chips
+  - All meta functions and built-in functions annotated with `input` metadata
+  - Design principle: free text → selection → structured input (minimize cognitive load)
+  - Full spec documented in `docs/api/agentic_function.md`
+- **Structured function form in Visualizer** — replaces text command input for function execution
+  - Shows function name, description, typed parameter fields with hints
+  - Integrated into the chat input area (replaces textarea when active)
+  - Keyboard support: Esc to cancel, Enter/Ctrl+Enter to submit
+- **Thinking effort selector** in Visualizer — per-provider thinking/reasoning level control
+- **Markdown + LaTeX rendering** in Visualizer chat output
+- **Runtime Block UI** — card-style display for function executions with inline context trees
+- **Retry with branching** — attempt navigation (Modify) and error retry (Retry) in Visualizer
 
 ### Changed
 - README redesigned: Quick Start with 3 usage paths (Python/Skills/MCP), annotated code hero image, Deep Work feature showcase
 - Split meta-function skill into four focused skills
 - `create_skill` updated with "one skill, one entry function" pattern
 - Context compaction via `/compact` instead of process restart
+- `docs/API.md` now reflects the current public exports for `fix`, `improve`, and `create_runtime`
+- Visualizer welcome page redesigned: examples above input, centered welcome screen
+- Provider/model badges lock after conversation starts (session immutability)
+- Chat history and execution trees persist across page refreshes
 
 ### Fixed
 - Stderr pipe buffer deadlock in CLI providers
 - Per-call readline thread replaced with persistent queue-based stdout reader
 - Context branch indentation
 - `pytest tests/` now works from a fresh checkout without manually exporting `PYTHONPATH`
+- `_loop` not captured when server started via `uvicorn.run()` (broadcast silently failed)
+- Detail panel resize/collapse conflict
+- Codex default model showing as null
 
 ## [0.3.0] - 2025-04-04
 

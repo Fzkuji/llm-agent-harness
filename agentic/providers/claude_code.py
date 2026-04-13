@@ -142,6 +142,13 @@ class ClaudeCodeRuntime(Runtime):
         if self.model and self.model != "sonnet":
             cmd.extend(["--model", self.model])
 
+        # Thinking effort
+        effort = getattr(self, '_thinking_effort', None)
+        if effort and effort != "medium":
+            # Map our levels to Claude Code's levels
+            effort_map = {"none": "low", "low": "low", "medium": "medium", "high": "high", "xhigh": "max"}
+            cmd.extend(["--effort", effort_map.get(effort, effort)])
+
         if self._tools is not None:
             cmd.extend(["--tools", self._tools])
 

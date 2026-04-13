@@ -13,7 +13,24 @@ from agentic.meta_functions._helpers import (
 )
 
 
-@agentic_function
+@agentic_function(input={
+    "fn": {
+        "description": "Function name to improve",
+        "placeholder": "e.g. sentiment",
+        "multiline": False,
+    },
+    "runtime": {"hidden": True},
+    "goal": {
+        "description": "Improvement goal",
+        "placeholder": "e.g. better prompt, more robust, cleaner code",
+        "multiline": True,
+    },
+    "name": {
+        "description": "Rename the improved function",
+        "placeholder": "e.g. sentiment_v2",
+        "multiline": False,
+    },
+})
 def improve(
     fn,
     runtime: Runtime,

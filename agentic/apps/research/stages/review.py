@@ -133,8 +133,15 @@ def review_loop(
     for round_num in range(1, max_rounds + 1):
         # Review phase — fresh runtime each round
         with create_runtime(model=review_runtime.model) as round_review_rt:
+            truncated = paper_content[:15000]
+            if len(paper_content) > 15000:
+                import warnings
+                warnings.warn(
+                    f"Paper content truncated from {len(paper_content)} to 15000 chars for review",
+                    stacklevel=2,
+                )
             reply = review_paper(
-                paper_content=paper_content[:15000],
+                paper_content=truncated,
                 venue=venue,
                 runtime=round_review_rt,
             )
@@ -142,7 +149,8 @@ def review_loop(
         try:
             review = parse_json(reply)
         except ValueError:
-            review = {"score": 0, "passed": False, "weaknesses": [], "strengths": []}
+            review = {"score": 0, "passed": False, "weaknesses": [],
+                      "strengths": [], "parse_error": reply[:500]}
         review["round"] = round_num
         review["full_review"] = reply
         reviews.append(review)

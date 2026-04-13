@@ -10,7 +10,24 @@ from agentic.function import agentic_function
 from agentic.runtime import Runtime
 
 
-@agentic_function
+@agentic_function(input={
+    "fn_name": {
+        "description": "Function name",
+        "placeholder": "e.g. sentiment",
+        "multiline": False,
+    },
+    "description": {
+        "description": "What the function does",
+        "placeholder": "e.g. Analyze text sentiment",
+        "multiline": True,
+    },
+    "code": {
+        "description": "Function source code",
+        "placeholder": "def sentiment(text: str): ...",
+        "multiline": True,
+    },
+    "runtime": {"hidden": True},
+})
 def create_skill(fn_name: str, description: str, code: str, runtime: Runtime) -> str:
     """Write a SKILL.md for an OpenClaw skill based on the given function.
 

@@ -147,7 +147,7 @@ def agent_loop(
         goal:       The high-level goal to achieve.
         runtime:    The LLM runtime to use.
         max_steps:  Max iterations before stopping (None = unlimited).
-        state_dir:  Directory for state persistence (default: agentic/logs/).
+        state_dir:  Directory for state persistence (default: ~/.agentic/logs/).
                     Set to enable crash recovery — the loop resumes from
                     the last completed step.
         callback:   Called after each step with the step result dict.
@@ -161,7 +161,7 @@ def agent_loop(
 
     # State persistence
     if state_dir is None:
-        state_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
+        state_dir = os.path.join(os.path.expanduser("~"), ".agentic", "logs")
     sp = _state_path(state_dir, goal)
     state = _load_state(sp) or {"goal": goal, "steps": 0, "history": [], "done": False}
 

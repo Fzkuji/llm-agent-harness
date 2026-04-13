@@ -14,7 +14,7 @@ def init_research(name: str, venue: Optional[str] = None, base_dir: str | None =
     import it safely even in lightweight environments like test collection.
     """
     base = Path(base_dir or ".").expanduser()
-    project_name = venue and f"{name}-{venue}" or name
+    project_name = f"{name}-{venue}" if venue else name
     project_dir = base / project_name
 
     for child in (project_dir, project_dir / "notes", project_dir / "sources", project_dir / "drafts"):

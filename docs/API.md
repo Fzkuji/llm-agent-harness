@@ -9,12 +9,21 @@
 | [`agentic_function`](api/agentic_function.md) | `function.py` | 装饰器。把普通函数变成 Agentic Function，自动记录到 Context 树 |
 | [`Runtime`](api/runtime.md) | `runtime.py` | LLM 运行时类。处理 Context 注入、调用 LLM、记录回复 |
 | [`Context`](api/context.md) | `context.py` | 执行记录。每个函数调用一个节点，节点组成树 |
-| [`create`](api/meta_function.md) | `meta_function.py` | Meta function。用自然语言描述生成新的 @agentic_function |
+| [`create`, `fix`, `improve`](api/meta_function.md) | `meta_functions/` | Meta functions。创建、修复、优化 `@agentic_function` |
+| [`create_runtime` 与内置 providers](api/providers.md) | `providers/` | 自动检测或显式创建 Runtime，支持 Anthropic/OpenAI/Gemini/CLI providers |
 
 ## 导入
 
 ```python
-from agentic import agentic_function, Runtime, Context, create
+from agentic import (
+    agentic_function,
+    Runtime,
+    Context,
+    create,
+    fix,
+    improve,
+    create_runtime,
+)
 ```
 
 ## 快速示例

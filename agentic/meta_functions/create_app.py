@@ -17,7 +17,19 @@ from agentic.runtime import Runtime
 from agentic.meta_functions._helpers import extract_code
 
 
-@agentic_function
+@agentic_function(input={
+    "description": {
+        "description": "What the app should do",
+        "placeholder": "e.g. a CLI tool that summarizes PDF files",
+        "multiline": True,
+    },
+    "runtime": {"hidden": True},
+    "name": {
+        "description": "App name (used as filename)",
+        "placeholder": "app",
+        "multiline": False,
+    },
+})
 def create_app(description: str, runtime: Runtime, name: str = "app") -> str:
     """Generate a complete, runnable agentic app script.
 

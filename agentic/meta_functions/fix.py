@@ -13,7 +13,28 @@ from agentic.meta_functions._helpers import (
 )
 
 
-@agentic_function
+@agentic_function(input={
+    "fn": {
+        "description": "Function name to fix",
+        "placeholder": "e.g. sentiment",
+        "multiline": False,
+    },
+    "runtime": {"hidden": True},
+    "instruction": {
+        "description": "What to fix or change",
+        "placeholder": "e.g. handle empty input gracefully",
+        "multiline": True,
+    },
+    "name": {
+        "description": "Rename the fixed function",
+        "placeholder": "e.g. sentiment_v2",
+        "multiline": False,
+    },
+    "max_rounds": {
+        "description": "Max retry rounds",
+        "options": ["3", "5", "10"],
+    },
+})
 def fix(
     fn,
     runtime: Runtime,

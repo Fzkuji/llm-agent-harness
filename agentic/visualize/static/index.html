@@ -35,7 +35,7 @@
   --shadow: 0 2px 8px rgba(0,0,0,0.3);
   --sidebar-width: 300px;
   --detail-width: 300px;
-  --font-mono: 'SF Mono', 'Fira Code', 'Consolas', 'Monaco', monospace;
+  --font-mono: 'Menlo', 'Monaco', 'Consolas', 'Liberation Mono', 'Courier New', monospace;
   --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;
 }
 
@@ -480,6 +480,9 @@ html, body {
   flex-direction: column;
   gap: 0;
 }
+.chat-messages:has(> .welcome) {
+  padding-bottom: 0;
+}
 
 .message {
   padding: 16px 24px;
@@ -541,6 +544,7 @@ html, body {
 
 .message-content {
   padding-left: 36px;
+  padding-right: 36px;
   font-size: 14px;
   line-height: 1.6;
   color: var(--text-primary);
@@ -568,6 +572,130 @@ html, body {
   background: var(--bg-secondary);
   padding: 1px 5px;
   border-radius: 3px;
+}
+.message-content pre code { background: none; padding: 0; }
+.message-content p { margin: 4px 0; }
+.message-content ul, .message-content ol { margin: 4px 0; padding-left: 20px; }
+.message-content li { margin: 2px 0; }
+.message-content h1, .message-content h2, .message-content h3 { margin: 12px 0 6px; color: var(--text-bright); }
+.message-content h1 { font-size: 18px; } .message-content h2 { font-size: 16px; } .message-content h3 { font-size: 14px; }
+.message-content a { color: var(--accent-blue); text-decoration: none; }
+.message-content a:hover { text-decoration: underline; }
+.message-content blockquote { border-left: 3px solid var(--border); margin: 8px 0; padding: 4px 12px; color: var(--text-secondary); }
+.message-content table { border-collapse: collapse; margin: 8px 0; font-size: 13px; }
+.message-content th, .message-content td { border: 1px solid var(--border); padding: 4px 8px; }
+.message-content th { background: var(--bg-secondary); }
+
+/* ===== Runtime Block (function execution card) ===== */
+.runtime-block {
+  margin: 20px 24px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent-cyan);
+  border-radius: var(--radius);
+  background: var(--bg-tertiary);
+  animation: msgAppear 0.3s ease forwards;
+  overflow: hidden;
+}
+.runtime-block + .message, .message + .runtime-block { margin-top: 20px; }
+.runtime-block-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 36px 10px 12px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-bright);
+  flex-wrap: wrap;
+  cursor: pointer;
+  user-select: none;
+}
+.runtime-block-header:hover { background: var(--bg-hover); }
+.runtime-block.collapsed .runtime-block-header { border-bottom: none; }
+.runtime-block.collapsed .runtime-block-body,
+.runtime-block.collapsed .runtime-block-footer { display: none; }
+.runtime-icon {
+  color: var(--accent-cyan);
+  font-size: 13px;
+  flex-shrink: 0;
+  width: 18px;
+  text-align: center;
+  transition: transform var(--transition);
+  display: inline-block;
+  transform: rotate(90deg);
+}
+.runtime-block.collapsed .runtime-icon { transform: rotate(0deg); }
+.runtime-block-header .runtime-result-preview { display: none; }
+.runtime-block.collapsed .runtime-block-header .runtime-result-preview {
+  display: inline;
+  color: var(--text-muted);
+  font-size: 13px;
+  margin-left: 8px;
+  font-weight: normal;
+}
+.runtime-func {
+  color: var(--accent-green);
+  font-weight: 600;
+}
+.runtime-params {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.runtime-block-body {
+  padding: 10px 36px;
+}
+.runtime-block-body .message-content {
+  padding-left: 0;
+  padding-right: 0;
+}
+.runtime-block-body .inline-tree { margin-left: 0; }
+.runtime-block-body .runtime-result {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  word-wrap: break-word;
+}
+.runtime-return-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--accent-purple);
+  font-weight: 600;
+}
+.runtime-block-footer {
+  padding: 10px 36px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+}
+.runtime-block-footer .rerun-btn,
+.runtime-block-footer .attempt-nav {
+  margin: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.runtime-block .inline-tree {
+  margin-top: 6px;
+}
+.runtime-block .rerun-btn {
+  margin-top: 6px;
+}
+.runtime-block.interrupted { border-left-color: var(--text-muted); }
+.runtime-block.error { border-left-color: var(--accent-red); }
+
+/* Pending runtime block (typing indicator) */
+.runtime-block-pending .runtime-block-body {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.runtime-block-pending .typing-indicator {
+  display: flex;
+  gap: 4px;
 }
 
 /* Status message */
@@ -723,6 +851,13 @@ html, body {
   background: rgba(198,120,221,0.15);
   border-color: rgba(198,120,221,0.3);
 }
+.agent-badge.locked {
+  cursor: default;
+}
+.agent-badge.locked:hover {
+  background: inherit;
+  border-color: inherit;
+}
 .agent-selector {
   position: fixed;
   z-index: 1000;
@@ -851,6 +986,44 @@ html, body {
 
 .context-card-body.expanded { display: block; }
 
+/* Inline execution tree (inside function result messages) */
+.inline-tree {
+  margin: 8px 0 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-secondary);
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.inline-tree-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: var(--bg-tertiary);
+  cursor: pointer;
+  user-select: none;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+.inline-tree-header:hover { background: var(--bg-hover); }
+.inline-tree-toggle {
+  color: var(--text-secondary);
+  font-size: 10px;
+  transition: transform var(--transition);
+  display: inline-block;
+}
+.inline-tree-toggle { transform: rotate(90deg); }
+.inline-tree-toggle.collapsed { transform: rotate(0deg); }
+.inline-tree-body {
+  padding: 6px 8px;
+  display: block;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.inline-tree-body.collapsed { display: none; }
+
 /* Error card */
 .error-content {
   background: rgba(224,108,117,0.08);
@@ -869,25 +1042,19 @@ html, body {
 /* Welcome screen */
 .welcome {
   flex: 1;
-  min-height: calc(100vh - 150px);
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   color: var(--text-secondary);
-  padding: 40px 40px 0;
+  padding: 40px;
 }
 .welcome-top {
-  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 16px;
-}
-.welcome-bottom {
-  margin-top: auto;
-  padding-bottom: 40px;
-  flex-shrink: 0;
 }
 
 .welcome-logo {
@@ -915,8 +1082,11 @@ html, body {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 8px;
+  padding: 16px 24px 16px;
   justify-content: center;
+  max-width: 800px;
+  margin: 0 auto;
+  flex-shrink: 0;
 }
 
 .welcome-example {
@@ -946,14 +1116,13 @@ html, body {
 
 .input-wrapper {
   display: flex;
-  align-items: flex-end;
-  gap: 8px;
+  flex-direction: column;
   max-width: 800px;
   margin: 0 auto;
   background: var(--bg-input);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 8px 12px;
+  padding: 10px 12px 6px;
   transition: border-color var(--transition);
 }
 
@@ -962,7 +1131,7 @@ html, body {
 }
 
 .chat-input {
-  flex: 1;
+  width: 100%;
   background: none;
   border: none;
   color: var(--text-bright);
@@ -978,6 +1147,19 @@ html, body {
 
 .chat-input::placeholder {
   color: var(--text-muted);
+}
+
+.input-bottom-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+}
+
+.input-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .send-btn {
@@ -1013,8 +1195,269 @@ html, body {
   font-size: 11px;
   color: var(--text-muted);
   text-align: center;
-  margin-top: 8px;
+  margin-top: 6px;
   margin-bottom: 2px;
+  max-width: 800px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.input-options { position: relative; }
+.thinking-selector {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 10px; border-radius: 6px; cursor: pointer;
+  font-size: 12px; color: var(--text-muted);
+  background: none; border: 1px solid transparent;
+  transition: all var(--transition); user-select: none;
+}
+.thinking-selector:hover, .thinking-selector.open { background: var(--bg-hover); color: var(--text-primary); border-color: var(--border); }
+.thinking-arrow { font-size: 8px; opacity: 0.6; }
+.thinking-menu {
+  display: none; position: absolute; bottom: 100%; left: 0;
+  margin-bottom: 8px; background: var(--bg-primary); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: 6px 0; min-width: 260px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5); z-index: 100;
+}
+.thinking-menu.open { display: block; }
+.thinking-option {
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 14px; cursor: pointer; font-size: 13px;
+  color: var(--text-secondary); transition: background var(--transition);
+}
+.thinking-option:hover { background: var(--bg-hover); color: var(--text-primary); }
+.thinking-option.selected { color: var(--text-primary); }
+.thinking-option.selected .thinking-opt-label { font-weight: 600; }
+.thinking-opt-label { min-width: 55px; flex-shrink: 0; }
+.thinking-opt-desc { font-size: 11px; color: var(--text-muted); flex: 1; }
+.thinking-opt-check { width: 18px; flex-shrink: 0; text-align: center; color: var(--accent-blue); font-size: 14px; }
+
+/* ===== Function Form (replaces input-wrapper content) ===== */
+.input-wrapper.fn-form-mode {
+  padding: 0;
+  border-color: var(--accent-cyan);
+}
+.fn-form-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.fn-form-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.fn-form-name {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent-green);
+  flex-shrink: 0;
+}
+.fn-form-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fn-form-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: all var(--transition);
+  line-height: 1;
+  flex-shrink: 0;
+}
+.fn-form-close:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+.fn-form-body {
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.fn-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.fn-form-label {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.fn-form-label-name {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-bright);
+}
+.fn-form-label-type {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent-purple);
+  opacity: 0.8;
+}
+.fn-form-label-required {
+  font-size: 10px;
+  color: var(--accent-red);
+  opacity: 0.7;
+}
+.fn-form-label-optional {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.fn-form-label-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-left: 4px;
+}
+.fn-form-input {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 10px;
+  color: var(--text-bright);
+  font-size: 13px;
+  font-family: var(--font-mono);
+  outline: none;
+  transition: border-color var(--transition);
+  width: 100%;
+}
+.fn-form-input:focus {
+  border-color: var(--accent-blue);
+}
+.fn-form-input::placeholder {
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 12px;
+}
+.fn-form-input.fn-form-textarea {
+  min-height: 48px;
+  max-height: 160px;
+  resize: vertical;
+}
+.fn-form-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  border-top: 1px solid var(--border);
+}
+.fn-form-footer-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fn-form-footer-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.fn-form-run-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: none;
+  background: var(--accent-cyan);
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  flex-shrink: 0;
+  transition: all var(--transition);
+  opacity: 0.8;
+}
+.fn-form-run-btn:hover {
+  opacity: 1;
+  transform: scale(1.05);
+}
+.fn-form-cancel-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: all var(--transition);
+}
+.fn-form-cancel-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+select.fn-form-input {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23636d83'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 28px;
+  cursor: pointer;
+}
+/* Bool toggle */
+.fn-form-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+.fn-form-toggle-btn {
+  padding: 5px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all var(--transition);
+  user-select: none;
+}
+.fn-form-toggle-btn:hover { border-color: var(--border-light); color: var(--text-primary); }
+.fn-form-toggle-btn.active {
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
+  color: #fff;
+}
+/* Option chips (for multi-choice) */
+.fn-form-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+.fn-form-option-chip {
+  padding: 5px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: all var(--transition);
+  user-select: none;
+}
+.fn-form-option-chip:hover { border-color: var(--border-light); color: var(--text-primary); }
+.fn-form-option-chip.active {
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
+  color: #fff;
+}
+/* No-params message */
+.fn-form-no-params {
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 2px 0;
 }
 
 /* ===== Right Panel (Detail) ===== */
@@ -1172,9 +1615,12 @@ html, body {
 .node-output-preview { font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
 
 .rerun-btn {
-  margin-top: 8px; padding: 4px 12px; font-size: 12px;
-  background: var(--bg-hover); border: 1px solid var(--border); border-radius: var(--radius);
+  -webkit-appearance: none; appearance: none;
+  padding: 0 12px; height: 28px; line-height: 28px; font-size: 12px;
+  background: var(--bg-hover); border: 1px solid var(--border); border-radius: 4px;
   color: var(--text-secondary); cursor: pointer; font-family: var(--font-sans);
+  display: inline-flex; align-items: center; justify-content: center;
+  margin: 0 !important; box-sizing: border-box;
 }
 .rerun-btn:hover { color: var(--accent-blue); border-color: var(--accent-blue); }
 
@@ -1298,16 +1744,13 @@ textarea.retry-field-input { min-height: 50px; max-height: 200px; resize: vertic
 
 /* Provider selector */
 .provider-selector { padding: 8px 12px; border-top: 1px solid var(--border); margin-top: auto; }
-.provider-item { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: var(--radius); cursor: pointer; font-size: 12px; color: var(--text-secondary); transition: all var(--transition); }
-.provider-item:hover { background: var(--bg-hover); color: var(--text-primary); }
-.provider-item.active { color: var(--accent-green); }
-.provider-item.unavailable { opacity: 0.4; cursor: not-allowed; }
-.provider-item.locked { opacity: 0.4; cursor: not-allowed; }
+.provider-item { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: var(--radius); cursor: default; font-size: 12px; color: var(--text-secondary); transition: all var(--transition); }
+.provider-item.configured { color: var(--accent-green); }
+.provider-item.unavailable { opacity: 0.4; }
 .provider-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); flex-shrink: 0; margin-left: 5px; margin-right: 5px; }
-.provider-item.active .provider-dot { background: var(--accent-green); }
-.provider-item.available .provider-dot { background: var(--accent-blue); }
+.provider-item.configured .provider-dot { background: var(--accent-green); }
 .provider-type-tag { font-size: 10px; color: var(--text-primary); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
-.provider-item.active .provider-type-tag { color: var(--accent-green); }
+.provider-item.configured .provider-type-tag { color: var(--accent-green); }
 .provider-name { flex: 1; }
 .config-badge { font-size: 9px; padding: 1px 5px; border-radius: 3px; text-decoration: none; background: rgba(75,82,99,0.3); color: var(--text-muted); border: 1px solid var(--border); transition: all 0.2s; cursor: pointer; }
 .config-badge.configured { background: rgba(97,175,239,0.12); color: var(--accent-blue); border-color: rgba(97,175,239,0.3); }
@@ -1317,6 +1760,48 @@ textarea.retry-field-input { min-height: 50px; max-height: 200px; resize: vertic
 .node-running { animation: pulse 1.5s ease-in-out infinite; }
 .node-just-completed { animation: flashGreen 0.5s ease; }
 @keyframes flashGreen { 0% { background: rgba(152,195,121,0.3); } 100% { background: transparent; } }
+
+/* Attempt navigation (ChatGPT-style regenerate switcher) */
+.attempt-nav {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 0;
+  user-select: none;
+}
+.attempt-nav-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition);
+  padding: 0;
+  line-height: 1;
+}
+.attempt-nav-btn:hover:not(:disabled) {
+  color: var(--text-bright);
+  border-color: var(--accent-blue);
+  background: rgba(97,175,239,0.08);
+}
+.attempt-nav-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.attempt-nav-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  min-width: 32px;
+  text-align: center;
+}
 </style>
 </head>
 <body>
@@ -1388,23 +1873,32 @@ textarea.retry-field-input { min-height: 50px; max-height: 200px; resize: vertic
               Type a command or natural language below.
             </div>
           </div>
-          <div class="welcome-bottom">
-            <div class="welcome-examples">
-              <div class="welcome-example" onclick="setInput('run word_count text=&quot;Hello world&quot;')">run word_count text="Hello world"</div>
-              <div class="welcome-example" onclick="setInput('run sentiment text=&quot;I love this product&quot;')">run sentiment</div>
-              <div class="welcome-example" onclick="setInput('create a function that extracts emails from text --name extract_emails')">create a function</div>
-            </div>
-          </div>
         </div>
       </div>
     </div>
 
     <!-- Input area -->
+    <div class="welcome-examples" id="welcomeExamples">
+      <div class="welcome-example" onclick="clickFnExample('word_count')">run word_count</div>
+      <div class="welcome-example" onclick="clickFnExample('sentiment')">run sentiment</div>
+      <div class="welcome-example" onclick="clickFnExample('create')">create a function</div>
+    </div>
     <div class="input-area">
       <div class="input-wrapper">
         <textarea id="chatInput" class="chat-input" placeholder="Type a message... (Enter to send, Shift+Enter for newline)" rows="1"></textarea>
-        <button class="stop-btn" id="stopBtn" onclick="stopExecution()" title="Stop" style="display:none">&#9632;</button>
-        <button class="send-btn" id="sendBtn" onclick="onSendBtnClick()" title="Send message">&#9654;</button>
+        <div class="input-bottom-row">
+          <div class="input-options">
+            <div class="thinking-selector" id="thinkingSelector" onclick="toggleThinkingMenu(event)">
+              <span id="thinkingLabel">medium</span>
+              <span class="thinking-arrow">&#9662;</span>
+            </div>
+            <div class="thinking-menu" id="thinkingMenu"></div>
+          </div>
+          <div class="input-actions">
+            <button class="stop-btn" id="stopBtn" onclick="stopExecution()" title="Stop" style="display:none">&#9632;</button>
+            <button class="send-btn" id="sendBtn" onclick="onSendBtnClick()" title="Send message">&#9654;</button>
+          </div>
+        </div>
       </div>
       <div class="input-hint">
         <span style="color:var(--accent-purple)">create</span> / <span style="color:var(--accent-cyan)">run</span> / <span style="color:var(--accent-orange)">fix</span> &nbsp;or ask anything
@@ -1424,6 +1918,10 @@ textarea.retry-field-input { min-height: 50px; max-height: 200px; resize: vertic
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/split.js/1.6.5/split.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"></script>
 <script>
 // ===== State =====
 var ws = null;
@@ -1440,6 +1938,7 @@ var sidebarOpen = true;
 var _nodeCache = {};  // path -> node data
 var _liveTreeCollapsed = false;
 var _lastRunCommand = null;
+var _skipScrollToBottom = false;
 var isRunning = false;
 var execLogStartTime = 0;
 var _modelList = [];
@@ -1488,7 +1987,6 @@ function handleMessage(msg) {
   switch (msg.type) {
     case 'full_tree':
       trees = msg.data || [];
-      renderLiveTree();
       break;
     case 'event':
       handleContextEvent(msg.event, msg.data);
@@ -1518,6 +2016,15 @@ function handleMessage(msg) {
       break;
     case 'conversation_loaded':
       loadConversationData(msg.data);
+      break;
+    case 'conversation_reload':
+      // Server asks us to reload this conversation (e.g. after retry_overwrite)
+      if (msg.data && msg.data.conv_id === currentConvId && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ action: 'load_conversation', conv_id: currentConvId }));
+      }
+      break;
+    case 'attempt_switched':
+      handleAttemptSwitched(msg.data);
       break;
     case 'conversations_list':
       // Sync with server: keep only conversations the server knows about
@@ -1568,7 +2075,15 @@ function handleMessage(msg) {
       _agentSettings.chat = msg.data.chat || _agentSettings.chat;
       _agentSettings.exec = msg.data.exec || _agentSettings.exec;
       updateAgentBadges();
+      // Refresh thinking menu for new provider
+      loadAgentSettings();
       addSystemMessage('Agent settings updated: Chat=' + msg.data.chat.provider + '·' + msg.data.chat.model + ', Exec=' + msg.data.exec.provider + '·' + msg.data.exec.model);
+      break;
+    case 'chat_session_update':
+      if (msg.data && msg.data.session_id && _agentSettings.chat) {
+        _agentSettings.chat.session_id = msg.data.session_id;
+        updateAgentBadges();
+      }
       break;
     case 'pong':
       break;
@@ -1577,67 +2092,20 @@ function handleMessage(msg) {
 
 function handleContextEvent(eventType, data) {
   updateTreeData(data);
-  renderLiveTree();
 }
 
-/* Insert element into chatMessages, always before the persistent live tree */
+/* Insert element into chatMessages */
 function appendToChat(el) {
   var container = document.getElementById('chatMessages');
   if (!container) return;
-  var tree = document.getElementById('liveExecTree');
-  if (tree && tree.parentNode === container) {
-    container.insertBefore(el, tree);
-  } else {
-    container.appendChild(el);
-  }
+  container.appendChild(el);
 }
 
 function renderLiveTree() {
-  if (trees.length === 0) {
-    var old = document.getElementById('liveExecTree');
-    if (old) old.remove();
-    return;
-  }
-
-  var chatContainer = document.getElementById('chatMessages');
-  if (!chatContainer) return;
-  var container = document.getElementById('liveExecTree');
-  if (!container) {
-    container = document.createElement('div');
-    container.id = 'liveExecTree';
-    container.className = 'context-card';
-    chatContainer.appendChild(container);
-  }
-  if (container !== chatContainer.lastElementChild) {
-    chatContainer.appendChild(container);
-  }
-
-  var hasRunning = trees.some(function(t) { return _treeHasRunning(t); });
-  var bodyExpanded = !_liveTreeCollapsed;
-
-  // Auto-expand root nodes
-  trees.forEach(function(t) { expandedNodes.add(t.path); });
-
-  var treeContent = '';
-  for (var i = 0; i < trees.length; i++) {
-    treeContent += renderTreeNode(trees[i]);
-  }
-
-  container.innerHTML =
-    '<div class="context-card-header" onclick="toggleLiveTree()">' +
-      '<span class="context-card-title">' +
-        (hasRunning
-          ? '<span class="pulse" style="color:var(--accent-blue)">&#9679;</span> '
-          : '<span style="color:var(--accent-cyan)">&#9670;</span> ') +
-        'Execution Tree' +
-      '</span>' +
-      '<span class="context-card-toggle' + (bodyExpanded ? ' expanded' : '') + '" id="toggle_liveExecTreeCard">&#9654;</span>' +
-    '</div>' +
-    '<div class="context-card-body' + (bodyExpanded ? ' expanded' : '') + '" id="body_liveExecTreeCard">' +
-      treeContent +
-    '</div>';
-
-  scrollToBottom();
+  // Global tree rendering is disabled -- trees are now inline per message.
+  // Clean up any leftover global tree element.
+  var old = document.getElementById('liveExecTree');
+  if (old) old.remove();
 }
 
 function _treeHasRunning(node) {
@@ -1844,6 +2312,76 @@ function finalizeExecLog() {
   }, 2000);
 }
 
+// ===== Attempt Navigation =====
+function renderAttemptNav(funcName, currentIdx, total) {
+  var prevDisabled = currentIdx <= 0 ? ' disabled' : '';
+  var nextDisabled = currentIdx >= total - 1 ? ' disabled' : '';
+  return '<div class="attempt-nav">' +
+    '<button class="attempt-nav-btn"' + prevDisabled + ' onclick="switchAttempt(\'' + escAttr(funcName) + '\', -1)" title="Previous attempt">&#9664;</button>' +
+    '<span class="attempt-nav-label">' + (currentIdx + 1) + '/' + total + '</span>' +
+    '<button class="attempt-nav-btn"' + nextDisabled + ' onclick="switchAttempt(\'' + escAttr(funcName) + '\', 1)" title="Next attempt">&#9654;</button>' +
+  '</div>';
+}
+
+function switchAttempt(funcName, direction) {
+  if (!currentConvId || !conversations[currentConvId]) return;
+  var msgs = conversations[currentConvId].messages || [];
+  var msg = null;
+  for (var i = msgs.length - 1; i >= 0; i--) {
+    if (msgs[i].role === 'assistant' && msgs[i].function === funcName && msgs[i].attempts) {
+      msg = msgs[i];
+      break;
+    }
+  }
+  if (!msg || !msg.attempts || msg.attempts.length <= 1) return;
+
+  var newIdx = (msg.current_attempt || 0) + direction;
+  if (newIdx < 0 || newIdx >= msg.attempts.length) return;
+
+  // Send to server — server saves/restores subsequent messages and responds
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({
+      action: 'switch_attempt',
+      conv_id: currentConvId,
+      function: funcName,
+      attempt_index: newIdx
+    }));
+  }
+}
+
+function handleAttemptSwitched(data) {
+  // Server confirmed attempt switch - update tree data
+  if (data.tree && (data.tree.path || data.tree.name)) {
+    var rootKey = data.tree.path || data.tree.name;
+    var idx = trees.findIndex(function(t) { return t.path === rootKey || t.name === data.tree.name; });
+    if (idx >= 0) { trees[idx] = data.tree; } else { trees.push(data.tree); }
+  }
+
+  // Rebuild conversation with restored subsequent messages
+  if (currentConvId && conversations[currentConvId]) {
+    var conv = conversations[currentConvId];
+    var msgs = conv.messages || [];
+    // Find the message and update it
+    for (var i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role === 'assistant' && msgs[i].function === data.function && msgs[i].attempts) {
+        msgs[i].current_attempt = data.attempt_index;
+        msgs[i].content = data.content;
+        // Rebuild: messages up to this point + restored subsequent
+        var restored = data.subsequent_messages || [];
+        conv.messages = msgs.slice(0, i + 1).concat(restored);
+        break;
+      }
+    }
+    _skipScrollToBottom = true;
+    renderConversationMessages(conv);
+    // Scroll to the attempt message instead of bottom
+    var el = document.querySelector('[data-function="' + data.function + '"]');
+    if (el) {
+      requestAnimationFrame(function() { el.scrollIntoView({ block: 'center' }); });
+    }
+  }
+}
+
 // ===== Chat =====
 function rerunFunction() {
   if (!_lastRunCommand) return;
@@ -1851,6 +2389,64 @@ function rerunFunction() {
   input.value = _lastRunCommand;
   input.focus();
   autoResize(input);
+}
+
+function retryCurrentBlock(funcName) {
+  // Overwrite retry: replace current error/interrupted block with running state,
+  // then backend re-runs and result replaces in-place
+  if (!currentConvId || !conversations[currentConvId]) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    addSystemMessage('Retry failed: not connected to server.');
+    return;
+  }
+
+  // Find the user command for this function
+  var msgs = conversations[currentConvId].messages || [];
+  var userCmd = null;
+  for (var i = msgs.length - 1; i >= 0; i--) {
+    if (msgs[i].role === 'user' && msgs[i].display === 'runtime') {
+      var parsed = parseRunCommandForDisplay(msgs[i].content || '');
+      if (parsed.funcName === funcName || !funcName) {
+        userCmd = msgs[i].content;
+        break;
+      }
+    }
+  }
+  if (!userCmd && _lastRunCommand) userCmd = _lastRunCommand;
+  if (!userCmd) return;
+
+  // Turn the existing block into "running" state with typing indicator
+  var existingBlock = document.querySelector('.runtime-block[data-function="' + funcName + '"]');
+  if (!existingBlock) {
+    // Try interrupted block (no data-function)
+    existingBlock = document.querySelector('.runtime-block.interrupted');
+  }
+  if (existingBlock) {
+    existingBlock.className = 'runtime-block';
+    existingBlock.setAttribute('data-function', funcName);
+    var parsedDisplay = parseRunCommandForDisplay(userCmd);
+    existingBlock.innerHTML =
+      '<div class="runtime-block-header">' +
+        '<span class="runtime-icon">&#9654;</span>' +
+        '<span class="runtime-func">' + escHtml(parsedDisplay.funcName) +
+          (parsedDisplay.params ? '(<span class="runtime-params">' + escHtml(parsedDisplay.params) + '</span>)' : '()') +
+        '</span>' +
+      '</div>' +
+      '<div class="runtime-block-body">' +
+        '<div class="typing-indicator"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>' +
+      '</div>';
+  }
+
+  setRunning(true);
+
+  // Send retry_overwrite action to backend
+  ws.send(JSON.stringify({
+    action: 'retry_overwrite',
+    conv_id: currentConvId,
+    function: funcName,
+    text: userCmd,
+    thinking_effort: _thinkingEffort
+  }));
 }
 
 function rerunFromNode(path) {
@@ -1943,22 +2539,33 @@ function executeRetry(path, paramsOverride) {
   }));
 }
 
-function sendMessage() {
+function sendMessage(textOverride) {
   var input = document.getElementById('chatInput');
-  var text = input.value.trim();
+  var text = textOverride ? textOverride.trim() : input.value.trim();
   if (!text) return;
 
   // Track last run command for re-run
   if (text.toLowerCase().startsWith('run ')) _lastRunCommand = text;
 
   // Hide welcome
-  var welcome = document.getElementById('welcomeScreen');
-  if (welcome) welcome.style.display = 'none';
+  setWelcomeVisible(false);
+  closeFnForm();
 
-  // Add user message to UI
-  addUserMessage(text);
-  input.value = '';
-  autoResize(input);
+  // Detect if this is a "run" command
+  var isRunCommand = /^(run\s|create\s|fix\s)/i.test(text);
+
+  if (isRunCommand) {
+    // Parse function name and params for display
+    var parsed = parseRunCommandForDisplay(text);
+    addRuntimeBlockPending(text, parsed.funcName, parsed.params);
+  } else {
+    // Normal chat message
+    addUserMessage(text);
+  }
+  if (!textOverride) {
+    input.value = '';
+    autoResize(input);
+  }
 
   // Send to server
   setRunning(true);
@@ -1966,7 +2573,8 @@ function sendMessage() {
     ws.send(JSON.stringify({
       action: 'chat',
       text: text,
-      conv_id: currentConvId
+      conv_id: currentConvId,
+      thinking_effort: _thinkingEffort
     }));
   } else {
     var errDiv = document.createElement('div');
@@ -1976,9 +2584,66 @@ function sendMessage() {
     return;
   }
 
-  // Add a pending assistant message placeholder
-  var msgId = 'pending_' + Date.now();
-  addAssistantPlaceholder(msgId);
+  // Add a pending assistant message placeholder (only for non-run commands)
+  if (!isRunCommand) {
+    var msgId = 'pending_' + Date.now();
+    addAssistantPlaceholder(msgId);
+  }
+}
+
+function parseRunCommandForDisplay(text) {
+  var t = text.trim();
+  // Handle "run func_name key=val ..." or "create ...", "fix ..."
+  var match = t.match(/^(?:run\s+)(\S+)\s*(.*)/i);
+  if (match) return { funcName: match[1], params: match[2] || '' };
+  var match2 = t.match(/^(create|fix)\s+(.*)/i);
+  if (match2) return { funcName: match2[1], params: match2[2] || '' };
+  return { funcName: t, params: '' };
+}
+
+function addRuntimeBlockPending(rawText, funcName, params) {
+  var div = document.createElement('div');
+  div.className = 'runtime-block runtime-block-pending';
+  div.id = 'runtime_pending';
+  var headerHtml = '<div class="runtime-block-header">' +
+    '<span class="runtime-icon">&#9654;</span>' +
+    '<span class="runtime-func">' + escHtml(funcName) + (params ? '(<span class="runtime-params">' + escHtml(params) + '</span>)' : '()') + '</span>' +
+  '</div>';
+  div.innerHTML = headerHtml +
+    '<div class="runtime-block-body">' +
+      '<div class="typing-indicator"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>' +
+    '</div>';
+  appendToChat(div);
+  scrollToBottom();
+
+  // Store user message in conversation data (mark as runtime)
+  if (currentConvId && conversations[currentConvId]) {
+    if (!conversations[currentConvId].messages) conversations[currentConvId].messages = [];
+    conversations[currentConvId].messages.push({ role: 'user', content: rawText, display: 'runtime' });
+  }
+}
+
+function buildRuntimeBlockHtml(funcName, params, contentHtml, treeHtml, attemptNavHtml, rerunHtml) {
+  // Extract plain text preview from contentHtml for collapsed state
+  var tempDiv = document.createElement('div');
+  tempDiv.innerHTML = contentHtml;
+  var plainPreview = (tempDiv.textContent || '').trim().substring(0, 60);
+  if (plainPreview.length >= 60) plainPreview += '...';
+
+  var headerHtml = '<div class="runtime-block-header" onclick="toggleRuntimeBlock(this)">' +
+    '<span class="runtime-icon">&#9654;</span>' +
+    '<span class="runtime-func">' + escHtml(funcName) + (params ? '(<span class="runtime-params">' + escHtml(params) + '</span>)' : '()') + '</span>' +
+    '<span class="runtime-result-preview">-> ' + escHtml(plainPreview) + '</span>' +
+  '</div>';
+  var bodyHtml = '<div class="runtime-block-body">' +
+    '<div class="runtime-result"><span class="runtime-return-label">return:</span> ' + contentHtml + '</div>' +
+    (treeHtml || '') +
+  '</div>';
+  var footerParts = [];
+  if (attemptNavHtml) footerParts.push(attemptNavHtml);
+  if (rerunHtml) footerParts.push(rerunHtml);
+  var footerHtml = footerParts.length > 0 ? '<div class="runtime-block-footer">' + footerParts.join('') + '</div>' : '';
+  return headerHtml + bodyHtml + footerHtml;
 }
 
 function addUserMessage(text) {
@@ -2025,7 +2690,6 @@ function handleChatResponse(data) {
       var rootKey = ct.path || ct.name;
       var idx = trees.findIndex(function(t) { return t.path === rootKey || t.name === ct.name; });
       if (idx >= 0) { trees[idx] = ct; } else { trees.push(ct); }
-      renderLiveTree();
       // Rebuild chat to remove retried node's messages
       if (currentConvId && conversations[currentConvId]) {
         var rebuilt = extractMessagesFromTree(ct);
@@ -2039,92 +2703,282 @@ function handleChatResponse(data) {
 
   // Final response (result or error) -- task done
   setRunning(false);
+  loadAgentSettings();
 
-  // Retry result: rebuild entire chat from tree and skip normal append
-  if (data.is_retry && data.context_tree && currentConvId && conversations[currentConvId]) {
+  // Retry result with attempts: update existing message in-place
+  if (type === 'retry_result' && data.function && data.attempts) {
+    setRunning(false);
+    loadAgentSettings();
+
+    // Update tree data tracking
+    if (data.context_tree && (data.context_tree.path || data.context_tree.name)) {
+      var ct = data.context_tree;
+      var rootKey = ct.path || ct.name;
+      var idx = trees.findIndex(function(t) { return t.path === rootKey || t.name === ct.name; });
+      if (idx >= 0) { trees[idx] = ct; } else { trees.push(ct); }
+      expandedNodes.add(rootKey);
+    }
+
+    // Remove pending placeholder
+    var statusLine = document.getElementById('currentStatusLine');
+    if (statusLine) statusLine.remove();
+    var pendingKeys = Object.keys(pendingResponses);
+    for (var pi = 0; pi < pendingKeys.length; pi++) {
+      var pel = pendingResponses[pendingKeys[pi]];
+      if (pel && pel.parentNode) pel.parentNode.removeChild(pel);
+      delete pendingResponses[pendingKeys[pi]];
+    }
+
+    // Update local conversation data
+    if (currentConvId && conversations[currentConvId]) {
+      var msgs = conversations[currentConvId].messages || [];
+      for (var mi = msgs.length - 1; mi >= 0; mi--) {
+        if (msgs[mi].role === 'assistant' && msgs[mi].function === data.function) {
+          msgs[mi].attempts = data.attempts;
+          msgs[mi].current_attempt = data.current_attempt;
+          msgs[mi].content = data.content;
+          break;
+        }
+      }
+    }
+
+    // If truncated, remove all messages after the retried one (new branch)
+    if (data.truncated) {
+      var existingCheck = document.querySelector('[data-function="' + data.function + '"]');
+      if (existingCheck) {
+        // Remove all sibling elements after the retried message
+        while (existingCheck.nextElementSibling) {
+          existingCheck.nextElementSibling.remove();
+        }
+      }
+      // Also truncate local conversation messages
+      if (currentConvId && conversations[currentConvId]) {
+        var msgs = conversations[currentConvId].messages || [];
+        for (var ti = msgs.length - 1; ti >= 0; ti--) {
+          if (msgs[ti].role === 'assistant' && msgs[ti].function === data.function) {
+            conversations[currentConvId].messages = msgs.slice(0, ti + 1);
+            break;
+          }
+        }
+      }
+    }
+
+    // Find and update existing message element
+    var existingEl = document.querySelector('[data-function="' + data.function + '"]');
+    if (existingEl) {
+      var curIdx = data.current_attempt;
+      var total = data.attempts.length;
+      var retryTree = data.context_tree || (data.attempts[curIdx] && data.attempts[curIdx].tree);
+
+      // Check if it's a runtime block
+      if (existingEl.classList.contains('runtime-block')) {
+        var resultContentHtml = renderMd(data.content || '');
+        var treeHtml = '';
+        var attemptNavHtml = '';
+        var rerunHtml = '';
+        if (retryTree && (retryTree.path || retryTree.name)) {
+          treeHtml = renderInlineTree(retryTree, 'itree_retry_' + data.function.replace(/[^a-zA-Z0-9]/g, '_') + '_' + curIdx);
+        }
+        if (total > 1) {
+          attemptNavHtml = renderAttemptNav(data.function, curIdx, total);
+        }
+        // Preserve the existing header (function name + params)
+        var existingHeader = existingEl.querySelector('.runtime-block-header');
+        var headerHtml = existingHeader ? existingHeader.outerHTML : '<div class="runtime-block-header"><span class="runtime-icon">&#9654;</span><span class="runtime-func">' + escHtml(data.function) + '</span>()</div>';
+        var bodyHtml = '<div class="runtime-block-body"><div class="runtime-result">' + resultContentHtml + '</div>' + treeHtml + rerunHtml + '</div>';
+        var footerHtml = attemptNavHtml ? '<div class="runtime-block-footer">' + attemptNavHtml + '</div>' : '';
+        existingEl.innerHTML = headerHtml + bodyHtml + footerHtml;
+      } else {
+        var cHtml = '<div class="message-content">';
+        cHtml += '<div style="margin-bottom:4px"><span style="font-family:var(--font-mono);color:var(--accent-green);font-size:12px">' +
+          escHtml(data.function) + '()</span> completed</div>';
+        cHtml += renderMd(data.content || '');
+        cHtml += '</div>';
+        if (total > 1) {
+          cHtml += renderAttemptNav(data.function, curIdx, total);
+        }
+        if (retryTree && (retryTree.path || retryTree.name)) {
+          cHtml += renderInlineTree(retryTree, 'itree_retry_' + data.function.replace(/[^a-zA-Z0-9]/g, '_') + '_' + curIdx);
+        }
+        existingEl.innerHTML =
+          '<div class="message-header">' +
+            '<div class="message-avatar bot-avatar">A</div>' +
+            '<div class="message-sender">Agentic</div>' +
+          '</div>' + cHtml;
+      }
+    }
+    scrollToBottom();
+    return;
+  }
+
+  // Legacy retry result: update tree and show result as normal message
+  if (data.is_retry && data.context_tree && (data.context_tree.path || data.context_tree.name)) {
     var ct = data.context_tree;
     var rootKey = ct.path || ct.name;
     var idx = trees.findIndex(function(t) { return t.path === rootKey || t.name === ct.name; });
     if (idx >= 0) { trees[idx] = ct; } else { trees.push(ct); }
     expandedNodes.add(rootKey);
-    renderLiveTree();
-    var rebuilt = extractMessagesFromTree(ct);
-    conversations[currentConvId].messages = rebuilt;
-    renderConversationMessages(conversations[currentConvId]);
-    pendingResponses = {};
-    scrollToBottom();
-    return;
+    // Fall through to normal result rendering below
   }
 
   // Remove status line and pending placeholder
   var statusLine = document.getElementById('currentStatusLine');
   if (statusLine) statusLine.remove();
 
-  var pendingKeys = Object.keys(pendingResponses);
-  var targetEl = null;
-  if (pendingKeys.length > 0) {
-    var key = pendingKeys[0];
-    targetEl = pendingResponses[key];
-    delete pendingResponses[key];
-  }
+  // Check if this is a runtime (function execution) result
+  var isRuntimeResult = data.display === 'runtime' || (data.function && data.function !== 'chat');
 
-  if (!targetEl) {
-    targetEl = document.createElement('div');
-    targetEl.className = 'message assistant';
-    appendToChat(targetEl);
-  }
+  if (isRuntimeResult) {
+    // --- Runtime block rendering ---
+    // Find the pending runtime block, or an existing block for this function (retry_overwrite)
+    var pendingBlock = document.getElementById('runtime_pending');
+    if (!pendingBlock && data.function) {
+      pendingBlock = document.querySelector('.runtime-block[data-function="' + data.function + '"]');
+    }
 
-  var contentHtml = '';
+    // Also clean up any pending assistant placeholders
+    var pendingKeys = Object.keys(pendingResponses);
+    for (var pi = 0; pi < pendingKeys.length; pi++) {
+      var pel = pendingResponses[pendingKeys[pi]];
+      if (pel && pel.parentNode) pel.parentNode.removeChild(pel);
+      delete pendingResponses[pendingKeys[pi]];
+    }
 
-  if (type === 'error') {
-    contentHtml = '<div class="error-content">' + escHtml(data.content) + '</div>';
-  } else if (type === 'result') {
+    // Extract params from pending block header or preceding user message
+    var runtimeParams = '';
+    if (pendingBlock) {
+      var paramsSpan = pendingBlock.querySelector('.runtime-params');
+      if (paramsSpan) runtimeParams = paramsSpan.textContent || '';
+    }
+    if (!runtimeParams && currentConvId && conversations[currentConvId]) {
+      var msgs = conversations[currentConvId].messages || [];
+      for (var ri = msgs.length - 1; ri >= 0; ri--) {
+        if (msgs[ri].role === 'user' && msgs[ri].display === 'runtime') {
+          var parsed = parseRunCommandForDisplay(msgs[ri].content);
+          runtimeParams = parsed.params;
+          break;
+        }
+      }
+    }
+
     var content = data.content || '';
-    contentHtml = '<div class="message-content">';
+    var resultContentHtml = renderMd(content);
+    var treeHtml = '';
+    var attemptNavHtml = '';
+    var rerunHtml = (type === 'error') ? '<button class="rerun-btn" onclick="retryCurrentBlock(\'' + escAttr(data.function || '') + '\')">&#8634; Retry</button>' : '';
 
-    if (data.function) {
-      contentHtml += '<div style="margin-bottom:4px"><span style="font-family:var(--font-mono);color:var(--accent-green);font-size:12px">' +
-        escHtml(data.function) + '()</span> completed</div>';
-    }
-
-    contentHtml += '<pre>' + escHtml(content) + '</pre>';
-    contentHtml += '</div>';
-
-    // Add Re-run button for non-chat functions
-    if (data.function && data.function !== 'chat') {
-      contentHtml += '<button class="rerun-btn" onclick="rerunFunction()">&#8634; Re-run</button>';
-    }
-
-    // Replace tree with authoritative state from server
-    if (data.context_tree) {
+    // Inline execution tree
+    if (data.context_tree && (data.context_tree.path || data.context_tree.name)) {
       var ct = data.context_tree;
+      treeHtml = renderInlineTree(ct, 'itree_' + (data.function || 'result').replace(/[^a-zA-Z0-9]/g, '_'));
       var rootKey = ct.path || ct.name;
       var idx = trees.findIndex(function(t) { return t.path === rootKey || t.name === ct.name; });
       if (idx >= 0) { trees[idx] = ct; } else { trees.push(ct); }
       expandedNodes.add(rootKey);
-      renderLiveTree();
-
     }
+
+    // Attempt navigation
+    if (data.attempts && data.attempts.length > 1) {
+      attemptNavHtml = renderAttemptNav(data.function, data.current_attempt || 0, data.attempts.length);
+    }
+
+    var blockHtml = buildRuntimeBlockHtml(data.function, runtimeParams, resultContentHtml, treeHtml, attemptNavHtml, rerunHtml);
+    var blockClass = 'runtime-block' + (type === 'error' ? ' error' : '');
+
+    if (pendingBlock) {
+      pendingBlock.className = blockClass;
+      pendingBlock.id = '';
+      pendingBlock.setAttribute('data-function', data.function);
+      pendingBlock.innerHTML = blockHtml;
+    } else {
+      var newBlock = document.createElement('div');
+      newBlock.className = blockClass;
+      newBlock.setAttribute('data-function', data.function);
+      newBlock.innerHTML = blockHtml;
+      appendToChat(newBlock);
+    }
+
+    scrollToBottom();
+  } else {
+    // --- Normal chat message rendering ---
+    var pendingKeys = Object.keys(pendingResponses);
+    var targetEl = null;
+    if (pendingKeys.length > 0) {
+      var key = pendingKeys[0];
+      targetEl = pendingResponses[key];
+      delete pendingResponses[key];
+    }
+
+    if (!targetEl) {
+      targetEl = document.createElement('div');
+      targetEl.className = 'message assistant';
+      appendToChat(targetEl);
+    }
+
+    var contentHtml = '';
+
+    if (type === 'error') {
+      contentHtml = '<div class="error-content">' + escHtml(data.content) + '</div>';
+    } else if (type === 'result') {
+      var content = data.content || '';
+      contentHtml = '<div class="message-content">';
+
+      if (data.function) {
+        contentHtml += '<div style="margin-bottom:4px"><span style="font-family:var(--font-mono);color:var(--accent-green);font-size:12px">' +
+          escHtml(data.function) + '()</span> completed</div>';
+      }
+
+      contentHtml += renderMd(content);
+      contentHtml += '</div>';
+
+      // Add inline execution tree
+      if (data.context_tree && (data.context_tree.path || data.context_tree.name)) {
+        var ct = data.context_tree;
+        contentHtml += renderInlineTree(ct, 'itree_' + (data.function || 'result').replace(/[^a-zA-Z0-9]/g, '_'));
+        var rootKey = ct.path || ct.name;
+        var idx = trees.findIndex(function(t) { return t.path === rootKey || t.name === ct.name; });
+        if (idx >= 0) { trees[idx] = ct; } else { trees.push(ct); }
+        expandedNodes.add(rootKey);
+      }
+
+      // Retry button only shown for errors (handled elsewhere)
+    }
+
+    // Add data-function attribute for retry updates
+    if (data.function) {
+      targetEl.setAttribute('data-function', data.function);
+    }
+
+    targetEl.innerHTML =
+      '<div class="message-header">' +
+        '<div class="message-avatar bot-avatar">A</div>' +
+        '<div class="message-sender">Agentic</div>' +
+      '</div>' +
+      contentHtml;
+
+    scrollToBottom();
   }
 
-  targetEl.innerHTML =
-    '<div class="message-header">' +
-      '<div class="message-avatar bot-avatar">A</div>' +
-      '<div class="message-sender">Agentic</div>' +
-    '</div>' +
-    contentHtml;
-
-  scrollToBottom();
-
-  // Store assistant message
+  // Store assistant message with attempts structure
   if (currentConvId && conversations[currentConvId]) {
     if (!conversations[currentConvId].messages) conversations[currentConvId].messages = [];
-    conversations[currentConvId].messages.push({
+    var storedMsg = {
       role: 'assistant',
       content: data.content || '',
       type: type,
-      function: data.function || null
-    });
+      function: data.function || null,
+      display: isRuntimeResult ? 'runtime' : undefined
+    };
+    // Initialize attempts for function results
+    if (type === 'result' && data.function) {
+      storedMsg.attempts = [{
+        content: data.content || '',
+        tree: data.context_tree || null,
+        timestamp: Date.now() / 1000
+      }];
+      storedMsg.current_attempt = 0;
+    }
+    conversations[currentConvId].messages.push(storedMsg);
   }
 
   // Update conversation title
@@ -2140,8 +2994,7 @@ function handleChatResponse(data) {
 }
 
 function addAssistantMessage(text) {
-  var welcome = document.getElementById('welcomeScreen');
-  if (welcome) welcome.style.display = 'none';
+  setWelcomeVisible(false);
   var div = document.createElement('div');
   div.className = 'message assistant';
   div.innerHTML =
@@ -2181,6 +3034,45 @@ function toggleContextCard(id) {
   }
 }
 
+// ===== Inline Tree (per-message) =====
+function renderInlineTree(tree, treeId) {
+  if (!tree) return '';
+  var id = treeId || 'itree_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+  // Auto-expand all nodes so tree is fully visible
+  function _expandAll(n) {
+    if (n.path) expandedNodes.add(n.path);
+    if (n.children) n.children.forEach(_expandAll);
+  }
+  _expandAll(tree);
+  var hasRunning = _treeHasRunning(tree);
+  var statusIcon = hasRunning
+    ? '<span class="pulse" style="color:var(--accent-blue)">&#9679;</span> '
+    : '<span style="color:var(--accent-cyan)">&#9670;</span> ';
+  return '<div class="inline-tree">' +
+    '<div class="inline-tree-header" onclick="toggleInlineTree(\'' + id + '\')">' +
+      '<span>' + statusIcon + 'Execution Tree</span>' +
+      '<span class="inline-tree-toggle" id="itoggle_' + id + '">&#9654;</span>' +
+    '</div>' +
+    '<div class="inline-tree-body" id="ibody_' + id + '">' +
+      renderTreeNode(tree) +
+    '</div>' +
+  '</div>';
+}
+
+function toggleRuntimeBlock(headerEl) {
+  var block = headerEl.closest('.runtime-block');
+  if (block) block.classList.toggle('collapsed');
+}
+
+function toggleInlineTree(id) {
+  var body = document.getElementById('ibody_' + id);
+  var toggle = document.getElementById('itoggle_' + id);
+  if (body && toggle) {
+    body.classList.toggle('collapsed');
+    toggle.classList.toggle('collapsed');
+  }
+}
+
 // ===== Tree rendering =====
 function renderTreeNode(node) {
   _nodeCache[node.path] = node;
@@ -2213,7 +3105,7 @@ function renderTreeNode(node) {
       '<span class="node-status ' + node.status + '">' + node.status + '</span>' +
       (dur ? '<span class="node-duration">' + dur + '</span>' : '') +
       (output ? '<span class="node-output-preview">' + escHtml(output) + '</span>' : '') +
-      (canRetry ? '<span class="retry-icon" onclick="event.stopPropagation();toggleRetryPanel(\'' + escAttr(node.path) + '\')" title="Retry">retry</span>' : '') +
+      (canRetry ? '<span class="retry-icon" onclick="event.stopPropagation();toggleRetryPanel(\'' + escAttr(node.path) + '\')" title="Modify">modify</span>' : '') +
     '</div>';
 
   // Inline retry panel with per-field inputs
@@ -2221,7 +3113,7 @@ function renderTreeNode(node) {
     var panelId = 'retryPanel_' + node.path.replace(/[^a-zA-Z0-9]/g, '_');
     var paramKeys = Object.keys(filteredParams);
     html += '<div class="retry-panel" id="' + panelId + '" style="display:none">';
-    html += '<div style="margin-bottom:6px;color:var(--text-secondary);font-size:11px">Retry <b>' + escHtml(node.name) + '</b> with:</div>';
+    html += '<div style="margin-bottom:6px;color:var(--text-secondary);font-size:11px">Modify <b>' + escHtml(node.name) + '</b> with:</div>';
     if (paramKeys.length === 0) {
       html += '<div style="color:var(--text-muted);font-size:11px;margin-bottom:6px">No editable parameters</div>';
     } else {
@@ -2366,7 +3258,7 @@ function showDetail(node) {
   // Re-run button for non-internal functions
   if (node.name !== 'chat_session') {
     html += '<div class="detail-section">' +
-      '<button class="rerun-btn" onclick="rerunFromNode(\'' + escAttr(node.path) + '\')">&#8634; Retry ' + escHtml(node.name) + '</button>' +
+      '<button class="rerun-btn" onclick="rerunFromNode(\'' + escAttr(node.path) + '\')">&#8634; Modify ' + escHtml(node.name) + '</button>' +
     '</div>';
   }
 
@@ -2375,11 +3267,17 @@ function showDetail(node) {
 
 function closeDetail() {
   selectedPath = null;
-  document.getElementById('detailPanel').classList.add('collapsed');
+  var panel = document.getElementById('detailPanel');
+  panel.style.removeProperty('width');
+  panel.classList.add('collapsed');
 }
 
 function toggleDetail() {
-  document.getElementById('detailPanel').classList.toggle('collapsed');
+  var panel = document.getElementById('detailPanel');
+  if (!panel.classList.contains('collapsed')) {
+    panel.style.removeProperty('width');
+  }
+  panel.classList.toggle('collapsed');
 }
 
 // ===== Sidebar =====
@@ -2490,39 +3388,227 @@ function renderFnItem(f, desc, cat, icon) {
   '</div>';
 }
 
+// --- Saved input-wrapper original HTML for restore ---
+var _inputWrapperOriginal = '';
+var _fnFormActive = false;
+
 function clickFunction(name, category) {
-  var input = document.getElementById('chatInput');
-  if (category === 'meta') {
-    if (name === 'create') {
-      input.value = 'create a function that ';
-    } else if (name === 'fix') {
-      input.value = 'fix ';
-    } else if (name === 'create_app') {
-      input.value = 'create app ';
-    } else if (name === 'create_skill') {
-      input.value = 'create skill ';
-    } else {
-      input.value = 'run ' + name + ' ';
+  var fn = availableFunctions.find(function(f) { return f.name === name; });
+  if (fn) {
+    showFnForm(fn);
+  }
+}
+
+function showFnForm(fn) {
+  var wrapper = document.querySelector('.input-wrapper');
+  if (!wrapper) return;
+
+  // Save original content if not already in form mode
+  if (!_fnFormActive) {
+    _inputWrapperOriginal = wrapper.innerHTML;
+  }
+  _fnFormActive = true;
+
+  var params = (fn.params_detail || []).filter(function(p) {
+    // Hide framework params and explicitly hidden params
+    if (p.name === 'runtime' || p.name === 'callback' || p.name === 'exec_runtime' || p.name === 'review_runtime') return false;
+    if (p.hidden) return false;
+    return true;
+  });
+
+  var fieldsHtml = '';
+  for (var i = 0; i < params.length; i++) {
+    var p = params[i];
+    var typeLabel = p.type ? '<span class="fn-form-label-type">' + escHtml(p.type) + '</span>' : '';
+    var reqLabel = p.required
+      ? '<span class="fn-form-label-required">*</span>'
+      : '<span class="fn-form-label-optional">optional</span>';
+    // Description goes inline with the label
+    var descSpan = p.description
+      ? '<span class="fn-form-label-desc">' + escHtml(p.description) + '</span>'
+      : '';
+
+    // Placeholder: prefer explicit placeholder, then default value hint, then generic
+    var placeholder = p.placeholder || '';
+    if (!placeholder && p.default && p.default !== 'None' && !(p.default + '').startsWith('_')) {
+      placeholder = 'default: ' + p.default;
     }
+
+    // Determine input type by priority:
+    // 1. bool → toggle (Yes/No)
+    // 2. options → clickable chips
+    // 3. multiline str → textarea
+    // 4. other → single-line input
+    var isBool = p.type === 'bool' || p.type === 'boolean';
+    var isMultiline = p.multiline !== undefined ? p.multiline : (!isBool && (p.type === 'str' || p.type === 'string' || !p.type));
+    var inputTag;
+    var defaultVal = (p.default || '').replace(/^["']|["']$/g, '');
+
+    if (isBool) {
+      // Bool → Yes/No toggle buttons
+      var yesActive = (defaultVal === 'True') ? ' active' : '';
+      var noActive = (defaultVal === 'False' || !defaultVal) ? ' active' : '';
+      inputTag =
+        '<div class="fn-form-toggle" id="fnField_' + escAttr(p.name) + '" data-value="' + (defaultVal === 'True' ? 'True' : 'False') + '">' +
+          '<button type="button" class="fn-form-toggle-btn' + yesActive + '" onclick="toggleBool(\'' + escAttr(p.name) + '\', \'True\', this)">Yes</button>' +
+          '<button type="button" class="fn-form-toggle-btn' + noActive + '" onclick="toggleBool(\'' + escAttr(p.name) + '\', \'False\', this)">No</button>' +
+        '</div>';
+    } else if (p.options && p.options.length > 0) {
+      // Options → clickable chip group
+      var chipsHtml = '';
+      for (var j = 0; j < p.options.length; j++) {
+        var isDefault = (p.options[j] === defaultVal) ? ' active' : '';
+        chipsHtml += '<button type="button" class="fn-form-option-chip' + isDefault + '" onclick="selectOption(\'' + escAttr(p.name) + '\', \'' + escAttr(p.options[j]) + '\', this)">' + escHtml(p.options[j]) + '</button>';
+      }
+      inputTag = '<div class="fn-form-options" id="fnField_' + escAttr(p.name) + '" data-value="' + escAttr(defaultVal) + '">' + chipsHtml + '</div>';
+    } else if (isMultiline) {
+      inputTag = '<textarea class="fn-form-input fn-form-textarea" id="fnField_' + escAttr(p.name) + '" placeholder="' + escAttr(placeholder) + '" rows="2"></textarea>';
+    } else {
+      inputTag = '<input class="fn-form-input" id="fnField_' + escAttr(p.name) + '" placeholder="' + escAttr(placeholder) + '">';
+    }
+
+    fieldsHtml +=
+      '<div class="fn-form-field">' +
+        '<div class="fn-form-label">' +
+          '<span class="fn-form-label-name">' + escHtml(p.name) + '</span>' +
+          typeLabel + reqLabel + descSpan +
+        '</div>' +
+        inputTag +
+      '</div>';
+  }
+
+  if (params.length === 0) {
+    fieldsHtml = '<div class="fn-form-no-params">No parameters needed — click run to execute</div>';
+  }
+
+  wrapper.className = 'input-wrapper fn-form-mode';
+  wrapper.innerHTML =
+    '<div class="fn-form-header">' +
+      '<div class="fn-form-title">' +
+        '<span class="fn-form-name">' + escHtml(fn.name) + '</span>' +
+        '<span class="fn-form-desc">' + escHtml(fn.description || '') + '</span>' +
+      '</div>' +
+      '<button class="fn-form-close" onclick="closeFnForm()" title="Close">&times;</button>' +
+    '</div>' +
+    '<div class="fn-form-body">' + fieldsHtml + '</div>' +
+    '<div class="fn-form-footer">' +
+      '<div class="fn-form-footer-left">' +
+        '<button class="fn-form-cancel-btn" onclick="closeFnForm()">Esc to cancel</button>' +
+      '</div>' +
+      '<div class="fn-form-footer-right">' +
+        '<button class="fn-form-run-btn" onclick="submitFnForm(\'' + escAttr(fn.name) + '\')" title="Run">&#9654;</button>' +
+      '</div>' +
+    '</div>';
+
+  wrapper.dataset.fnName = fn.name;
+
+  // Hide input hint
+  var hint = document.querySelector('.input-hint');
+  if (hint) hint.style.display = 'none';
+
+  // Focus first input
+  setTimeout(function() {
+    var firstInput = wrapper.querySelector('.fn-form-input');
+    if (firstInput) firstInput.focus();
+  }, 50);
+}
+
+function clickFnExample(fnName) {
+  var fn = availableFunctions.find(function(f) { return f.name === fnName; });
+  if (fn) {
+    showFnForm(fn);
   } else {
-    // Find function params
-    var fn = availableFunctions.find(function(f) { return f.name === name; });
-    if (fn && fn.params && fn.params.length > 0) {
-      var filtered = fn.params.filter(function(p) { return p !== 'runtime' && p !== 'callback'; });
-      var paramStr = filtered.map(function(p) { return p + '=""'; }).join(' ');
-      input.value = 'run ' + name + ' ' + paramStr;
+    setInput('run ' + fnName + ' ');
+  }
+}
+
+function closeFnForm() {
+  if (!_fnFormActive) return;
+  var wrapper = document.querySelector('.input-wrapper');
+  if (!wrapper) return;
+  wrapper.className = 'input-wrapper';
+  wrapper.innerHTML = _inputWrapperOriginal;
+  _fnFormActive = false;
+  delete wrapper.dataset.fnName;
+
+  // Restore input hint
+  var hint = document.querySelector('.input-hint');
+  if (hint) hint.style.display = '';
+
+  // Re-bind chatInput events since we replaced innerHTML
+  var chatInput = document.getElementById('chatInput');
+  if (chatInput) {
+    chatInput.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+    chatInput.addEventListener('input', function() {
+      autoResize(chatInput);
+    });
+    chatInput.focus();
+  }
+}
+
+function toggleBool(paramName, value, btnEl) {
+  var container = document.getElementById('fnField_' + paramName);
+  if (!container) return;
+  container.dataset.value = value;
+  var btns = container.querySelectorAll('.fn-form-toggle-btn');
+  for (var i = 0; i < btns.length; i++) btns[i].classList.remove('active');
+  btnEl.classList.add('active');
+}
+
+function selectOption(paramName, value, chipEl) {
+  var container = document.getElementById('fnField_' + paramName);
+  if (!container) return;
+  container.dataset.value = value;
+  var chips = container.querySelectorAll('.fn-form-option-chip');
+  for (var i = 0; i < chips.length; i++) chips[i].classList.remove('active');
+  chipEl.classList.add('active');
+}
+
+function submitFnForm(fnName) {
+  var fn = availableFunctions.find(function(f) { return f.name === fnName; });
+  if (!fn) return;
+
+  var params = (fn.params_detail || []).filter(function(p) {
+    if (p.name === 'runtime' || p.name === 'callback' || p.name === 'exec_runtime' || p.name === 'review_runtime') return false;
+    if (p.hidden) return false;
+    return true;
+  });
+
+  var parts = ['run', fnName];
+  for (var i = 0; i < params.length; i++) {
+    var p = params[i];
+    var el = document.getElementById('fnField_' + p.name);
+    if (!el) continue;
+
+    // Read value: toggle/chips use data-value, inputs use .value
+    var val;
+    if (el.dataset.value !== undefined) {
+      val = el.dataset.value;
     } else {
-      input.value = 'run ' + name + ' ';
+      val = el.value.trim();
+    }
+
+    if (!val && !p.required) continue;
+    if (!val && p.required) {
+      el.style.borderColor = 'var(--accent-red)';
+      if (el.focus) el.focus();
+      return;
+    }
+    if (val.indexOf(' ') !== -1 || val.indexOf('"') !== -1) {
+      parts.push(p.name + '=' + JSON.stringify(val));
+    } else {
+      parts.push(p.name + '=' + val);
     }
   }
-  input.focus();
-  autoResize(input);
-  // Place cursor inside the first empty quotes
-  var firstQuote = input.value.indexOf('=""');
-  if (firstQuote !== -1) {
-    var pos = firstQuote + 2;
-    input.setSelectionRange(pos, pos);
-  }
+
+  var command = parts.join(' ');
+  closeFnForm();
+  sendMessage(command);
 }
 
 function switchConversation(convId) {
@@ -2549,6 +3635,7 @@ function switchConversation(convId) {
   if (conversations[convId]) {
     renderConversationMessages(conversations[convId]);
   }
+  loadAgentSettings();
 }
 
 function loadConversationData(data) {
@@ -2557,6 +3644,15 @@ function loadConversationData(data) {
   renderConversations();
   if (data.id === currentConvId) {
     renderConversationMessages(data);
+    // Restore function trees
+    if (data.function_trees && data.function_trees.length > 0) {
+      for (var i = 0; i < data.function_trees.length; i++) {
+        var ft = data.function_trees[i];
+        if (ft && (ft.path || ft.name)) {
+          trees.push(ft);
+        }
+      }
+    }
     if (data.provider_info) {
       updateProviderBadge(data.provider_info);
     }
@@ -2619,9 +3715,9 @@ function extractMessagesFromTree(tree) {
       var funcName = child.name;
       var kwargs = child.params || {};
       var argStr = Object.entries(kwargs).filter(function(e) { return e[0] !== 'runtime'; }).map(function(e) { return e[0] + '=' + JSON.stringify(e[1]); }).join(' ');
-      messages.push({ role: 'user', content: 'run ' + funcName + (argStr ? ' ' + argStr : '') });
+      messages.push({ role: 'user', content: 'run ' + funcName + (argStr ? ' ' + argStr : ''), display: 'runtime' });
       if (child.output) {
-        messages.push({ role: 'assistant', content: formatProgramResultContent(child.output), type: 'result', function: funcName });
+        messages.push({ role: 'assistant', content: formatProgramResultContent(child.output), type: 'result', function: funcName, display: 'runtime' });
       }
     }
   }
@@ -2645,17 +3741,79 @@ function renderConversationMessages(conv) {
     container.innerHTML = '';
     if (welcome) {
       container.appendChild(welcome);
-      welcome.style.display = '';
     }
+    setWelcomeVisible(true);
     return;
   }
 
-  if (welcome) welcome.style.display = 'none';
+  setWelcomeVisible(false);
   container.innerHTML = '';
 
   for (var mi = 0; mi < conv.messages.length; mi++) {
     var msg = conv.messages[mi];
     if (msg.type === 'status') continue;
+
+    // Check if this is a runtime user message — look ahead for the paired assistant message
+    if (msg.role === 'user' && msg.display === 'runtime') {
+      // Look for the next assistant message to pair with
+      var nextMsg = (mi + 1 < conv.messages.length) ? conv.messages[mi + 1] : null;
+      if (nextMsg && nextMsg.role === 'assistant' && (nextMsg.display === 'runtime' || nextMsg.function)) {
+        // Render as a combined runtime block
+        var parsed = parseRunCommandForDisplay(msg.content || '');
+        var displayContent = nextMsg.content || '';
+        var displayTree = nextMsg.context_tree || null;
+        if (nextMsg.attempts && nextMsg.attempts.length > 0) {
+          var aidx = nextMsg.current_attempt || 0;
+          if (aidx >= 0 && aidx < nextMsg.attempts.length) {
+            displayContent = nextMsg.attempts[aidx].content || displayContent;
+            displayTree = nextMsg.attempts[aidx].tree || displayTree;
+          }
+        }
+
+        var resultContentHtml = renderMd(displayContent);
+        var treeHtml = '';
+        var attemptNavHtml = '';
+        var isError = nextMsg.type === 'error';
+        var rerunHtml = isError ? '<button class="rerun-btn" onclick="retryCurrentBlock(\'' + escAttr(nextMsg.function || parsed.funcName) + '\')">&#8634; Retry</button>' : '';
+
+        if (displayTree) {
+          var inlineId = 'itree_restore_' + mi + '_' + (nextMsg.function || 'result').replace(/[^a-zA-Z0-9]/g, '_');
+          treeHtml = renderInlineTree(displayTree, inlineId);
+          updateTreeData(displayTree);
+        } else if (nextMsg.context_tree) {
+          var inlineId2 = 'itree_restore_' + mi + '_ctx';
+          treeHtml = renderInlineTree(nextMsg.context_tree, inlineId2);
+          updateTreeData(nextMsg.context_tree);
+        }
+
+        if (nextMsg.attempts && nextMsg.attempts.length > 1) {
+          attemptNavHtml = renderAttemptNav(nextMsg.function, nextMsg.current_attempt || 0, nextMsg.attempts.length);
+        }
+
+        var blockDiv = document.createElement('div');
+        blockDiv.className = 'runtime-block' + (isError ? ' error' : '');
+        if (nextMsg.function) blockDiv.setAttribute('data-function', nextMsg.function);
+        blockDiv.innerHTML = buildRuntimeBlockHtml(nextMsg.function || parsed.funcName, parsed.params, resultContentHtml, treeHtml, attemptNavHtml, rerunHtml);
+        container.appendChild(blockDiv);
+
+        mi++; // skip the assistant message since we already rendered it
+        continue;
+      }
+      // If no paired assistant message, render user message as an interrupted runtime block
+      var parsed2 = parseRunCommandForDisplay(msg.content || '');
+      var pendDiv = document.createElement('div');
+      pendDiv.className = 'runtime-block interrupted';
+      pendDiv.setAttribute('data-function', parsed2.funcName);
+      var interruptedRerunHtml = '<button class="rerun-btn" onclick="retryCurrentBlock(\'' + escAttr(parsed2.funcName) + '\')">&#8634; Retry</button>';
+      pendDiv.innerHTML = buildRuntimeBlockHtml(
+        parsed2.funcName,
+        parsed2.params,
+        '<span style="color:var(--text-muted)">Execution interrupted</span>',
+        '', '', interruptedRerunHtml
+      );
+      container.appendChild(pendDiv);
+      continue;
+    }
 
     var div = document.createElement('div');
     if (msg.role === 'user') {
@@ -2667,34 +3825,93 @@ function renderConversationMessages(conv) {
         '</div>' +
         '<div class="message-content">' + escHtml(msg.content || '') + '</div>';
     } else {
-      div.className = 'message assistant';
-      var cHtml = '';
-      if (msg.type === 'error') {
-        cHtml = '<div class="error-content">' + escHtml(msg.content || '') + '</div>';
-      } else if (msg.type === 'result') {
-        cHtml = '<div class="message-content">';
-        if (msg.function) {
-          cHtml += '<div style="margin-bottom:4px"><span style="font-family:var(--font-mono);color:var(--accent-green);font-size:12px">' +
-            escHtml(msg.function) + '()</span> completed</div>';
+      // Check if this assistant message should be a runtime block (no preceding user runtime msg)
+      var isOrphanRuntime = msg.display === 'runtime' || (msg.function && msg.function !== 'chat' && msg.type === 'result');
+      if (isOrphanRuntime) {
+        var displayContent = msg.content || '';
+        var displayTree = msg.context_tree || null;
+        if (msg.attempts && msg.attempts.length > 0) {
+          var aidx = msg.current_attempt || 0;
+          if (aidx >= 0 && aidx < msg.attempts.length) {
+            displayContent = msg.attempts[aidx].content || displayContent;
+            displayTree = msg.attempts[aidx].tree || displayTree;
+          }
         }
-        cHtml += '<pre>' + escHtml(msg.content || '') + '</pre></div>';
-        if (msg.context_tree) {
+        var resultContentHtml = renderMd(displayContent);
+        var treeHtml = '';
+        var attemptNavHtml = '';
+        var isOrphanError = msg.type === 'error';
+        var rerunHtml = isOrphanError ? '<button class="rerun-btn" onclick="retryCurrentBlock(\'' + escAttr(msg.function || '') + '\')">&#8634; Retry</button>' : '';
+        if (displayTree) {
+          var inlineId = 'itree_restore_' + mi + '_' + (msg.function || 'result').replace(/[^a-zA-Z0-9]/g, '_');
+          treeHtml = renderInlineTree(displayTree, inlineId);
+          updateTreeData(displayTree);
+        } else if (msg.context_tree) {
+          var inlineId2 = 'itree_restore_' + mi + '_ctx';
+          treeHtml = renderInlineTree(msg.context_tree, inlineId2);
           updateTreeData(msg.context_tree);
         }
+        if (msg.attempts && msg.attempts.length > 1) {
+          attemptNavHtml = renderAttemptNav(msg.function, msg.current_attempt || 0, msg.attempts.length);
+        }
+        div.className = 'runtime-block' + (isOrphanError ? ' error' : '');
+        if (msg.function) div.setAttribute('data-function', msg.function);
+        div.innerHTML = buildRuntimeBlockHtml(msg.function || '', '', resultContentHtml, treeHtml, attemptNavHtml, rerunHtml);
       } else {
-        cHtml = '<div class="message-content"><pre>' + escHtml(msg.content || '') + '</pre></div>';
+        div.className = 'message assistant';
+        if (msg.function) {
+          div.setAttribute('data-function', msg.function);
+        }
+        var cHtml = '';
+        if (msg.type === 'error') {
+          cHtml = '<div class="error-content">' + escHtml(msg.content || '') + '</div>';
+        } else if (msg.type === 'result') {
+          var displayContent = msg.content || '';
+          var displayTree = msg.context_tree || null;
+          if (msg.attempts && msg.attempts.length > 0) {
+            var aidx = msg.current_attempt || 0;
+            if (aidx >= 0 && aidx < msg.attempts.length) {
+              displayContent = msg.attempts[aidx].content || displayContent;
+              displayTree = msg.attempts[aidx].tree || displayTree;
+            }
+          }
+
+          cHtml = '<div class="message-content">';
+          if (msg.function) {
+            cHtml += '<div style="margin-bottom:4px"><span style="font-family:var(--font-mono);color:var(--accent-green);font-size:12px">' +
+              escHtml(msg.function) + '()</span> completed</div>';
+          }
+          cHtml += renderMd(displayContent) + '</div>';
+
+          if (msg.attempts && msg.attempts.length > 1) {
+            cHtml += renderAttemptNav(msg.function, msg.current_attempt || 0, msg.attempts.length);
+          }
+
+          if (displayTree) {
+            var inlineId = 'itree_restore_' + mi + '_' + (msg.function || 'result').replace(/[^a-zA-Z0-9]/g, '_');
+            cHtml += renderInlineTree(displayTree, inlineId);
+            updateTreeData(displayTree);
+          } else if (msg.context_tree) {
+            var inlineId2 = 'itree_restore_' + mi + '_ctx';
+            cHtml += renderInlineTree(msg.context_tree, inlineId2);
+            updateTreeData(msg.context_tree);
+          }
+        } else {
+          cHtml = '<div class="message-content">' + renderMd(msg.content || '') + '</div>';
+        }
+        div.innerHTML =
+          '<div class="message-header">' +
+            '<div class="message-avatar bot-avatar">A</div>' +
+            '<div class="message-sender">Agentic</div>' +
+          '</div>' +
+          cHtml;
       }
-      div.innerHTML =
-        '<div class="message-header">' +
-          '<div class="message-avatar bot-avatar">A</div>' +
-          '<div class="message-sender">Agentic</div>' +
-        '</div>' +
-        cHtml;
     }
     container.appendChild(div);
   }
-  renderLiveTree();
-  scrollToBottom();
+  // No global tree rendering -- trees are now inline per message
+  if (!_skipScrollToBottom) scrollToBottom();
+  _skipScrollToBottom = false;
 }
 
 function newConversation() {
@@ -2712,15 +3929,9 @@ function newConversation() {
       '<div class="welcome-logo">{ }</div>' +
       '<div class="welcome-title">Agentic Programming</div>' +
       '<div class="welcome-text">Run agentic functions, create new ones, or ask questions. Type a command or natural language below.</div>' +
-    '</div>' +
-    '<div class="welcome-bottom">' +
-      '<div class="welcome-examples">' +
-        '<div class="welcome-example" onclick="setInput(\'run word_count text=&quot;Hello world&quot;\')">run word_count text="Hello world"</div>' +
-        '<div class="welcome-example" onclick="setInput(\'run sentiment text=&quot;I love this product&quot;\')">run sentiment</div>' +
-        '<div class="welcome-example" onclick="setInput(\'create a function that extracts emails from text --name extract_emails\')">create a function</div>' +
-      '</div>' +
     '</div>';
   container.appendChild(welcome);
+  setWelcomeVisible(true);
   renderConversations();
   // Reset session state for new conversation (no session yet)
   _hasActiveSession = false;
@@ -2732,9 +3943,11 @@ function newConversation() {
   if (sessBadge) { sessBadge.textContent = 'no session'; sessBadge.title = ''; }
   loadProviders();
   loadModelPills();
+  loadAgentSettings();
 }
 
 function setInput(text) {
+  if (_fnFormActive) closeFnForm();
   var input = document.getElementById('chatInput');
   input.value = text;
   input.focus();
@@ -2821,6 +4034,58 @@ function updateStatus(status) {
   }
 }
 
+// ===== Thinking effort =====
+var _thinkingEffort = 'medium';
+var _thinkingConfig = null;
+
+function buildThinkingMenu() {
+  var cfg = _thinkingConfig;
+  if (!cfg) return;
+  var menu = document.getElementById('thinkingMenu');
+  var label = document.getElementById('thinkingLabel');
+
+  // Set default if current value not in options
+  var values = cfg.options.map(function(o) { return o.value; });
+  if (values.indexOf(_thinkingEffort) < 0) {
+    _thinkingEffort = cfg.default || values[0];
+  }
+  label.textContent = _thinkingEffort;
+
+  menu.innerHTML = cfg.options.map(function(o) {
+    var sel = o.value === _thinkingEffort;
+    return '<div class="thinking-option' + (sel ? ' selected' : '') + '" onclick="setThinkingEffort(\'' + o.value + '\')">' +
+      '<span class="thinking-opt-label">' + o.value + '</span>' +
+      '<span class="thinking-opt-desc">' + o.desc + '</span>' +
+      '<span class="thinking-opt-check">' + (sel ? '&#10003;' : '') + '</span>' +
+    '</div>';
+  }).join('');
+}
+
+function toggleThinkingMenu(e) {
+  e.stopPropagation();
+  var menu = document.getElementById('thinkingMenu');
+  var sel = document.getElementById('thinkingSelector');
+  menu.classList.toggle('open');
+  sel.classList.toggle('open', menu.classList.contains('open'));
+}
+
+function setThinkingEffort(level) {
+  _thinkingEffort = level;
+  buildThinkingMenu();
+  document.getElementById('thinkingMenu').classList.remove('open');
+  document.getElementById('thinkingSelector').classList.remove('open');
+}
+
+// Close menu when clicking outside
+document.addEventListener('click', function(e) {
+  var menu = document.getElementById('thinkingMenu');
+  if (menu && !e.target.closest('.input-options')) {
+    menu.classList.remove('open');
+    var sel = document.getElementById('thinkingSelector');
+    if (sel) sel.classList.remove('open');
+  }
+});
+
 // ===== Input handling =====
 var chatInput = document.getElementById('chatInput');
 
@@ -2828,6 +4093,25 @@ chatInput.addEventListener('keydown', function(e) {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
     sendMessage();
+  }
+});
+
+// Function form keyboard handling
+document.addEventListener('keydown', function(e) {
+  if (!_fnFormActive) return;
+  var wrapper = document.querySelector('.input-wrapper');
+  if (!wrapper || !wrapper.dataset.fnName) return;
+  if (e.key === 'Escape') {
+    closeFnForm();
+    e.preventDefault();
+  }
+  if (e.key === 'Enter' && !e.shiftKey && e.target.classList.contains('fn-form-input') && e.target.tagName !== 'TEXTAREA') {
+    e.preventDefault();
+    submitFnForm(wrapper.dataset.fnName);
+  }
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && e.target.classList.contains('fn-form-input')) {
+    e.preventDefault();
+    submitFnForm(wrapper.dataset.fnName);
   }
 });
 
@@ -2842,6 +4126,7 @@ function autoResize(el) {
 
 // ===== Helpers =====
 function scrollToBottom() {
+  renderMathInChat();
   var area = document.getElementById('chatArea');
   requestAnimationFrame(function() {
     area.scrollTop = area.scrollHeight;
@@ -2853,11 +4138,62 @@ function truncate(s, len) {
   return s.length > len ? s.slice(0, len - 3) + '...' : s;
 }
 
+function setWelcomeVisible(show) {
+  var w = document.getElementById('welcomeScreen');
+  var ex = document.getElementById('welcomeExamples');
+  var cm = document.getElementById('chatMessages');
+  if (w) w.style.display = show ? '' : 'none';
+  if (ex) ex.style.display = show ? '' : 'none';
+  if (cm) cm.style.paddingBottom = show ? '0' : '';
+}
+
 function escHtml(s) {
   if (typeof s !== 'string') s = String(s || '');
   var div = document.createElement('div');
   div.textContent = s;
   return div.innerHTML;
+}
+
+function renderMd(s) {
+  if (typeof s !== 'string') s = String(s || '');
+  if (typeof marked !== 'undefined') {
+    // Protect LaTeX from Markdown parser
+    var mathBlocks = [];
+    // $$...$$ (display)
+    s = s.replace(/\$\$([\s\S]*?)\$\$/g, function(m) { mathBlocks.push(m); return '%%MATH' + (mathBlocks.length - 1) + '%%'; });
+    // \[...\] (display)
+    s = s.replace(/\\\[([\s\S]*?)\\\]/g, function(m) { mathBlocks.push(m); return '%%MATH' + (mathBlocks.length - 1) + '%%'; });
+    // \(...\) (inline)
+    s = s.replace(/\\\(([\s\S]*?)\\\)/g, function(m) { mathBlocks.push(m); return '%%MATH' + (mathBlocks.length - 1) + '%%'; });
+    // $...$ (inline, single line only)
+    s = s.replace(/\$([^\$\n]+?)\$/g, function(m) { mathBlocks.push(m); return '%%MATH' + (mathBlocks.length - 1) + '%%'; });
+
+    var html = marked.parse(s, { breaks: true });
+
+    // Restore LaTeX blocks
+    for (var i = 0; i < mathBlocks.length; i++) {
+      html = html.replace('%%MATH' + i + '%%', mathBlocks[i]);
+    }
+    return '<span class="md-rendered">' + html + '</span>';
+  }
+  return '<pre>' + escHtml(s) + '</pre>';
+}
+
+function renderMathInChat() {
+  if (typeof renderMathInElement === 'undefined') return;
+  document.querySelectorAll('.md-rendered').forEach(function(el) {
+    if (el.dataset.mathRendered) return;
+    renderMathInElement(el, {
+      delimiters: [
+        { left: '$$', right: '$$', display: true },
+        { left: '$', right: '$', display: false },
+        { left: '\\[', right: '\\]', display: true },
+        { left: '\\(', right: '\\)', display: false },
+      ],
+      throwOnError: false,
+    });
+    el.dataset.mathRendered = '1';
+  });
 }
 
 function escAttr(s) {
@@ -3003,7 +4339,7 @@ async function loadModelPills() {
   var badge = document.getElementById('modelBadge');
   if (!badge) return;
   if (!_currentModel && _modelList.length === 0) { badge.style.display = 'none'; return; }
-  badge.textContent = _currentModel || 'default';
+  badge.textContent = _currentModel || '';
   badge.style.display = '';
   if (_hasActiveSession) {
     badge.onclick = null;
@@ -3070,10 +4406,17 @@ var _agentSettings = { chat: {}, exec: {}, available: {} };
 
 async function loadAgentSettings() {
   try {
-    var resp = await fetch('/api/agent_settings');
+    var url = '/api/agent_settings';
+    if (currentConvId) url += '?conv_id=' + encodeURIComponent(currentConvId);
+    var resp = await fetch(url);
     _agentSettings = await resp.json();
   } catch(e) { return; }
   updateAgentBadges();
+  // Update thinking menu for current chat provider
+  if (_agentSettings.chat && _agentSettings.chat.thinking) {
+    _thinkingConfig = _agentSettings.chat.thinking;
+    buildThinkingMenu();
+  }
 }
 
 function updateAgentBadges() {
@@ -3081,12 +4424,25 @@ function updateAgentBadges() {
   var execBadge = document.getElementById('execAgentBadge');
   if (chatBadge && _agentSettings.chat) {
     var cp = _agentSettings.chat.provider || '?';
-    var cm = _agentSettings.chat.model || 'default';
-    chatBadge.textContent = 'Chat: ' + cp + ' \u00b7 ' + cm;
+    var cm = _agentSettings.chat.model || '';
+    var label = 'Chat: ' + cp + ' \u00b7 ' + cm;
+    var sid = _agentSettings.chat.session_id;
+    if (sid) {
+      label += ' \u00b7 ' + sid.slice(0, 8);
+    }
+    chatBadge.textContent = label;
+    var isLocked = _agentSettings.chat.locked;
+    if (isLocked) {
+      chatBadge.classList.add('locked');
+      chatBadge.onclick = null;
+    } else {
+      chatBadge.classList.remove('locked');
+      chatBadge.onclick = function() { openAgentSelector('chat'); };
+    }
   }
   if (execBadge && _agentSettings.exec) {
     var ep = _agentSettings.exec.provider || '?';
-    var em = _agentSettings.exec.model || 'default';
+    var em = _agentSettings.exec.model || '';
     execBadge.textContent = 'Exec: ' + ep + ' \u00b7 ' + em;
   }
 }
@@ -3112,7 +4468,7 @@ function openAgentSelector(agentType) {
     html += '<div class="provider-group">';
     html += '<div class="provider-name">' + escHtml(provName) + '</div>';
     var models = prov.models || [];
-    if (models.length === 0) models = [prov.default_model || 'default'];
+    if (models.length === 0) models = [prov.default_model || ''];
     for (var i = 0; i < models.length; i++) {
       var m = models[i];
       var isActive = (current.provider === provName && current.model === m);
@@ -3144,6 +4500,7 @@ function openAgentSelector(agentType) {
       _agentSettings.chat = data.chat || _agentSettings.chat;
       _agentSettings.exec = data.exec || _agentSettings.exec;
       updateAgentBadges();
+      loadAgentSettings();
     }).catch(function() {});
   });
 
@@ -3184,16 +4541,15 @@ function renderProviders(providers) {
   var el = document.getElementById('providerList');
   if (!el) return;
   el.innerHTML = providers.map(function(p) {
-    var locked = _hasActiveSession && !p.active;
-    var cls = p.active ? 'provider-item active' : (locked ? 'provider-item unavailable' : (p.available ? 'provider-item available' : 'provider-item unavailable'));
-    var typeTag = p.configurable ? 'API' : 'CLI';
-    var clickAction = (p.available && !p.active && !_hasActiveSession) ? "switchProvider('" + p.name + "')" : "";
     var isConfigured = p.configurable ? p.configured : p.available;
+    var cls = isConfigured ? 'provider-item configured' : 'provider-item unavailable';
+    var typeTag = p.configurable ? 'API' : 'CLI';
+
     var badgeCls = isConfigured ? 'config-badge configured' : 'config-badge';
     var badgeText = isConfigured ? 'Configured' : 'Set up';
     var configBadge = '<a class="' + badgeCls + '" href="/config" target="_blank" onclick="event.stopPropagation()" title="Configure">' + badgeText + '</a>';
 
-    return '<div class="' + cls + '" onclick="' + clickAction + '" title="' + escAttr(p.label) + '">' +
+    return '<div class="' + cls + '" title="' + escAttr(p.label) + '">' +
       '<span class="provider-dot"></span>' +
       '<span class="provider-type-tag">' + typeTag + '</span>' +
       '<span class="provider-name">' + escHtml(p.name) + '</span>' +
@@ -3364,6 +4720,7 @@ async function deleteFunction(name) {
 // ===== Init =====
 connect();
 loadProviders();
+setWelcomeVisible(true);
 
 // Check for ?run= parameter from programs page
 (function() {

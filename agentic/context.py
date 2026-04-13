@@ -716,6 +716,8 @@ class Context:
             "status": self.status,
             "render": self.render,
             "compress": self.compress,
+            "start_time": self.start_time,
+            "end_time": self.end_time,
             "duration_ms": self.duration_ms,
             "children": [c._to_dict() for c in self.children],
         }
@@ -737,7 +739,8 @@ class Context:
         ctx.attempts = data.get("attempts", [])
         ctx.error = data.get("error")
         ctx.status = data.get("status", "idle")
-        if data.get("duration_ms") is not None and ctx.start_time:
+        ctx.end_time = data.get("end_time") or 0.0
+        if not ctx.end_time and data.get("duration_ms") is not None and ctx.start_time:
             ctx.end_time = ctx.start_time + data["duration_ms"] / 1000.0
         for child_data in data.get("children", []):
             child = cls.from_dict(child_data, parent=ctx)

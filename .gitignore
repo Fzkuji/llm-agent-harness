@@ -21,9 +21,12 @@ agentic/functions/
 !agentic/functions/agent_loop.py
 !agentic/functions/wait.py
 !agentic/functions/deep_work.py
-!agentic/functions/build_catalog.py
-!agentic/functions/prepare_args.py
-
-# Internal-only functions (not uploaded)
 !agentic/functions/init_research.py
+!agentic/functions/parse_action.py
+!agentic/functions/prepare_args.py
+!agentic/functions/build_catalog.py
+!agentic/functions/conclusion.py
+!agentic/functions/llm_call_example.py
+!agentic/functions/sentiment.py
+!agentic/functions/word_count.py
 skills/init-research/

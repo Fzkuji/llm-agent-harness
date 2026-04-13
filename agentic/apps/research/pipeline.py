@@ -153,7 +153,7 @@ def _stage_analysis(project_dir, runtime):
         with open(os.path.join(exp_dir, fname), "r") as f:
             data = f.read()
         output = analyze_results(data=data, runtime=runtime)
-        results[fname] = output[:500]
+        results[fname] = output
     return results
 
 

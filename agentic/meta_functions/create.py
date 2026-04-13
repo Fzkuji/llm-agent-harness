@@ -13,7 +13,22 @@ from agentic.meta_functions._helpers import (
 )
 
 
-@agentic_function
+@agentic_function(input={
+    "description": {
+        "description": "What the function should do",
+        "placeholder": "e.g. count words in a text string",
+        "multiline": True,
+    },
+    "runtime": {"hidden": True},
+    "name": {
+        "description": "Function name override",
+        "placeholder": "e.g. my_function",
+        "multiline": False,
+    },
+    "as_skill": {
+        "description": "Also create a SKILL.md",
+    },
+})
 def create(description: str, runtime: Runtime, name: str = None, as_skill: bool = False):
     """Create a new Python function from a natural language description.
 

@@ -27,7 +27,10 @@ from agentic.functions._utils import parse_json
 _MISSING_RUNTIME = object()
 
 
-@agentic_function(compress=True, summarize={"depth": 0, "siblings": 0})
+@agentic_function(compress=True, summarize={"depth": 0, "siblings": 0}, input={
+    "action": {"description": "What just happened", "placeholder": "e.g. started model training on 10k samples"},
+    "runtime": {"hidden": True},
+})
 def wait(action: str, runtime: Runtime = _MISSING_RUNTIME) -> int:
     """Decide how many seconds to wait before the next step.
 

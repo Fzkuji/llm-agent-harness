@@ -110,8 +110,14 @@ def run_experiments(
         with open(idea_path, "r") as f:
             idea = f.read()
     else:
+        import warnings
+        warnings.warn(
+            f"IDEA_REPORT.md not found at {idea_path}. "
+            "Run the 'idea' stage first for better experiment design.",
+            stacklevel=2,
+        )
         idea = "No idea report found. Design experiments based on project context."
-        # Try outline
+        # Fallback to outline
         outline_path = os.path.join(project_dir, "outline", "outline.md")
         if os.path.exists(outline_path):
             with open(outline_path, "r") as f:

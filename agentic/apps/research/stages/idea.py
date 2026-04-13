@@ -110,6 +110,12 @@ def run_idea(
         with open(gaps_path, "r") as f:
             gaps = f.read()
     else:
+        import warnings
+        warnings.warn(
+            f"Gaps file not found at {gaps_path}. "
+            "Run the 'literature' stage first for better results.",
+            stacklevel=2,
+        )
         gaps = "No gaps identified yet. Generate ideas based on the topic directly."
 
     ideas = generate_ideas(topic=topic, gaps=gaps, runtime=runtime)

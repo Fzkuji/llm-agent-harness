@@ -71,7 +71,7 @@ class CodexRuntime(Runtime):
 
     def __init__(
         self,
-        model: str = None,
+        model: str = "gpt-5.4-mini",
         timeout: int = 300,
         cli_path: str = None,
         session_id: str = "auto",
@@ -268,6 +268,11 @@ class CodexRuntime(Runtime):
             # Image flags
             for img_path in image_paths:
                 cmd.extend(["-i", img_path])
+
+        # Reasoning effort
+        effort = getattr(self, '_reasoning_effort', None)
+        if effort and effort != "medium":
+            cmd.extend(["--reasoning-effort", effort])
 
         # Output: capture last message to a temp file for reliable extraction
         fd, output_file = tempfile.mkstemp(suffix=".txt", prefix="codex_out_")
