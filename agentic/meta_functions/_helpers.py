@@ -396,6 +396,10 @@ def get_source(fn) -> str:
     2. _FunctionStub (broken module) — __source__ attribute carries the full file
     3. Fallback — docstring or placeholder
     """
+    # Plain string means the function couldn't be loaded — let the LLM know
+    if isinstance(fn, str):
+        return f"# Function '{fn}' not found — no source code available."
+
     # Stub from _load_function: carries full file source
     source_attr = getattr(fn, '__source__', None)
     if source_attr:
