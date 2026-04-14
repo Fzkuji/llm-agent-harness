@@ -99,7 +99,12 @@ def _create_runtime_for_visualizer(provider: str):
     from agentic.providers import create_runtime
     if provider == "codex":
         # Keep visualizer chat stateless so Context tree stays source of truth.
-        return create_runtime(provider=provider, session_id=None, search=True)
+        # Restrict workdir to functions/ to prevent Codex from modifying
+        # framework source files during fix()/generate_code() execution.
+        func_dir = os.path.join(os.path.dirname(__file__), "..", "functions")
+        func_dir = os.path.abspath(func_dir)
+        return create_runtime(provider=provider, session_id=None, search=True,
+                              workdir=func_dir)
     # Claude Code, Gemini CLI, APIs: use default behavior
     return create_runtime(provider=provider)
 
