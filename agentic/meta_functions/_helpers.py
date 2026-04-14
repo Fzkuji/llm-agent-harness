@@ -486,6 +486,9 @@ def follow_up(question: str, runtime: Runtime) -> str:
 
 
 # ── Clarify — pre-check before code generation ───────────────
+# NOTE: Do NOT add shortcut functions here (e.g. _has_prior_context,
+# _looks_obviously_vague). The LLM must always decide via runtime.exec().
+# See commit 5094410 for rationale.
 
 def _reply_looks_like_follow_up(reply: str) -> bool:
     """Heuristically detect a non-JSON clarification request.

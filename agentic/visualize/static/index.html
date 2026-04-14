@@ -1643,7 +1643,7 @@ select.fn-form-input {
 .node-status.paused { background: rgba(229,192,123,0.12); color: var(--accent-yellow); }
 .node-status.success { background: rgba(152,195,121,0.12); color: var(--accent-green); }
 .node-status.error { background: rgba(224,108,117,0.12); color: var(--accent-red); }
-.node-duration { font-size: 11px; color: var(--text-secondary); flex-shrink: 0; }
+.node-duration { font-size: 10px; color: var(--text-secondary); flex-shrink: 0; }
 .node-output-preview { font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
 
 .rerun-btn {
@@ -2637,8 +2637,7 @@ function submitFollowUp() {
 function retryCurrentBlock(funcName) {
   // Overwrite retry: replace current error/interrupted block with running state,
   // then backend re-runs and result replaces in-place
-  console.log('[retry] retryCurrentBlock called, funcName:', funcName);
-  if (!currentConvId || !conversations[currentConvId]) { console.log('[retry] no conversation'); return; }
+  if (!currentConvId || !conversations[currentConvId]) return;
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     addSystemMessage('Retry failed: not connected to server.');
     return;
@@ -2646,12 +2645,10 @@ function retryCurrentBlock(funcName) {
 
   // Find the ORIGINAL user command for this function (ignoring retry modifications)
   var msgs = conversations[currentConvId].messages || [];
-  console.log('[retry] searching', msgs.length, 'messages for funcName:', funcName);
   var userCmd = null;
   for (var i = msgs.length - 1; i >= 0; i--) {
     if (msgs[i].role === 'user' && msgs[i].display === 'runtime') {
       var parsed = parseRunCommandForDisplay(msgs[i].content || '');
-      console.log('[retry] candidate msg:', msgs[i].content, '-> parsed funcName:', parsed.funcName);
       if (parsed.funcName === funcName || !funcName) {
         userCmd = msgs[i].original_content || msgs[i].content;
         break;
@@ -2659,8 +2656,7 @@ function retryCurrentBlock(funcName) {
     }
   }
   if (!userCmd && _lastRunCommand) userCmd = _lastRunCommand;
-  if (!userCmd) { console.log('[retry] no userCmd found, aborting'); return; }
-  console.log('[retry] found userCmd:', userCmd);
+  if (!userCmd) return;
 
   // Turn the existing block into "running" state with typing indicator
   var existingBlock = document.querySelector('.runtime-block[data-function="' + funcName + '"]');
