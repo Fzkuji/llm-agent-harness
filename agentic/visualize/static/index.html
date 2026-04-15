@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Agentic</title>
-<link rel="stylesheet" href="/css/style.css?v=44">
+<link rel="stylesheet" href="/css/style.css?v=46">
 </head>
 <body>
 <div class="app">
@@ -108,12 +108,10 @@
       </div>
       <div class="input-area">
         <div class="input-wrapper">
+          <button class="send-btn" id="sendBtn" onclick="onSendBtnClick()" title="Send message"><svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button>
+          <button class="stop-btn" id="stopBtn" onclick="stopExecution()" title="Stop" style="display:none"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button>
           <div class="input-top-row">
             <textarea id="chatInput" class="chat-input" placeholder="create / run / fix or ask anything..." rows="1"></textarea>
-            <div class="input-actions">
-              <button class="stop-btn" id="stopBtn" onclick="stopExecution()" title="Stop" style="display:none"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button>
-              <button class="send-btn" id="sendBtn" onclick="onSendBtnClick()" title="Send message"><svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button>
-            </div>
           </div>
           <div class="input-bottom-row">
             <div class="input-options">

@@ -665,17 +665,17 @@ a.user-menu-item { text-decoration: none; color: inherit; }
 .conv-item .conv-title { flex: 1; overflow: hidden; text-overflow: ellipsis; }
 .conv-item .conv-del {
   display: none; flex-shrink: 0; width: 20px; height: 20px;
-  text-align: center; line-height: 20px; font-size: 12px;
-  border-radius: 4px; color: var(--text-muted); margin-left: 4px;
+  font-size: 12px; border-radius: 4px; color: var(--text-muted); margin-left: 4px;
+  align-items: center; justify-content: center; line-height: 1;
 }
-.conv-item:hover .conv-del { display: block; }
+.conv-item:hover .conv-del { display: flex; }
 .conv-item .conv-del:hover { background: var(--accent-red); color: #fff; }
 
 .conv-item:hover { background: var(--bg-hover); color: var(--text-primary); }
 .conv-item.active { background: var(--bg-hover); color: var(--text-bright); }
 .conv-clear-all {
   padding: 6px 16px; font-size: 11px; color: var(--text-muted);
-  cursor: pointer; text-align: center; border-top: 1px solid var(--border);
+  cursor: pointer; text-align: center;
 }
 .conv-clear-all:hover { color: var(--accent-red); }
 
@@ -1018,7 +1018,7 @@ a.user-menu-item { text-decoration: none; color: inherit; }
 .runtime-block {
   margin: 20px 24px;
   border: 1px solid var(--border);
-  border-left: 3px solid var(--accent-cyan);
+  border-left: 3px solid #a08a6c;
   border-radius: var(--radius);
   background: var(--bg-tertiary);
   animation: msgAppear 0.3s ease forwards;
@@ -1043,7 +1043,7 @@ a.user-menu-item { text-decoration: none; color: inherit; }
 .runtime-block.collapsed .runtime-block-body,
 .runtime-block.collapsed .runtime-block-footer { display: none; }
 .runtime-icon {
-  color: var(--accent-cyan);
+  color: var(--text-secondary);
   font-size: 13px;
   flex-shrink: 0;
   width: 18px;
@@ -1062,7 +1062,7 @@ a.user-menu-item { text-decoration: none; color: inherit; }
   font-weight: normal;
 }
 .runtime-func {
-  color: var(--accent-green);
+  color: var(--text-bright);
   font-weight: 600;
 }
 .runtime-params {
@@ -1232,7 +1232,7 @@ a.user-menu-item { text-decoration: none; color: inherit; }
 .exec-log-icon.running { color: var(--accent-blue); }
 .exec-log-icon.done { color: var(--accent-green); }
 .exec-log-icon.error { color: var(--accent-red); }
-.exec-log-name { color: var(--accent-cyan); cursor: pointer; }
+.exec-log-name { color: var(--text-bright); cursor: pointer; }
 .exec-log-name:hover { text-decoration: underline; }
 .exec-log-params { color: var(--text-muted); }
 .exec-log-time { color: var(--text-muted); margin-left: auto; flex-shrink: 0; font-size: 11px; }
@@ -1626,13 +1626,14 @@ a.user-menu-item { text-decoration: none; color: inherit; }
   top: 0;
   left: 0;
   right: 0;
-  height: 24px;
+  height: 8px;
   background: linear-gradient(to bottom, var(--bg-primary), transparent);
   pointer-events: none;
   transform: translateY(-100%);
 }
 
 .input-wrapper {
+  position: relative;
   display: flex;
   flex-direction: column;
   max-width: 800px;
@@ -1674,6 +1675,7 @@ a.user-menu-item { text-decoration: none; color: inherit; }
   align-items: flex-end;
   gap: 8px;
   min-height: 30px;
+  padding-right: 38px;
 }
 .input-top-row .chat-input { flex: 1; }
 
@@ -1710,6 +1712,9 @@ a.user-menu-item { text-decoration: none; color: inherit; }
 }
 
 .send-btn {
+  position: absolute;
+  right: 12px;
+  top: 12px;
   width: 30px;
   height: 30px;
   border-radius: 50%;
@@ -1721,8 +1726,12 @@ a.user-menu-item { text-decoration: none; color: inherit; }
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  transition: all var(--transition);
+  transition: top 0.3s cubic-bezier(0.25,0.1,0.25,1), border-color var(--transition), color var(--transition);
   padding: 0;
+  z-index: 2;
+}
+.input-wrapper.fn-form-mode .send-btn {
+  top: calc(100% - 42px);
 }
 .send-btn svg { width: 14px; height: 14px; fill: currentColor; }
 
@@ -1731,6 +1740,10 @@ a.user-menu-item { text-decoration: none; color: inherit; }
 .send-btn.paused-state { border-color: var(--accent-green); color: var(--accent-green); background: transparent; }
 
 .stop-btn {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  z-index: 2;
   width: 30px; height: 30px; border-radius: 50%; border: none;
   background: var(--accent-red); color: #fff; cursor: pointer;
   display: flex; align-items: center; justify-content: center;
@@ -1802,7 +1815,7 @@ a.user-menu-item { text-decoration: none; color: inherit; }
   font-family: var(--font-mono);
   font-size: 14px;
   font-weight: 600;
-  color: var(--accent-green);
+  color: var(--text-bright);
   flex-shrink: 0;
 }
 .fn-form-desc {
@@ -2185,7 +2198,7 @@ select.fn-form-input {
 .node-toggle.leaf { visibility: hidden; }
 
 .node-icon { font-size: 12px; flex-shrink: 0; width: 16px; text-align: center; }
-.node-name { font-family: var(--font-mono); font-size: 12px; color: var(--accent-blue); font-weight: 500; cursor: pointer; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.node-name { font-family: var(--font-mono); font-size: 12px; color: var(--text-bright); font-weight: 500; cursor: pointer; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .node-name:hover { text-decoration: underline; }
 .node-status { font-size: 10px; padding: 0 5px; border-radius: 3px; flex-shrink: 0; }
 .node-status.running { background: rgba(97,175,239,0.12); color: var(--accent-blue); }

@@ -20,7 +20,7 @@ function renderConversations() {
       var active = c.id === currentConvId ? ' active' : '';
       html += '<div class="conv-item' + active + '" onclick="switchConversation(\'' + c.id + '\')" title="' + escAttr(c.title || 'Untitled') + '">' +
         '<span class="conv-title">' + escHtml(c.title || 'Untitled') + '</span>' +
-        '<span class="conv-del" onclick="event.stopPropagation();deleteConversation(\'' + c.id + '\')" title="Delete">&times;</span>' +
+        '<span class="conv-del" onclick="event.stopPropagation();deleteConversation(\'' + c.id + '\')" title="Delete"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="2" y1="2" x2="8" y2="8"/><line x1="8" y1="2" x2="2" y2="8"/></svg></span>' +
       '</div>';
     }
     html += '<div class="conv-clear-all" onclick="clearAllConversations()">Clear all</div>';
@@ -37,6 +37,9 @@ function switchConversation(convId) {
 }
 
 function deleteConversation(convId) {
+  var conv = conversations[convId];
+  var title = (conv && conv.title) || 'this conversation';
+  if (!confirm('Delete "' + title + '"?')) return;
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ action: 'delete_conversation', conv_id: convId }));
   }
@@ -48,6 +51,9 @@ function deleteConversation(convId) {
 }
 
 function clearAllConversations() {
+  var count = Object.keys(conversations).length;
+  if (!count) return;
+  if (!confirm('Delete all ' + count + ' conversations? This cannot be undone.')) return;
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ action: 'clear_conversations' }));
   }
@@ -585,12 +591,23 @@ function _buildFieldsHtml(fn) {
   return fieldsHtml;
 }
 
+
 function showFnForm(fn) {
   var wrapper = document.querySelector('.input-wrapper');
   if (!wrapper) return;
 
+  // Save only the non-button content (sendBtn & stopBtn stay in wrapper)
+  var sendBtn = document.getElementById('sendBtn');
+  var stopBtn = document.getElementById('stopBtn');
   if (!_fnFormActive) {
-    _inputWrapperOriginal = wrapper.innerHTML;
+    // Save children except sendBtn/stopBtn
+    _inputContentOriginal = [];
+    var children = wrapper.children;
+    for (var i = 0; i < children.length; i++) {
+      if (children[i] !== sendBtn && children[i] !== stopBtn) {
+        _inputContentOriginal.push(children[i]);
+      }
+    }
   }
   _fnFormActive = true;
 
@@ -623,12 +640,15 @@ function showFnForm(fn) {
     '</div>' +
     '<div class="thinking-menu" id="thinkingMenu"></div>';
 
-  // --- Replace content (hidden via overflow) ---
+  // --- Replace content (keep sendBtn & stopBtn) ---
   wrapper.style.height = wrapperBefore.height + 'px';
   wrapper.style.overflow = 'hidden';
 
-  wrapper.className = 'input-wrapper fn-form-mode';
-  wrapper.innerHTML =
+  // Remove old content (not buttons)
+  _inputContentOriginal.forEach(function(el) { el.remove(); });
+
+  // Build form content as DOM
+  var formHtml =
     '<div class="fn-form-header">' +
       '<div class="fn-form-title">' +
         '<span class="fn-form-name"><span style="color:var(--text-secondary);font-weight:400">function </span>' + escHtml(fn.name) + '</span>' +
@@ -641,12 +661,18 @@ function showFnForm(fn) {
       '<div class="fn-form-footer-left">' +
         '<div class="input-options">' + thinkingSelectorHtml + '</div>' +
       '</div>' +
-      '<div class="fn-form-footer-right">' +
-        '<button class="send-btn" id="sendBtn" onclick="submitFnForm(\'' + escAttr(fn.name) + '\')" title="Run"><svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button>' +
-      '</div>' +
     '</div>';
+  var temp = document.createElement('div');
+  temp.innerHTML = formHtml;
+  while (temp.firstChild) wrapper.appendChild(temp.firstChild);
 
+  wrapper.className = 'input-wrapper fn-form-mode';
   wrapper.dataset.fnName = fn.name;
+
+  // Update send button for form mode
+  sendBtn.setAttribute('onclick', "submitFnForm('" + escAttr(fn.name) + "')");
+  sendBtn.title = 'Run';
+
   if (typeof buildThinkingMenu === 'function') buildThinkingMenu();
 
   // --- Set initial opacity for fade-in ---
@@ -699,52 +725,35 @@ function closeFnForm() {
   if (!_fnFormActive) return;
   var wrapper = document.querySelector('.input-wrapper');
   if (!wrapper) return;
+  var sendBtn = document.getElementById('sendBtn');
+  var stopBtn = document.getElementById('stopBtn');
 
-  // --- Step 1: Fade out form content ---
-  var formHeader = wrapper.querySelector('.fn-form-header');
-  var formBody = wrapper.querySelector('.fn-form-body');
-  var formFooter = wrapper.querySelector('.fn-form-footer');
-  [formHeader, formBody, formFooter].forEach(function(el) {
-    if (el) { el.style.transition = 'opacity 0.15s ease'; el.style.opacity = '0'; }
+  // Measure target height
+  var measure = wrapper.cloneNode(false);
+  measure.className = 'input-wrapper';
+  _inputContentOriginal.forEach(function(el) { measure.appendChild(el.cloneNode(true)); });
+  measure.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none;width:' + wrapper.offsetWidth + 'px';
+  wrapper.parentNode.appendChild(measure);
+  var targetHeight = measure.offsetHeight;
+  wrapper.parentNode.removeChild(measure);
+
+  // Step 1: Fade out form content
+  var formParts = wrapper.querySelectorAll('.fn-form-header, .fn-form-body, .fn-form-footer');
+  formParts.forEach(function(el) {
+    el.style.transition = 'opacity 0.12s ease';
+    el.style.opacity = '0';
   });
 
-  // --- Step 2: After fade-out, swap DOM and animate height ---
-  setTimeout(function() {
-    var wrapperBefore = wrapper.getBoundingClientRect();
-    wrapper.style.height = wrapperBefore.height + 'px';
-    wrapper.style.overflow = 'hidden';
+  // Step 2: Lock height and shrink
+  var heightBefore = wrapper.offsetHeight;
+  wrapper.style.height = heightBefore + 'px';
+  wrapper.style.overflow = 'hidden';
 
-    wrapper.className = 'input-wrapper';
-    wrapper.innerHTML = _inputWrapperOriginal;
-    _fnFormActive = false;
-    delete wrapper.dataset.fnName;
+  requestAnimationFrame(function() {
+    wrapper.style.transition = 'height 0.3s cubic-bezier(0.25, 0.1, 0.25, 1)';
+    wrapper.style.height = targetHeight + 'px';
 
-    var wrapperAfterHeight = wrapper.scrollHeight;
-
-    requestAnimationFrame(function() {
-      wrapper.style.transition = 'height 0.25s cubic-bezier(0.25, 0.1, 0.25, 1)';
-      wrapper.style.height = wrapperAfterHeight + 'px';
-      wrapper.addEventListener('transitionend', function handler(e) {
-        if (e.target !== wrapper || e.propertyName !== 'height') return;
-        wrapper.style.height = '';
-        wrapper.style.overflow = '';
-        wrapper.style.transition = '';
-        wrapper.removeEventListener('transitionend', handler);
-      });
-    });
-
-    // Re-bind chat input listeners
-    var chatInput = document.getElementById('chatInput');
-    if (chatInput) {
-      chatInput.addEventListener('keydown', function(e) {
-        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
-      });
-      chatInput.addEventListener('input', function() { autoResize(chatInput); });
-      chatInput.focus();
-    }
-    if (typeof buildThinkingMenu === 'function') buildThinkingMenu();
-
-    // --- Show welcome examples with height expand + fade-in ---
+    // Show welcome examples
     var examples = document.getElementById('welcomeExamples');
     if (examples) {
       examples.style.transition = 'none';
@@ -757,7 +766,7 @@ function closeFnForm() {
       examples.style.height = '0px';
       examples.style.padding = '0 24px';
       requestAnimationFrame(function() {
-        examples.style.transition = 'opacity 0.25s ease 0.1s, height 0.25s cubic-bezier(0.25, 0.1, 0.25, 1), padding 0.25s ease';
+        examples.style.transition = 'opacity 0.2s ease 0.1s, height 0.3s cubic-bezier(0.25, 0.1, 0.25, 1), padding 0.3s ease';
         examples.style.opacity = '1';
         examples.style.height = naturalH + 'px';
         examples.style.padding = '';
@@ -770,7 +779,43 @@ function closeFnForm() {
         });
       });
     }
-  }, 150);
+
+    // Step 3: After shrink, swap content (keep buttons)
+    wrapper.addEventListener('transitionend', function handler(e) {
+      if (e.target !== wrapper || e.propertyName !== 'height') return;
+      wrapper.removeEventListener('transitionend', handler);
+
+      wrapper.style.height = '';
+      wrapper.style.overflow = '';
+      wrapper.style.transition = '';
+
+      // Remove form content (not buttons)
+      var toRemove = wrapper.querySelectorAll('.fn-form-header, .fn-form-body, .fn-form-footer');
+      toRemove.forEach(function(el) { el.remove(); });
+
+      // Restore original content
+      _inputContentOriginal.forEach(function(el) { wrapper.appendChild(el); });
+
+      wrapper.className = 'input-wrapper';
+      _fnFormActive = false;
+      delete wrapper.dataset.fnName;
+
+      // Restore send button for chat mode
+      sendBtn.setAttribute('onclick', 'onSendBtnClick()');
+      sendBtn.title = 'Send message';
+
+      // Re-bind
+      var chatInput = document.getElementById('chatInput');
+      if (chatInput) {
+        chatInput.addEventListener('keydown', function(e) {
+          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+        });
+        chatInput.addEventListener('input', function() { autoResize(chatInput); });
+        chatInput.focus();
+      }
+      if (typeof buildThinkingMenu === 'function') buildThinkingMenu();
+    });
+  });
 }
 
 function toggleBool(paramName, value, btnEl) {
