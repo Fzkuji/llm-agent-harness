@@ -12,17 +12,9 @@ class TestCreateFailFixSucceed:
 
     def test_basic_recovery_flow(self):
         """create() → call fails → fix(fn=...) → call succeeds."""
-        def mock_call(content, model="test", response_format=None):
-            prompt_text = "".join(b.get("text", "") for b in content if b["type"] == "text")
+        from agentic.context import set_ask_user
 
-            if "Write a Python function" in prompt_text:
-                return '''@agentic_function
-def divide(a, b):
-    """Divide a by b."""
-    return str(a / b)'''
-
-            if "Fix" in prompt_text or "fix" in prompt_text:
-                return '''@agentic_function
+        fix_code = '''@agentic_function
 def divide(a, b):
     """Divide a by b safely."""
     a_num = float(a)
@@ -31,14 +23,36 @@ def divide(a, b):
         return "Error: division by zero"
     return str(a_num / b_num)'''
 
-            return "ok"
+        create_call_count = [0]
+        fix_call_count = [0]
+        phase = ["create"]
+
+        def mock_call(content, model="test", response_format=None):
+            prompt_text = "".join(b.get("text", "") for b in content if b["type"] == "text")
+
+            if phase[0] == "create":
+                create_call_count[0] += 1
+                return '''@agentic_function
+def divide(a, b):
+    """Divide a by b."""
+    return str(a / b)'''
+
+            # fix phase — handle multi-call flow
+            fix_call_count[0] += 1
+            if fix_call_count[0] == 1:  # clarify round 0
+                return '{"ready": false, "question": "Confirm fix?"}'
+            if fix_call_count[0] == 2:  # clarify round 1
+                return '{"ready": true}'
+            if fix_call_count[0] == 3:  # generate
+                return fix_code
+            if fix_call_count[0] == 4:  # verify
+                return '{"approved": true, "reasoning": "ok"}'
+            return "Fix done."  # conclude
 
         runtime = Runtime(call=mock_call)
 
         # Create
         divide = create(description="Divide two numbers", runtime=runtime)
-
-        # Works for normal input
         result = divide(a=10, b=2)
         assert "5" in result
 
@@ -46,19 +60,30 @@ def divide(a, b):
         with pytest.raises(Exception):
             divide(a=10, b=0)
 
-        # Fix (new API: pass fn directly)
-        fixed_divide = fix(fn=divide, runtime=runtime)
+        # Fix
+        phase[0] = "fix"
+        set_ask_user(lambda q: "Yes, fix the division by zero.")
+        try:
+            fixed_divide = fix(fn=divide, runtime=runtime)
+        finally:
+            set_ask_user(None)
 
-        # Fixed handles zero
         result = fixed_divide(a=10, b=0)
         assert "Error" in result or "zero" in result.lower()
 
     def test_fix_preserves_context_tree(self):
         """Fixed function creates proper Context trees."""
+        from agentic.context import set_ask_user
+
+        create_call_count = [0]
+        fix_call_count = [0]
+        phase = ["create"]
+
         def mock_call(content, model="test", response_format=None):
             prompt_text = "".join(b.get("text", "") for b in content if b["type"] == "text")
 
-            if "Write a Python function" in prompt_text:
+            if phase[0] == "create":
+                create_call_count[0] += 1
                 return '''@agentic_function
 def process(data):
     """Process data."""
@@ -66,8 +91,14 @@ def process(data):
         {"type": "text", "text": "Process: " + str(data)},
     ])'''
 
-            if "Fix" in prompt_text or "fix" in prompt_text:
-                return '''@agentic_function
+            if phase[0] == "fix":
+                fix_call_count[0] += 1
+                if fix_call_count[0] == 1:
+                    return '{"ready": false, "question": "Confirm?"}'
+                if fix_call_count[0] == 2:
+                    return '{"ready": true}'
+                if fix_call_count[0] == 3:
+                    return '''@agentic_function
 def process(data):
     """Process data with validation."""
     if not data:
@@ -75,13 +106,24 @@ def process(data):
     return runtime.exec(content=[
         {"type": "text", "text": "Process: " + str(data)},
     ])'''
+                if fix_call_count[0] == 4:
+                    return '{"approved": true, "reasoning": "ok"}'
+                return "Fix done."
 
             return f"processed: {prompt_text}"
 
         runtime = Runtime(call=mock_call)
 
         original = create(description="Process data", runtime=runtime)
-        fixed = fix(fn=original, runtime=runtime)
+
+        phase[0] = "fix"
+        set_ask_user(lambda q: "Yes, proceed.")
+        try:
+            fixed = fix(fn=original, runtime=runtime)
+        finally:
+            set_ask_user(None)
+
+        phase[0] = "run"
 
         @agentic_function
         def pipeline(items):

@@ -631,7 +631,7 @@ function _showFnFormSwitch(fn, wrapper, sendBtn) {
   var fieldsHtml = _buildFieldsHtml(fn);
   var thinkingSelectorHtml =
     '<div class="thinking-selector" id="thinkingSelector" onclick="toggleThinkingMenu(event)">' +
-      '<span id="thinkingLabel">effort: ' + (_execThinkingEffort || 'medium') + '</span>' +
+      '<span id="thinkingLabel">effort: ' + (_thinkingEffort || 'medium') + '</span>' +
       '<svg class="thinking-arrow" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
     '</div>' +
     '<div class="thinking-menu" id="thinkingMenu"></div>';
@@ -740,7 +740,7 @@ function showFnForm(fn) {
 
   var thinkingSelectorHtml =
     '<div class="thinking-selector" id="thinkingSelector" onclick="toggleThinkingMenu(event)">' +
-      '<span id="thinkingLabel">effort: ' + (_execThinkingEffort || 'medium') + '</span>' +
+      '<span id="thinkingLabel">effort: ' + (_thinkingEffort || 'medium') + '</span>' +
       '<svg class="thinking-arrow" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
     '</div>' +
     '<div class="thinking-menu" id="thinkingMenu"></div>';

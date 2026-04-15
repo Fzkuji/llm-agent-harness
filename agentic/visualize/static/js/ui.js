@@ -100,9 +100,7 @@ function stopExecution() {
 // ===== Thinking Effort =====
 
 function buildThinkingMenu() {
-  // Pick the right config based on mode (exec for fn form, chat for normal)
-  var cfg = _fnFormActive ? (_thinkingConfigExec || _thinkingConfigChat) : (_thinkingConfigChat || _thinkingConfigExec);
-  _thinkingConfig = cfg;
+  var cfg = _thinkingConfig;
   if (!cfg) return;
   var menu = document.getElementById('thinkingMenu');
   var label = document.getElementById('thinkingLabel');

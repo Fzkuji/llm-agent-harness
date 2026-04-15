@@ -259,42 +259,52 @@ def test_prepare_args_merges_context_and_runtime():
 
 def test_fix_rewrites_function():
     """fix() auto-extracts code and fixes the function."""
-    def mock_call(content, model="test", response_format=None):
-        return '''@agentic_function
+    from tests._fix_test_helpers import make_fix_mock
+
+    code = '''@agentic_function
 def fixed_add(a, b):
     """Add two numbers correctly."""
     return str(int(a) + int(b))'''
 
-    runtime = Runtime(call=mock_call)
+    mock_call, cleanup = make_fix_mock(code)
+    try:
+        runtime = Runtime(call=mock_call)
 
-    @agentic_function
-    def broken(a, b):
-        """Add two numbers."""
-        return 1 / 0  # broken
+        @agentic_function
+        def broken(a, b):
+            """Add two numbers."""
+            return 1 / 0  # broken
 
-    fn = fix(fn=broken, runtime=runtime)
-    assert callable(fn)
-    assert fn(a="2", b="3") == "5"
+        fn = fix(fn=broken, runtime=runtime)
+        assert callable(fn)
+        assert fn(a="2", b="3") == "5"
+    finally:
+        cleanup()
 
 
 def test_fix_with_custom_name():
     """fix() can override the function name."""
-    def mock_call(content, model="test", response_format=None):
-        return '''@agentic_function
+    from tests._fix_test_helpers import make_fix_mock
+
+    code = '''@agentic_function
 def repaired():
     """Fixed function."""
     return "fixed"'''
 
-    runtime = Runtime(call=mock_call)
+    mock_call, cleanup = make_fix_mock(code)
+    try:
+        runtime = Runtime(call=mock_call)
 
-    @agentic_function
-    def broken():
-        """Do something."""
-        raise Exception()
+        @agentic_function
+        def broken():
+            """Do something."""
+            raise Exception()
 
-    fn = fix(fn=broken, runtime=runtime, name="my_fixed_fn")
-    assert fn.__name__ == "my_fixed_fn"
-    assert fn() == "fixed"
+        fn = fix(fn=broken, runtime=runtime, name="my_fixed_fn")
+        assert fn.__name__ == "my_fixed_fn"
+        assert fn() == "fixed"
+    finally:
+        cleanup()
 
 
 # ── retry tests ──────────────────────────────────────────────

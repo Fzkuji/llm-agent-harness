@@ -110,16 +110,10 @@ async function loadAgentSettings() {
     _agentSettings = await resp.json();
   } catch(e) { return; }
   updateAgentBadges();
-  // Store thinking configs for both chat and exec
   if (_agentSettings.chat && _agentSettings.chat.thinking) {
-    _thinkingConfigChat = _agentSettings.chat.thinking;
+    _thinkingConfig = _agentSettings.chat.thinking;
+    buildThinkingMenu();
   }
-  if (_agentSettings.exec && _agentSettings.exec.thinking) {
-    _thinkingConfigExec = _agentSettings.exec.thinking;
-  }
-  // Use whichever is active
-  _thinkingConfig = _fnFormActive ? (_thinkingConfigExec || _thinkingConfigChat) : (_thinkingConfigChat || _thinkingConfigExec);
-  buildThinkingMenu();
 }
 
 function updateAgentBadges() {

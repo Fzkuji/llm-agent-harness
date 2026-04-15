@@ -385,6 +385,8 @@ def fix(
     # Conclude — summary recorded in context tree
     if compiled_fn is not None:
         conclude_task = f"Fix task for '{fn_name}': {instruction_text or description}"
+        conclude_fix(task=conclude_task, runtime=runtime)
+        return compiled_fn
     else:
         conclude_task = (
             f"Fix task for '{fn_name}' failed after {max_rounds} rounds.\n"
@@ -392,6 +394,5 @@ def fix(
             f"Last feedback: {feedback or 'N/A'}\n"
             "Summarize what was attempted and why it failed."
         )
-    summary = conclude_fix(task=conclude_task, runtime=runtime)
-
-    return summary
+        summary = conclude_fix(task=conclude_task, runtime=runtime)
+        return summary

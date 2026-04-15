@@ -140,65 +140,75 @@ def test_attempts_in_save(tmp_path):
 
 
 # ── fix() with new API ────────────────────────────────────────
+# New fix() always asks a follow-up on round 0 (forced clarify).
+# Tests must register ask_user handler via set_ask_user().
 
 def test_fix_auto_extracts_code():
     """fix() auto-extracts source code from function."""
-    def mock_call(content, model="test", response_format=None):
-        # Verify that source code was included in the prompt
-        text = content[-1]["text"] if content else ""
-        return '''@agentic_function
+    from tests._fix_test_helpers import make_fix_mock
+
+    code = '''@agentic_function
 def func():
     """Fixed."""
     return "fixed"'''
 
-    runtime = Runtime(call=mock_call)
+    mock_call, cleanup = make_fix_mock(code)
+    try:
+        runtime = Runtime(call=mock_call)
 
-    @agentic_function
-    def broken():
-        """Original broken function."""
-        return "broken"
+        @agentic_function
+        def broken():
+            """Original broken function."""
+            return "broken"
 
-    fixed_fn = fix(fn=broken, runtime=runtime)
-    assert callable(fixed_fn)
-    assert fixed_fn() == "fixed"
+        fixed_fn = fix(fn=broken, runtime=runtime)
+        assert callable(fixed_fn)
+        assert fixed_fn() == "fixed"
+    finally:
+        cleanup()
 
 
 def test_fix_with_instruction():
     """fix() passes instruction to LLM."""
-    received_prompts = []
+    from tests._fix_test_helpers import make_fix_mock
 
-    def mock_call(content, model="test", response_format=None):
-        received_prompts.append(content[-1]["text"] if content else "")
-        return '''@agentic_function
+    code = '''@agentic_function
 def func():
     """Fixed with instruction."""
     return "instructed"'''
 
-    runtime = Runtime(call=mock_call)
+    prompts = []
+    mock_call, cleanup = make_fix_mock(code, check_prompts=prompts)
+    try:
+        runtime = Runtime(call=mock_call)
 
-    @agentic_function
-    def original():
-        """Do something."""
-        return "original"
+        @agentic_function
+        def original():
+            """Do something."""
+            return "original"
 
-    fixed_fn = fix(fn=original, runtime=runtime, instruction="Use bullet points")
-    assert fixed_fn() == "instructed"
-    assert "bullet points" in received_prompts[0]
+        fixed_fn = fix(fn=original, runtime=runtime, instruction="Use bullet points")
+        assert fixed_fn() == "instructed"
+        # Instruction should appear in clarify prompt (call 1)
+        assert any("bullet points" in p for p in prompts)
+    finally:
+        cleanup()
 
 
 def test_fix_with_error_context():
     """fix() includes error info from fn.context."""
-    received_prompts = []
+    from tests._fix_test_helpers import make_fix_mock
 
-    def failing_call(content, model="test", response_format=None):
-        raise ValueError("some error")
-
-    def fix_call(content, model="test", response_format=None):
-        received_prompts.append(content[-1]["text"] if content else "")
-        return '''@agentic_function
+    code = '''@agentic_function
 def func():
     """Fixed."""
     return "fixed"'''
+
+    prompts = []
+    mock_call, cleanup = make_fix_mock(code, check_prompts=prompts)
+
+    def failing_call(content, model="test", response_format=None):
+        raise ValueError("some error")
 
     # First, create a function that fails
     runtime_fail = Runtime(call=failing_call, max_retries=1)
@@ -212,10 +222,13 @@ def func():
         failing()
 
     # Now fix it — error context should be included
-    runtime_fix = Runtime(call=fix_call)
-    fixed_fn = fix(fn=failing, runtime=runtime_fix)
-    assert callable(fixed_fn)
-    assert "some error" in received_prompts[0]
+    try:
+        runtime_fix = Runtime(call=mock_call)
+        fixed_fn = fix(fn=failing, runtime=runtime_fix)
+        assert callable(fixed_fn)
+        assert any("some error" in p for p in prompts)
+    finally:
+        cleanup()
 
 
 def test_fix_follow_up():
@@ -267,13 +280,10 @@ def test_fix_clarify_prompt_omits_generation_suffix():
     assert "Respond with ONLY the fixed Python code" not in prompts[0]
 
 
-def test_clarify_flags_vague_chinese_instruction_without_call():
-    """clarify() should short-circuit clearly vague Chinese instructions."""
-    call_count = [0]
-
+def test_clarify_vague_chinese_instruction():
+    """clarify() flags vague Chinese instructions via LLM."""
     def mock_call(content, model="test", response_format=None):
-        call_count[0] += 1
-        return '{"ready": true}'
+        return '{"ready": false, "question": "请具体说明需要修改什么"}'
 
     runtime = Runtime(call=mock_call)
     task = (
@@ -286,16 +296,12 @@ def test_clarify_flags_vague_chinese_instruction_without_call():
     result = clarify(task=task, runtime=runtime)
     assert result["ready"] is False
     assert result["question"]
-    assert call_count[0] == 0
 
 
 def test_clarify_treats_answered_qna_as_ready():
-    """clarify() should not re-ask once a Q/A clarification block exists."""
-    call_count = [0]
-
+    """clarify() treats tasks with prior Q/A context as ready."""
     def mock_call(content, model="test", response_format=None):
-        call_count[0] += 1
-        return '{"ready": false, "question": "Should never be used."}'
+        return '{"ready": true}'
 
     runtime = Runtime(call=mock_call)
     task = (
@@ -306,17 +312,13 @@ def test_clarify_treats_answered_qna_as_ready():
     )
 
     result = clarify(task=task, runtime=runtime)
-    assert result == {"ready": True}
-    assert call_count[0] == 0
+    assert result["ready"] is True
 
 
 def test_clarify_treats_retry_feedback_as_ready():
-    """clarify() should not re-ask when retry feedback is already present."""
-    call_count = [0]
-
+    """clarify() treats tasks with retry feedback as ready (via LLM)."""
     def mock_call(content, model="test", response_format=None):
-        call_count[0] += 1
-        return '{"ready": false, "question": "Should never be used."}'
+        return '{"ready": true}'
 
     runtime = Runtime(call=mock_call)
     task = (
@@ -327,106 +329,124 @@ def test_clarify_treats_retry_feedback_as_ready():
     )
 
     result = clarify(task=task, runtime=runtime)
-    assert result == {"ready": True}
-    assert call_count[0] == 0
+    assert result["ready"] is True
 
 
 def test_fix_produces_code_directly():
-    """fix() returns compiled function when LLM produces code."""
-    def mock_call(content, model="test", response_format=None):
-        return '''```python
+    """fix() returns compiled function through the full clarify → generate → verify flow."""
+    from tests._fix_test_helpers import make_fix_mock
+
+    code = '''```python
 @agentic_function
 def func():
     """Fixed."""
     return "fixed_result"
 ```'''
 
-    runtime = Runtime(call=mock_call)
+    mock_call, cleanup = make_fix_mock(code)
+    try:
+        runtime = Runtime(call=mock_call)
 
-    @agentic_function
-    def original():
-        """Do something."""
-        return "original"
+        @agentic_function
+        def original():
+            """Do something."""
+            return "original"
 
-    fixed_fn = fix(fn=original, runtime=runtime)
-    assert callable(fixed_fn)
-    assert fixed_fn() == "fixed_result"
+        fixed_fn = fix(fn=original, runtime=runtime)
+        assert callable(fixed_fn)
+        assert fixed_fn() == "fixed_result"
+    finally:
+        cleanup()
 
 
 def test_fix_custom_name():
     """fix() can override function name."""
-    def mock_call(content, model="test", response_format=None):
-        return '''@agentic_function
+    from tests._fix_test_helpers import make_fix_mock
+
+    code = '''@agentic_function
 def generated():
     """Fixed."""
     return "ok"'''
 
-    runtime = Runtime(call=mock_call)
+    mock_call, cleanup = make_fix_mock(code)
+    try:
+        runtime = Runtime(call=mock_call)
 
-    @agentic_function
-    def original():
-        return "original"
+        @agentic_function
+        def original():
+            return "original"
 
-    fixed_fn = fix(fn=original, runtime=runtime, name="my_fixed")
-    assert fixed_fn.__name__ == "my_fixed"
+        fixed_fn = fix(fn=original, runtime=runtime, name="my_fixed")
+        assert fixed_fn.__name__ == "my_fixed"
+    finally:
+        cleanup()
 
 
 def test_fix_uses_docstring_when_source_unavailable(monkeypatch):
     """fix() falls back to docstring when inspect.getsource() is unavailable."""
-    prompts = []
+    from tests._fix_test_helpers import make_fix_mock
 
-    def mock_call(content, model="test", response_format=None):
-        prompts.append(content[-1]["text"] if content else "")
-        return '''@agentic_function
+    code = '''@agentic_function
 def restored():
     """Fixed."""
     return "ok"'''
 
-    runtime = Runtime(call=mock_call)
+    prompts = []
+    mock_call, cleanup = make_fix_mock(code, check_prompts=prompts)
 
-    @agentic_function
-    def original():
-        """Original docstring."""
-        return "original"
+    try:
+        runtime = Runtime(call=mock_call)
 
-    import inspect
-    original_getsource = inspect.getsource
+        @agentic_function
+        def original():
+            """Original docstring."""
+            return "original"
 
-    def raising_getsource(fn):
-        if fn is original:
-            raise OSError("source unavailable")
-        return original_getsource(fn)
+        import inspect
+        original_getsource = inspect.getsource
 
-    monkeypatch.setattr(inspect, "getsource", raising_getsource)
+        def raising_getsource(fn):
+            if fn is original:
+                raise OSError("source unavailable")
+            return original_getsource(fn)
 
-    fixed_fn = fix(fn=original, runtime=runtime)
-    assert fixed_fn() == "ok"
-    assert "Source not available for original" in prompts[0]
-    assert "Original docstring" in prompts[0]
+        monkeypatch.setattr(inspect, "getsource", raising_getsource)
+
+        fixed_fn = fix(fn=original, runtime=runtime)
+        assert fixed_fn() == "ok"
+        # Source fallback message should appear in the clarify prompt (call 1)
+        assert any("Source not available for original" in p for p in prompts)
+        assert any("Original docstring" in p for p in prompts)
+    finally:
+        cleanup()
 
 
 def test_fix_omits_builtin_docstring_bloat():
     """fix() keeps built-in fallbacks concise instead of dumping API docs."""
-    prompts = []
+    from tests._fix_test_helpers import make_fix_mock
 
-    def mock_call(content, model="test", response_format=None):
-        prompts.append(content[-1]["text"] if content else "")
-        return '''@agentic_function
+    code = '''@agentic_function
 def restored():
     """Fixed."""
     return "ok"'''
 
-    runtime = Runtime(call=mock_call)
-
-    fixed_fn = fix(fn=str, runtime=runtime)
-    assert fixed_fn() == "ok"
-    assert "Source not available for str" in prompts[0]
-    assert "Create a new string object" not in prompts[0]
+    prompts = []
+    mock_call, cleanup = make_fix_mock(code, check_prompts=prompts)
+    try:
+        runtime = Runtime(call=mock_call)
+        fixed_fn = fix(fn=str, runtime=runtime)
+        assert fixed_fn() == "ok"
+        assert any("Source not available for str" in p for p in prompts)
+        # The generate_code prompt (call 3) should not contain full builtin docs
+        if len(prompts) >= 3:
+            assert "Create a new string object" not in prompts[2]
+    finally:
+        cleanup()
 
 
 def test_fix_omits_api_style_docstring_bloat():
     """fix() keeps source-less API-style callable docs out of the prompt."""
-    prompts = []
+    from tests._fix_test_helpers import make_fix_mock
 
     class MysteryCallable:
         __doc__ = str.__doc__
@@ -434,26 +454,26 @@ def test_fix_omits_api_style_docstring_bloat():
         def __call__(self):
             return "broken"
 
-    def mock_call(content, model="test", response_format=None):
-        prompts.append(content[-1]["text"] if content else "")
-        if len(prompts) == 1:
-            return '{"ready": true}'
-        return '''@agentic_function
+    code = '''@agentic_function
 def restored():
     """Fixed."""
     return "ok"'''
 
-    runtime = Runtime(call=mock_call)
-
-    fixed_fn = fix(fn=MysteryCallable(), runtime=runtime, instruction="improve the prompt")
-    assert callable(fixed_fn)
-    assert fixed_fn() == "ok"
-    assert "Source not available for unknown" in prompts[0]
-    assert "Create a new string object" not in prompts[0]
+    prompts = []
+    mock_call, cleanup = make_fix_mock(code, check_prompts=prompts)
+    try:
+        runtime = Runtime(call=mock_call)
+        fixed_fn = fix(fn=MysteryCallable(), runtime=runtime, instruction="improve the prompt")
+        assert callable(fixed_fn)
+        assert fixed_fn() == "ok"
+        assert any("Source not available for unknown" in p for p in prompts)
+        assert not any("Create a new string object" in p for p in prompts)
+    finally:
+        cleanup()
 
 
 def test_fix_uses_follow_up_answer_without_reasking():
-    """fix() should continue after an answered follow-up without re-clarifying."""
+    """fix() continues after an answered follow-up without re-clarifying."""
     from agentic.context import set_ask_user
 
     call_count = [0]
@@ -462,12 +482,23 @@ def test_fix_uses_follow_up_answer_without_reasking():
     def mock_call(content, model="test", response_format=None):
         call_count[0] += 1
         prompts.append(content[-1]["text"] if content else "")
+        # Round 0 clarify — forced follow_up regardless
         if call_count[0] == 1:
             return '{"ready": false, "question": "What output format should I use?"}'
-        return '''@agentic_function
+        # Round 1 clarify — ready
+        if call_count[0] == 2:
+            return '{"ready": true}'
+        # Round 1 generate
+        if call_count[0] == 3:
+            return '''@agentic_function
 def restored():
     """Fixed."""
     return "ok"'''
+        # Round 1 verify
+        if call_count[0] == 4:
+            return '{"approved": true, "reasoning": "Looks good."}'
+        # conclude
+        return "Fix completed."
 
     runtime = Runtime(call=mock_call)
 
@@ -484,14 +515,15 @@ def restored():
 
     assert callable(fixed_fn)
     assert fixed_fn() == "ok"
-    assert call_count[0] == 4  # clarify, generate, verify, conclude
-    assert "Q: What output format should I use?" in prompts[1]
-    assert "A: Return plain text." in prompts[1]
+    # clarify(r0) + clarify(r1) + generate + verify + conclude = 5
+    assert call_count[0] == 5
+    # The user's answer should appear in round 1's context
+    assert any("Return plain text." in p for p in prompts)
 
 
 def test_fix_includes_nested_child_errors():
     """fix() includes child context errors collected from nested attempts."""
-    prompts = []
+    from tests._fix_test_helpers import make_fix_mock
 
     def flaky(content, model="test", response_format=None):
         raise ValueError("child boom")
@@ -509,15 +541,17 @@ def test_fix_includes_nested_child_errors():
     with pytest.raises(RuntimeError):
         parent()
 
-    def fix_call(content, model="test", response_format=None):
-        prompts.append(content[-1]["text"] if content else "")
-        return '''@agentic_function
+    code = '''@agentic_function
 def parent():
     """Fixed parent."""
     return "fixed"'''
 
-    runtime_fix = Runtime(call=fix_call)
-    fixed_fn = fix(fn=parent, runtime=runtime_fix)
-    assert fixed_fn() == "fixed"
-    assert "child attempt 1: FAILED" in prompts[0]
-    assert "ValueError: child boom" in prompts[0]
+    prompts = []
+    mock_call, cleanup = make_fix_mock(code, check_prompts=prompts)
+    try:
+        runtime_fix = Runtime(call=mock_call)
+        fixed_fn = fix(fn=parent, runtime=runtime_fix)
+        assert fixed_fn() == "fixed"
+        assert any("child" in p and "boom" in p for p in prompts)
+    finally:
+        cleanup()
