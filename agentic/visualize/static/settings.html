@@ -4,13 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Settings - Agentic</title>
-<link rel="stylesheet" href="/css/style.css?v=35">
+<link rel="stylesheet" href="/css/style.css?v=36">
 <style>
-  html, body { overflow: visible !important; height: auto !important; }
-  .app { height: auto !important; min-height: 100vh; }
-  .sidebar { position: fixed; top: 0; left: 0; bottom: 0; z-index: 100; }
-  .col-resize#sidebarResize { position: fixed; top: 0; bottom: 0; left: var(--sidebar-width); z-index: 100; }
-  .main { margin-left: var(--sidebar-width); flex: none; width: calc(100vw - var(--sidebar-width)); min-height: 100vh; }
+  .main { overflow-y: auto; overflow-x: clip; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.2) transparent; }
   .settings-view { overflow: visible; height: auto; }
 </style>
 </head>

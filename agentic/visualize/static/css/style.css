@@ -471,6 +471,8 @@ a.user-menu-item { text-decoration: none; color: inherit; }
 }
 .settings-section:last-child {
   border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
 }
 .settings-section-title {
   font-size: 16px;
