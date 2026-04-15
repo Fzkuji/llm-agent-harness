@@ -216,6 +216,24 @@ class TestGeminiRuntime:
         call_kwargs = self.mock_types.Part.from_bytes.call_args[1]
         assert call_kwargs["mime_type"] == "application/pdf"
 
+    def test_usage_is_normalized(self):
+        """Usage metadata keeps a consistent shape across providers."""
+        usage = MagicMock()
+        usage.prompt_token_count = 77
+        usage.candidates_token_count = 19
+        response = self.mock_client.models.generate_content.return_value
+        response.usage_metadata = usage
+
+        rt = self._make_runtime()
+        rt._call([{"type": "text", "text": "hello"}])
+
+        assert rt.last_usage == {
+            "input_tokens": 77,
+            "output_tokens": 19,
+            "cache_read": 0,
+            "cache_create": 0,
+        }
+
 
 # ══════════════════════════════════════════════════════════════
 # Provider lazy import tests

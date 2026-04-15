@@ -157,6 +157,7 @@ class OpenAIRuntime(Runtime):
                 "input_tokens": total_in,
                 "output_tokens": getattr(u, 'completion_tokens', 0),
                 "cache_read": cached or 0,
+                "cache_create": 0,
             }
         return response.choices[0].message.content
 

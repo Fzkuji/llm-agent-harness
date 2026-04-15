@@ -158,6 +158,8 @@ class GeminiRuntime(Runtime):
             self.last_usage = {
                 "input_tokens": getattr(u, 'prompt_token_count', 0),
                 "output_tokens": getattr(u, 'candidates_token_count', 0),
+                "cache_read": 0,
+                "cache_create": 0,
             }
         return response.text
 
