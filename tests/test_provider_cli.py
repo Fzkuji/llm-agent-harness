@@ -461,4 +461,40 @@ class TestGeminiCLIRuntime:
         cmd = self._mock_run.call_args[0][0]
         assert cmd[1] == "implicit text"
 
+    def test_image_block_warns_and_uses_placeholder(self):
+        """Image blocks warn and degrade to a text placeholder."""
+        rt = self._make_runtime()
+        import warnings
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            result = rt._call([{"type": "image", "path": "diagram.png"}])
+
+        assert result == "mock gemini reply"
+        image_warnings = [x for x in w if "image" in str(x.message).lower()]
+        assert len(image_warnings) == 1
+        cmd = self._mock_run.call_args[0][0]
+        assert cmd[1] == "[Image: diagram.png]"
+
+    @pytest.mark.parametrize(
+        ("block_type", "path", "expected_prompt"),
+        [
+            ("audio", "clip.wav", "[Audio: clip.wav]"),
+            ("video", "demo.mp4", "[Video: demo.mp4]"),
+            ("file", "spec.pdf", "[File: spec.pdf]"),
+        ],
+    )
+    def test_unsupported_modalities_warn_and_use_placeholders(self, block_type, path, expected_prompt):
+        """Audio/video/file blocks warn and degrade to text placeholders."""
+        rt = self._make_runtime()
+        import warnings
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            result = rt._call([{"type": block_type, "path": path}])
+
+        assert result == "mock gemini reply"
+        matching_warnings = [x for x in w if block_type in str(x.message).lower()]
+        assert len(matching_warnings) == 1
+        cmd = self._mock_run.call_args[0][0]
+        assert cmd[1] == expected_prompt
+
 
