@@ -594,14 +594,24 @@ function showFnForm(fn) {
   }
   _fnFormActive = true;
 
-  // --- FLIP: capture send button position BEFORE ---
-  var sendBtn = document.getElementById('sendBtn');
-  var sendBefore = sendBtn ? sendBtn.getBoundingClientRect() : null;
-  var wrapperBefore = wrapper.getBoundingClientRect();
+  // --- Hide welcome examples with height collapse ---
+  var examples = document.getElementById('welcomeExamples');
+  if (examples) {
+    var exH = examples.offsetHeight;
+    examples.style.height = exH + 'px';
+    examples.style.overflow = 'hidden';
+    examples.style.opacity = '1';
+    examples.style.pointerEvents = 'none';
+    requestAnimationFrame(function() {
+      examples.style.transition = 'opacity 0.15s ease, height 0.25s cubic-bezier(0.25, 0.1, 0.25, 1)';
+      examples.style.opacity = '0';
+      examples.style.height = '0px';
+      examples.style.padding = '0 24px';
+    });
+  }
 
-  // --- Fade out context stats ---
-  var statsEl = document.getElementById('contextStats');
-  var statsText = statsEl ? statsEl.textContent : '';
+  // --- Capture before state ---
+  var wrapperBefore = wrapper.getBoundingClientRect();
 
   // --- Build form HTML ---
   var fieldsHtml = _buildFieldsHtml(fn);
@@ -612,6 +622,10 @@ function showFnForm(fn) {
       '<svg class="thinking-arrow" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
     '</div>' +
     '<div class="thinking-menu" id="thinkingMenu"></div>';
+
+  // --- Replace content (hidden via overflow) ---
+  wrapper.style.height = wrapperBefore.height + 'px';
+  wrapper.style.overflow = 'hidden';
 
   wrapper.className = 'input-wrapper fn-form-mode';
   wrapper.innerHTML =
@@ -635,61 +649,37 @@ function showFnForm(fn) {
   wrapper.dataset.fnName = fn.name;
   if (typeof buildThinkingMenu === 'function') buildThinkingMenu();
 
-  // --- FLIP: capture send button position AFTER ---
-  var newSendBtn = document.getElementById('sendBtn');
-  var sendAfter = newSendBtn ? newSendBtn.getBoundingClientRect() : null;
+  // --- Set initial opacity for fade-in ---
+  var formHeader = wrapper.querySelector('.fn-form-header');
+  var formBody = wrapper.querySelector('.fn-form-body');
+  var formFooter = wrapper.querySelector('.fn-form-footer');
+  if (formHeader) formHeader.style.opacity = '0';
+  if (formBody) formBody.style.opacity = '0';
+  if (formFooter) formFooter.style.opacity = '0';
 
-  // --- FLIP: animate send button from old to new position ---
-  if (sendBefore && sendAfter && newSendBtn) {
-    var dx = sendBefore.left - sendAfter.left;
-    var dy = sendBefore.top - sendAfter.top;
-    newSendBtn.style.transform = 'translate(' + dx + 'px, ' + dy + 'px)';
-    newSendBtn.style.transition = 'none';
-    requestAnimationFrame(function() {
-      requestAnimationFrame(function() {
-        newSendBtn.style.transition = 'transform 0.35s cubic-bezier(0.4, 0, 0.2, 1)';
-        newSendBtn.style.transform = '';
-        newSendBtn.addEventListener('transitionend', function handler() {
-          newSendBtn.style.transition = '';
-          newSendBtn.removeEventListener('transitionend', handler);
-        });
-      });
-    });
-  }
-
-  // --- Animate wrapper height expansion ---
+  // --- Measure target height ---
   var wrapperAfterHeight = wrapper.scrollHeight;
-  wrapper.style.height = wrapperBefore.height + 'px';
-  wrapper.style.overflow = 'hidden';
+
+  // --- Single rAF: animate height + fade in content ---
   requestAnimationFrame(function() {
-    wrapper.style.transition = 'height 0.35s cubic-bezier(0.4, 0, 0.2, 1)';
+    // Height transition
+    wrapper.style.transition = 'height 0.3s cubic-bezier(0.25, 0.1, 0.25, 1)';
     wrapper.style.height = wrapperAfterHeight + 'px';
+
+    // Content fade-in (staggered)
+    if (formHeader) { formHeader.style.transition = 'opacity 0.25s ease 0.1s'; formHeader.style.opacity = '1'; }
+    if (formBody) { formBody.style.transition = 'opacity 0.25s ease 0.15s'; formBody.style.opacity = '1'; }
+    if (formFooter) { formFooter.style.transition = 'opacity 0.25s ease 0.1s'; formFooter.style.opacity = '1'; }
+
+    // Clean up after transition
     wrapper.addEventListener('transitionend', function handler(e) {
-      if (e.propertyName !== 'height') return;
+      if (e.target !== wrapper || e.propertyName !== 'height') return;
       wrapper.style.height = '';
       wrapper.style.overflow = '';
       wrapper.style.transition = '';
       wrapper.removeEventListener('transitionend', handler);
     });
   });
-
-  // --- Fade in form header + body ---
-  var formHeader = wrapper.querySelector('.fn-form-header');
-  var formBody = wrapper.querySelector('.fn-form-body');
-  if (formHeader) {
-    formHeader.style.opacity = '0';
-    requestAnimationFrame(function() {
-      formHeader.style.transition = 'opacity 0.3s ease 0.08s';
-      formHeader.style.opacity = '1';
-    });
-  }
-  if (formBody) {
-    formBody.style.opacity = '0';
-    requestAnimationFrame(function() {
-      formBody.style.transition = 'opacity 0.3s ease 0.12s';
-      formBody.style.opacity = '1';
-    });
-  }
 
   // --- Setup textarea auto-resize + focus ---
   setTimeout(function() {
@@ -710,86 +700,77 @@ function closeFnForm() {
   var wrapper = document.querySelector('.input-wrapper');
   if (!wrapper) return;
 
-  // --- FLIP: capture send button position BEFORE (form mode, bottom-right) ---
-  var sendBtn = document.getElementById('sendBtn');
-  var sendBefore = sendBtn ? sendBtn.getBoundingClientRect() : null;
-  var wrapperBefore = wrapper.getBoundingClientRect();
-
-  // --- Restore original chat HTML ---
-  wrapper.className = 'input-wrapper';
-  wrapper.innerHTML = _inputWrapperOriginal;
-  _fnFormActive = false;
-  delete wrapper.dataset.fnName;
-
-  // --- FLIP: capture send button position AFTER (chat mode, top-right) ---
-  var newSendBtn = document.getElementById('sendBtn');
-  var sendAfter = newSendBtn ? newSendBtn.getBoundingClientRect() : null;
-
-  // --- FLIP: animate send button from old (bottom) to new (top) position ---
-  if (sendBefore && sendAfter && newSendBtn) {
-    var dx = sendBefore.left - sendAfter.left;
-    var dy = sendBefore.top - sendAfter.top;
-    newSendBtn.style.transform = 'translate(' + dx + 'px, ' + dy + 'px)';
-    newSendBtn.style.transition = 'none';
-    requestAnimationFrame(function() {
-      requestAnimationFrame(function() {
-        newSendBtn.style.transition = 'transform 0.35s cubic-bezier(0.4, 0, 0.2, 1)';
-        newSendBtn.style.transform = '';
-        newSendBtn.addEventListener('transitionend', function handler() {
-          newSendBtn.style.transition = '';
-          newSendBtn.removeEventListener('transitionend', handler);
-        });
-      });
-    });
-  }
-
-  // --- Animate wrapper height shrink ---
-  var wrapperAfterHeight = wrapper.scrollHeight;
-  wrapper.style.height = wrapperBefore.height + 'px';
-  wrapper.style.overflow = 'hidden';
-  requestAnimationFrame(function() {
-    wrapper.style.transition = 'height 0.35s cubic-bezier(0.4, 0, 0.2, 1)';
-    wrapper.style.height = wrapperAfterHeight + 'px';
-    wrapper.addEventListener('transitionend', function handler(e) {
-      if (e.propertyName !== 'height') return;
-      wrapper.style.height = '';
-      wrapper.style.overflow = '';
-      wrapper.style.transition = '';
-      wrapper.removeEventListener('transitionend', handler);
-    });
+  // --- Step 1: Fade out form content ---
+  var formHeader = wrapper.querySelector('.fn-form-header');
+  var formBody = wrapper.querySelector('.fn-form-body');
+  var formFooter = wrapper.querySelector('.fn-form-footer');
+  [formHeader, formBody, formFooter].forEach(function(el) {
+    if (el) { el.style.transition = 'opacity 0.15s ease'; el.style.opacity = '0'; }
   });
 
-  // --- Fade in context stats ---
-  var statsEl = document.getElementById('contextStats');
-  if (statsEl && statsEl.textContent) {
-    statsEl.style.opacity = '0';
+  // --- Step 2: After fade-out, swap DOM and animate height ---
+  setTimeout(function() {
+    var wrapperBefore = wrapper.getBoundingClientRect();
+    wrapper.style.height = wrapperBefore.height + 'px';
+    wrapper.style.overflow = 'hidden';
+
+    wrapper.className = 'input-wrapper';
+    wrapper.innerHTML = _inputWrapperOriginal;
+    _fnFormActive = false;
+    delete wrapper.dataset.fnName;
+
+    var wrapperAfterHeight = wrapper.scrollHeight;
+
     requestAnimationFrame(function() {
-      statsEl.style.transition = 'opacity 0.3s ease 0.15s';
-      statsEl.style.opacity = '1';
-      statsEl.addEventListener('transitionend', function handler() {
-        statsEl.style.transition = '';
-        statsEl.removeEventListener('transitionend', handler);
+      wrapper.style.transition = 'height 0.25s cubic-bezier(0.25, 0.1, 0.25, 1)';
+      wrapper.style.height = wrapperAfterHeight + 'px';
+      wrapper.addEventListener('transitionend', function handler(e) {
+        if (e.target !== wrapper || e.propertyName !== 'height') return;
+        wrapper.style.height = '';
+        wrapper.style.overflow = '';
+        wrapper.style.transition = '';
+        wrapper.removeEventListener('transitionend', handler);
       });
     });
-  }
 
-  // --- Re-bind chat input listeners ---
-  var chatInput = document.getElementById('chatInput');
-  if (chatInput) {
-    chatInput.addEventListener('keydown', function(e) {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        sendMessage();
-      }
-    });
-    chatInput.addEventListener('input', function() {
-      autoResize(chatInput);
-    });
-    chatInput.focus();
-  }
+    // Re-bind chat input listeners
+    var chatInput = document.getElementById('chatInput');
+    if (chatInput) {
+      chatInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+      });
+      chatInput.addEventListener('input', function() { autoResize(chatInput); });
+      chatInput.focus();
+    }
+    if (typeof buildThinkingMenu === 'function') buildThinkingMenu();
 
-  // --- Rebuild thinking menu ---
-  if (typeof buildThinkingMenu === 'function') buildThinkingMenu();
+    // --- Show welcome examples with height expand + fade-in ---
+    var examples = document.getElementById('welcomeExamples');
+    if (examples) {
+      examples.style.transition = 'none';
+      examples.style.height = '';
+      examples.style.padding = '';
+      examples.style.overflow = 'hidden';
+      examples.style.opacity = '0';
+      examples.style.pointerEvents = '';
+      var naturalH = examples.scrollHeight;
+      examples.style.height = '0px';
+      examples.style.padding = '0 24px';
+      requestAnimationFrame(function() {
+        examples.style.transition = 'opacity 0.25s ease 0.1s, height 0.25s cubic-bezier(0.25, 0.1, 0.25, 1), padding 0.25s ease';
+        examples.style.opacity = '1';
+        examples.style.height = naturalH + 'px';
+        examples.style.padding = '';
+        examples.addEventListener('transitionend', function handler(e) {
+          if (e.propertyName !== 'height') return;
+          examples.style.height = '';
+          examples.style.overflow = '';
+          examples.style.transition = '';
+          examples.removeEventListener('transitionend', handler);
+        });
+      });
+    }
+  }, 150);
 }
 
 function toggleBool(paramName, value, btnEl) {
