@@ -231,11 +231,32 @@ def func():
         cleanup()
 
 
-def test_fix_follow_up():
-    """fix() returns follow_up when clarify says info is insufficient."""
+def test_fix_follow_up_auto_answered():
+    """fix() auto-answers follow-up when no human handler, then proceeds."""
+    call_count = [0]
+
     def mock_call(content, model="test", response_format=None):
-        # clarify returns not-ready with a question
-        return '{"ready": false, "question": "Should I use recursion or iteration?"}'
+        call_count[0] += 1
+        # Round 0 clarify — forced follow_up
+        if call_count[0] == 1:
+            return '{"ready": false, "question": "Should I use recursion or iteration?"}'
+        # Auto-answer call
+        if call_count[0] == 2:
+            return "Use iteration for simplicity."
+        # Round 1 clarify — ready (has Q/A context now)
+        if call_count[0] == 3:
+            return '{"ready": true}'
+        # Generate code
+        if call_count[0] == 4:
+            return '''@agentic_function
+def original():
+    """Fixed."""
+    return "fixed"'''
+        # Verify
+        if call_count[0] == 5:
+            return '{"approved": true, "reasoning": "ok"}'
+        # Conclude
+        return "Fix completed."
 
     runtime = Runtime(call=mock_call)
 
@@ -245,13 +266,16 @@ def test_fix_follow_up():
         return "original"
 
     result = fix(fn=original, runtime=runtime)
-    assert isinstance(result, dict)
-    assert result["type"] == "follow_up"
-    assert "recursion" in result["question"]
+    assert callable(result)
+    assert result() == "fixed"
+    # auto_answer was called (call 2)
+    assert call_count[0] >= 5
 
 
 def test_fix_clarify_prompt_omits_generation_suffix():
     """fix() keeps generation-only instructions out of clarify()."""
+    from agentic.context import set_ask_user
+
     prompts = []
 
     class MysteryCallable:
@@ -266,14 +290,18 @@ def test_fix_clarify_prompt_omits_generation_suffix():
 
     runtime = Runtime(call=mock_call)
 
-    result = fix(
-        fn=MysteryCallable(),
-        runtime=runtime,
-        instruction="Fix the crash when the input is empty.",
-    )
+    # Use ask_user returning empty string to decline answering (stops the loop)
+    set_ask_user(lambda q: "")
+    try:
+        result = fix(
+            fn=MysteryCallable(),
+            runtime=runtime,
+            instruction="Fix the crash when the input is empty.",
+        )
+    finally:
+        set_ask_user(None)
 
-    assert isinstance(result, dict)
-    assert result["type"] == "follow_up"
+    # Clarify prompt (call 1) should have instruction but not generation suffix
     assert "Fix the crash when the input is empty." in prompts[0]
     assert "Source not available for unknown" in prompts[0]
     assert "Fix the root cause" not in prompts[0]
