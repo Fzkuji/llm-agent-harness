@@ -36,30 +36,56 @@ function switchConversation(convId) {
   window.location.href = '/c/' + convId;
 }
 
+function _showConfirm(title, message, onConfirm) {
+  var overlay = document.createElement('div');
+  overlay.className = 'confirm-overlay';
+  overlay.innerHTML =
+    '<div class="confirm-dialog">' +
+      '<div class="confirm-title">' + title + '</div>' +
+      '<div class="confirm-message">' + message + '</div>' +
+      '<div class="confirm-actions">' +
+        '<button class="confirm-btn" id="_confirmCancel">Cancel</button>' +
+        '<button class="confirm-btn confirm-btn-danger" id="_confirmOk">Delete</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+  requestAnimationFrame(function() { overlay.classList.add('visible'); });
+
+  function close() {
+    overlay.classList.remove('visible');
+    overlay.addEventListener('transitionend', function() { overlay.remove(); });
+  }
+  overlay.querySelector('#_confirmCancel').onclick = close;
+  overlay.querySelector('#_confirmOk').onclick = function() { close(); onConfirm(); };
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) close(); });
+}
+
 function deleteConversation(convId) {
   var conv = conversations[convId];
-  var title = (conv && conv.title) || 'this conversation';
-  if (!confirm('Delete "' + title + '"?')) return;
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ action: 'delete_conversation', conv_id: convId }));
-  }
-  delete conversations[convId];
-  if (currentConvId === convId) {
-    newConversation();
-  }
-  renderConversations();
+  var title = (conv && conv.title) || 'Untitled';
+  _showConfirm('Delete chat', 'Are you sure you want to delete "' + title + '"?', function() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ action: 'delete_conversation', conv_id: convId }));
+    }
+    delete conversations[convId];
+    if (currentConvId === convId) {
+      newConversation();
+    }
+    renderConversations();
+  });
 }
 
 function clearAllConversations() {
   var count = Object.keys(conversations).length;
   if (!count) return;
-  if (!confirm('Delete all ' + count + ' conversations? This cannot be undone.')) return;
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ action: 'clear_conversations' }));
-  }
-  conversations = {};
-  newConversation();
-  renderConversations();
+  _showConfirm('Delete all chats', 'Are you sure you want to delete all ' + count + ' conversations? This cannot be undone.', function() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ action: 'clear_conversations' }));
+    }
+    conversations = {};
+    newConversation();
+    renderConversations();
+  });
 }
 
 function newConversation() {

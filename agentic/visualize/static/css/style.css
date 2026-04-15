@@ -584,6 +584,65 @@ a.user-menu-item { text-decoration: none; color: inherit; }
   color: var(--text-bright);
 }
 
+/* Confirm dialog (Claude-style modal) */
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.confirm-overlay.visible { opacity: 1; }
+.confirm-dialog {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px;
+  min-width: 320px;
+  max-width: 400px;
+  transform: scale(0.95);
+  transition: transform 0.15s ease;
+}
+.confirm-overlay.visible .confirm-dialog { transform: scale(1); }
+.confirm-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-bright);
+  margin-bottom: 8px;
+}
+.confirm-message {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin-bottom: 20px;
+}
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.confirm-btn {
+  padding: 8px 20px;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-primary);
+  transition: background 0.1s;
+  font-family: var(--font-sans);
+}
+.confirm-btn:hover { background: var(--bg-hover); }
+.confirm-btn-danger {
+  background: var(--accent-red);
+  color: #fff;
+  border-color: var(--accent-red);
+}
+.confirm-btn-danger:hover { background: #c9413a; }
+
 /* Input & Button */
 .settings-input {
   background: var(--bg-primary);
@@ -664,9 +723,10 @@ a.user-menu-item { text-decoration: none; color: inherit; }
 }
 .conv-item .conv-title { flex: 1; overflow: hidden; text-overflow: ellipsis; }
 .conv-item .conv-del {
-  display: none; flex-shrink: 0; width: 20px; height: 20px;
-  font-size: 12px; border-radius: 4px; color: var(--text-muted); margin-left: 4px;
+  display: none; width: 20px; height: 20px;
+  font-size: 12px; border-radius: 4px; color: var(--text-muted);
   align-items: center; justify-content: center; line-height: 1;
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
 }
 .conv-item:hover .conv-del { display: flex; }
 .conv-item .conv-del:hover { background: var(--accent-red); color: #fff; }

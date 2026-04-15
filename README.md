@@ -112,6 +112,17 @@ This starts a local MCP server that any compatible client (Claude Desktop, Curso
 
 Verify your setup with `agentic providers`.
 
+### Option D: Visualizer — interactive web UI
+
+A browser-based interface for running functions, managing conversations, and viewing execution trees in real time.
+
+```bash
+pip install "agentic-programming[visualize]"
+agentic visualize
+```
+
+This opens `http://localhost:8765` with a chat interface where you can create, run, and fix functions interactively. Supports light/dark themes (Settings → General).
+
 ---
 
 ## Why Agentic Programming?
