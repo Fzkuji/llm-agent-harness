@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Settings - Agentic</title>
+<link rel="stylesheet" href="/css/style.css?v=35">
+<style>
+  html, body { overflow: visible !important; height: auto !important; }
+  .app { height: auto !important; min-height: 100vh; }
+  .sidebar { position: fixed; top: 0; left: 0; bottom: 0; z-index: 100; }
+  .col-resize#sidebarResize { position: fixed; top: 0; bottom: 0; left: var(--sidebar-width); z-index: 100; }
+  .main { margin-left: var(--sidebar-width); flex: none; width: calc(100vw - var(--sidebar-width)); min-height: 100vh; }
+  .settings-view { overflow: visible; height: auto; }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Left Sidebar -->
+  <div id="sidebar" class="sidebar">
+    <div class="sidebar-header">
+      <div class="logo"><span class="logo-accent">{<span class="logo-l1">L</span><span class="logo-l2">L</span><span class="logo-m">M</span>}</span> Agentic</div>
+      <button class="sidebar-toggle" onclick="toggleSidebar()" title="Toggle sidebar"><svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path d="M16.5 4A1.5 1.5 0 0 1 18 5.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 2 14.5v-9A1.5 1.5 0 0 1 3.5 4zM7 15h9.5a.5.5 0 0 0 .5-.5v-9a.5.5 0 0 0-.5-.5H7zM3.5 5a.5.5 0 0 0-.5.5v9a.5.5 0 0 0 .5.5H6V5z"/></svg></button>
+    </div>
+    <div class="new-chat-btn" onclick="window.location.href='/new'"><span class="btn-icon"><svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path d="M10 3a.75.75 0 0 1 .75.75v5.5h5.5a.75.75 0 0 1 0 1.5h-5.5v5.5a.75.75 0 0 1-1.5 0v-5.5h-5.5a.75.75 0 0 1 0-1.5h5.5v-5.5A.75.75 0 0 1 10 3"/></svg></span><span>New conversation</span></div>
+
+    <div class="sidebar-panels">
+      <div class="sidebar-panel" id="convPanel" data-panel="conv">
+        <div class="panel-header" onclick="togglePanel('conv')">
+          <span class="sidebar-section-title" style="padding:0">Conversations</span>
+          <span class="panel-hide-hint" id="convHint">Hide</span>
+        </div>
+        <div class="panel-body" id="convList"></div>
+      </div>
+
+      <div class="panel-resize" id="panelResize"></div>
+
+      <div class="sidebar-panel" id="fnPanel" data-panel="fn">
+        <div class="panel-header" onclick="togglePanel('fn')">
+          <span class="sidebar-section-title" style="padding:0">Programs</span>
+          <span class="refresh-btn" onclick="event.stopPropagation();doRefreshFunctions(this)" title="Refresh function list" style="cursor:pointer;font-size:14px;opacity:0.6">&#8635;</span>
+          <span class="panel-hide-hint" id="fnHint">Hide</span>
+        </div>
+        <div class="panel-body" id="fnList"></div>
+      </div>
+    </div>
+
+    <!-- Sidebar Footer -->
+    <div class="sidebar-footer" onclick="toggleUserMenu(event)">
+      <div class="sidebar-user">
+        <div class="user-avatar">A</div>
+        <div class="user-info">
+          <span class="user-name">Agentic</span>
+          <span class="user-subtitle">Local instance</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- User Menu Popup -->
+    <div id="userMenu" class="user-menu" onclick="event.stopPropagation()">
+      <div class="user-menu-item" onclick="closeUserMenu()">
+        <span class="user-menu-icon"><svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path d="M10.549 2C11.35 2 12 2.65 12 3.451c0 .195.138.403.385.501q.102.041.204.085l.09.032c.212.06.415.007.536-.114a1.453 1.453 0 0 1 2.055.001l.774.774.1.11a1.454 1.454 0 0 1-.1 1.945c-.138.138-.187.382-.081.625l.085.205.042.087c.108.192.289.298.459.298C17.35 8 18 8.65 18 9.451v1.098C18 11.35 17.35 12 16.549 12c-.17 0-.35.106-.46.298l-.041.087-.085.204c-.106.243-.057.488.08.626a1.453 1.453 0 0 1 0 2.055l-.773.774a1.453 1.453 0 0 1-2.055 0 .55.55 0 0 0-.535-.114l-.091.033q-.1.044-.203.084c-.247.098-.386.306-.386.5C12 17.35 11.35 18 10.548 18H9.452C8.65 18 8 17.35 8 16.548a.55.55 0 0 0-.298-.46l-.087-.041-.205-.085c-.243-.106-.487-.056-.625.082a1.453 1.453 0 0 1-1.944.1l-.11-.1-.775-.774a1.453 1.453 0 0 1 0-2.055l.047-.057a.56.56 0 0 0 .066-.478l-.032-.091-.085-.204c-.098-.247-.306-.385-.5-.385C2.65 12 2 11.35 2 10.549V9.45C2 8.65 2.65 8 3.451 8c.195 0 .402-.138.5-.385l.086-.205.032-.09a.56.56 0 0 0-.066-.48l-.048-.055a1.453 1.453 0 0 1 0-2.055l.775-.775.11-.1a1.453 1.453 0 0 1 1.945.1c.138.138.382.188.625.082q.102-.045.205-.086c.247-.098.385-.305.385-.5C8 2.65 8.65 2 9.451 2zM10 7a3 3 0 1 1 0 6 3 3 0 0 1 0-6m0 1a2 2 0 1 0 0 4 2 2 0 0 0 0-4"/></svg></span>
+        Settings
+      </div>
+      <div class="user-menu-sep"></div>
+      <a class="user-menu-item" href="https://github.com/Fzkuji/Agentic-Programming" target="_blank" rel="noopener" onclick="closeUserMenu()">
+        <span class="user-menu-icon"><svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path d="M10 2.5a7.5 7.5 0 1 1 0 15 7.5 7.5 0 0 1 0-15m0 1a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13m.1 5.51a.5.5 0 0 1 .4.49v3h1a.5.5 0 0 1 0 1h-3a.5.5 0 0 1 0-1h1V10h-1a.5.5 0 0 1 0-1H10zM10 6.5A.75.75 0 1 1 10 8a.75.75 0 0 1 0-1.5"/></svg></span>
+        About
+      </a>
+    </div>
+  </div>
+
+  <div class="col-resize" id="sidebarResize"></div>
+
+  <!-- Main Area: Settings -->
+  <div class="main">
+    <div class="settings-view">
+      <div class="settings-topbar">
+        <span class="settings-title">Settings</span>
+      </div>
+      <div class="settings-body">
+        <div class="settings-nav">
+          <div class="settings-nav-item active" data-section="providers" onclick="switchSettingsSection(this)">LLM Providers</div>
+          <div class="settings-nav-item" data-section="general" onclick="switchSettingsSection(this)">General</div>
+        </div>
+        <div class="settings-content" id="settingsContent">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Application Scripts (subset needed for settings) -->
+<script src="/js/state.js"></script>
+<script src="/js/helpers.js?v=13"></script>
+<script src="/js/sidebar.js?v=2"></script>
+<script src="/js/providers.js"></script>
+<script src="/js/settings.js?v=4"></script>
+<script src="/js/ui.js"></script>
+<script>
+// Minimal init for settings page
+var _isSettingsPage = true;
+
+function connect() {
+  var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(proto + '//' + location.host + '/ws');
+  ws.onopen = function() {
+    updateStatus('connected');
+    ws.send(JSON.stringify({ action: 'list_conversations' }));
+  };
+  ws.onmessage = function(e) {
+    try {
+      var msg = JSON.parse(e.data);
+      if (msg.type === 'conversations_list' || msg.type === 'history_list') {
+        var data = msg.data || [];
+        data.forEach(function(c) {
+          if (!conversations[c.id]) {
+            conversations[c.id] = { id: c.id, title: c.title, messages: [] };
+          }
+        });
+        renderConversations();
+      } else if (msg.type === 'functions_list') {
+        availableFunctions = msg.data || [];
+        if (typeof loadProgramsMeta === 'function') {
+          loadProgramsMeta().then(function() { renderFunctions(); });
+        } else {
+          renderFunctions();
+        }
+      }
+    } catch(err) {}
+  };
+  ws.onclose = function() {
+    updateStatus('disconnected');
+    setTimeout(connect, 2000);
+  };
+  ws.onerror = function() { ws.close(); };
+}
+
+// Override navigation functions for settings page
+function newConversation() { window.location.href = '/new'; }
+function loadConversation(id) {
+  window.location.href = '/c/' + id;
+}
+
+// Panel toggle
+function togglePanel(name) {
+  var panel = document.querySelector('[data-panel="' + name + '"]');
+  if (!panel) return;
+  panel.classList.toggle('panel-collapsed');
+  var hintId = name === 'conv' ? 'convHint' : 'fnHint';
+  var hint = document.getElementById(hintId);
+  if (hint) hint.textContent = panel.classList.contains('panel-collapsed') ? 'Show' : 'Hide';
+}
+
+// Refresh button
+function doRefreshFunctions(btn) {
+  if (btn.classList.contains('spinning')) return;
+  btn.classList.add('spinning');
+  refreshFunctions();
+  btn.addEventListener('animationend', function handler() {
+    btn.classList.remove('spinning');
+    btn.removeEventListener('animationend', handler);
+    var orig = btn.innerHTML;
+    btn.innerHTML = '&#10003;';
+    btn.classList.add('done');
+    setTimeout(function() { btn.innerHTML = orig; btn.classList.remove('done'); }, 800);
+  });
+}
+
+// Column resize
+(function() {
+  function setupColResize(handleId, getTarget, setSide, minW) {
+    var handle = document.getElementById(handleId);
+    if (!handle) return;
+    handle.addEventListener('mousedown', function(e) {
+      var target = getTarget();
+      if (!target) return;
+      e.preventDefault();
+      var startX = e.clientX, startW = target.offsetWidth;
+      handle.classList.add('dragging');
+      target.style.transition = 'none';
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      function onMove(ev) { target.style.width = Math.max(minW, startW + (ev.clientX - startX) * setSide) + 'px'; }
+      function onUp() {
+        handle.classList.remove('dragging'); target.style.transition = '';
+        document.body.style.cursor = ''; document.body.style.userSelect = '';
+        document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp);
+      }
+      document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
+    });
+  }
+  setupColResize('sidebarResize', function() { return document.getElementById('sidebar'); }, 1, 180);
+})();
+
+// Panel resize
+(function() {
+  var handle = document.getElementById('panelResize');
+  if (!handle) return;
+  handle.addEventListener('mousedown', function(e) {
+    var convPanel = document.getElementById('convPanel');
+    var fnPanel = document.getElementById('fnPanel');
+    var container = document.querySelector('.sidebar-panels');
+    if (!convPanel || !fnPanel || !container) return;
+    e.preventDefault();
+    var startY = e.clientY, startConvH = convPanel.offsetHeight;
+    var availableH = container.offsetHeight - handle.offsetHeight;
+    var convHeaderH = convPanel.querySelector('.panel-header').offsetHeight;
+    var fnHeaderH = fnPanel.querySelector('.panel-header').offsetHeight;
+    handle.classList.add('dragging');
+    convPanel.style.transition = 'none'; fnPanel.style.transition = 'none';
+    document.body.style.cursor = 'row-resize'; document.body.style.userSelect = 'none';
+    function onMove(ev) {
+      var newConvH = Math.max(convHeaderH, Math.min(availableH - fnHeaderH, startConvH + ev.clientY - startY));
+      convPanel.style.flex = '0 0 ' + newConvH + 'px';
+      fnPanel.style.flex = '0 0 ' + (availableH - newConvH) + 'px';
+      fnPanel.style.maxHeight = 'none';
+    }
+    function onUp() {
+      handle.classList.remove('dragging'); convPanel.style.transition = ''; fnPanel.style.transition = '';
+      document.body.style.cursor = ''; document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp);
+    }
+    document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
+  });
+})();
+
+// Init
+connect();
+loadProviders();
+// Load initial settings section
+var active = document.querySelector('.settings-nav-item.active');
+var section = active ? active.getAttribute('data-section') : 'providers';
+_loadSettingsSection(section);
+</script>
+</body>
+</html>
