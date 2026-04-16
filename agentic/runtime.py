@@ -33,7 +33,7 @@ import json
 import os
 from typing import Any, Optional
 
-from agentic.context import _current_ctx
+from agentic.context import Context, _current_ctx, _emit_event
 
 
 class Runtime:
@@ -108,7 +108,7 @@ class Runtime:
         model: Optional[str] = None,
     ) -> str:
         """
-        Call the LLM with automatic Context integration.
+        Call the LLM. Creates an exec node in the Context tree.
 
         Args:
             content:          List of content blocks. Each block is a dict:
@@ -118,7 +118,7 @@ class Runtime:
                               {"type": "file", "path": "data.csv"}
 
             context:          Override auto-generated context string.
-                              If None: auto-generates from Context tree.
+                              If None: exec node calls summarize() on itself.
 
             response_format:  Expected output format (JSON schema).
                               Passed to _call() for provider-native handling.
@@ -135,79 +135,47 @@ class Runtime:
         if isinstance(content, str):
             content = [{"type": "text", "text": content}]
 
-        ctx = _current_ctx.get(None)
+        import time as _time
+        parent_ctx = _current_ctx.get(None)
         use_model = model or self.model
+        content_text = "\n".join(b["text"] for b in content if b.get("type") == "text")
 
-        # --- Read: auto-generate context from the tree ---
-        is_continuation = ctx is not None and ctx.raw_reply is not None
-        if context is None and ctx is not None:
-            func_is_new = ctx.name not in self._prompted_functions
+        # --- Create exec child node ---
+        exec_ctx = None
+        if parent_ctx is not None:
+            exec_ctx = Context(
+                name="_exec",
+                node_type="exec",
+                params={"_content": content_text},
+                parent=parent_ctx,
+                start_time=_time.time(),
+                render="result",
+            )
+            parent_ctx.children.append(exec_ctx)
+            _emit_event("node_created", exec_ctx)
 
+        # --- Context: exec node summarizes itself ---
+        if context is None and exec_ctx is not None:
             if self.has_session:
-                if func_is_new and ctx.prompt:
-                    context = ctx.prompt
+                # Session providers manage their own context
+                if parent_ctx.prompt and parent_ctx.name not in self._prompted_functions:
+                    context = parent_ctx.prompt
+                    self._prompted_functions.add(parent_ctx.name)
             else:
-                kwargs = dict(ctx._summarize_kwargs) if ctx._summarize_kwargs else {}
+                # Use parent's summarize config
+                kwargs = dict(parent_ctx._summarize_kwargs) if parent_ctx._summarize_kwargs else {}
                 kwargs["prompted_functions"] = self._prompted_functions
-                context = ctx.summarize(**kwargs)
+                context = exec_ctx.summarize(**kwargs)
 
-            # Mark function as prompted AFTER building context
-            if ctx.name:
-                self._prompted_functions.add(ctx.name)
-
-        # --- Build full content ---
-        # Merge text content into the context string under an exec() marker,
-        # so the LLM sees one coherent structure. Non-text content (images, etc.)
-        # stays as separate blocks.
-        full_content = []
-        if context and ctx is not None and ctx.parent:
-            # Calculate indent for exec content (one level deeper than current call)
-            base = ctx._depth()
-            node = ctx.parent
-            while node and node.name:
-                base = node._depth()
-                node = node.parent
-            exec_indent = "    " * (ctx._depth() - base + 1)
-
-            # Append previous exchanges for continuation calls
-            if is_continuation and ctx.exchanges:
-                for ex in ctx.exchanges:
-                    context += (
-                        "\n" + exec_indent + "→ Task:\n"
-                        + "\n".join(exec_indent + "    " + line for line in ex["content"].splitlines())
-                        + "\n" + exec_indent + "← Reply:\n"
-                        + "\n".join(exec_indent + "    " + line for line in ex["reply"].splitlines())
-                    )
-
-            # Merge text content into context
-            text_parts = []
-            for block in content:
-                if block.get("type") == "text":
-                    indented = "\n".join(
-                        exec_indent + line if line.strip() else ""
-                        for line in block["text"].splitlines()
-                    )
-                    text_parts.append(indented)
-                else:
-                    full_content.append(block)  # non-text goes as separate block
-
-            if text_parts:
-                merged = context + "\n" + exec_indent + "→ Current Task:\n" + "\n".join(text_parts)
-            else:
-                merged = context
-            full_content.insert(0, {"type": "text", "text": merged})
-        elif context:
-            full_content.append({"type": "text", "text": context})
-            full_content.extend(content)
-        else:
-            full_content.extend(content)
+        # --- Merge content into context ---
+        full_content = _merge_content(context, content, exec_ctx)
 
         # --- Debug: dump LLM input ---
         if os.environ.get("AGENTIC_DUMP_INPUT"):
             import json as _json
             _dump_dir = os.environ.get("AGENTIC_DUMP_DIR", os.path.join(os.path.dirname(os.path.dirname(__file__)), "tmp"))
             os.makedirs(_dump_dir, exist_ok=True)
-            _call_path = ctx._call_path() if ctx else "unknown"
+            _call_path = exec_ctx._call_path() if exec_ctx else (parent_ctx._call_path() if parent_ctx else "unknown")
             _seq = getattr(self, '_dump_seq', 0)
             self._dump_seq = _seq + 1
             _dump_path = os.path.join(_dump_dir, f"{_seq:03d}_{_call_path}.txt")
@@ -221,29 +189,33 @@ class Runtime:
             print(f"[DUMP] {_call_path} -> {_dump_path}")
 
         # --- Call the LLM (with retry) ---
-        attempts = ctx.attempts if ctx is not None else []
+        attempts = exec_ctx.attempts if exec_ctx is not None else []
         for attempt in range(self.max_retries):
             try:
                 reply = self._call(full_content, model=use_model, response_format=response_format)
-                # Record successful attempt
                 attempts.append({"attempt": attempt + 1, "reply": reply, "error": None})
-                if ctx is not None:
-                    # Extract text content for exchange record
-                    content_text = "\n".join(
-                        b["text"] for b in content if b.get("type") == "text"
-                    )
-                    ctx.exchanges.append({"content": content_text, "reply": reply})
-                    ctx.raw_reply = reply
+                if exec_ctx is not None:
+                    exec_ctx.raw_reply = reply
+                    exec_ctx.output = reply
+                    exec_ctx.status = "success"
+                    exec_ctx.end_time = _time.time()
+                    _emit_event("node_completed", exec_ctx)
+                    # Backward compat: parent function also gets latest reply
+                    parent_ctx.raw_reply = reply
                 return reply
             except (TypeError, NotImplementedError):
                 raise  # Programming errors — don't retry
             except Exception as e:
-                # Record failed attempt
                 attempts.append({"attempt": attempt + 1, "reply": None, "error": f"{type(e).__name__}: {e}"})
                 if attempt == self.max_retries - 1:
+                    if exec_ctx is not None:
+                        exec_ctx.error = str(e)
+                        exec_ctx.status = "error"
+                        exec_ctx.end_time = _time.time()
+                        _emit_event("node_completed", exec_ctx)
                     error_report = "\n".join(f"Attempt {a['attempt']}: {a['error']}" for a in attempts)
                     raise RuntimeError(
-                        f"exec() failed after {self.max_retries} attempts in {ctx.name if ctx else 'unknown'}():\n{error_report}"
+                        f"exec() failed after {self.max_retries} attempts in {parent_ctx.name if parent_ctx else 'unknown'}():\n{error_report}"
                     ) from e
 
     async def async_exec(
@@ -253,55 +225,70 @@ class Runtime:
         response_format: Optional[dict] = None,
         model: Optional[str] = None,
     ) -> str:
-        """Async version of exec(). Calls _async_call() instead of _call()."""
-        ctx = _current_ctx.get(None)
+        """Async version of exec(). Creates exec node, calls _async_call()."""
+        if isinstance(content, str):
+            content = [{"type": "text", "text": content}]
+
+        import time as _time
+        parent_ctx = _current_ctx.get(None)
         use_model = model or self.model
+        content_text = "\n".join(b["text"] for b in content if b.get("type") == "text")
 
-        is_continuation = ctx is not None and ctx.raw_reply is not None
+        # --- Create exec child node ---
+        exec_ctx = None
+        if parent_ctx is not None:
+            exec_ctx = Context(
+                name="_exec",
+                node_type="exec",
+                params={"_content": content_text},
+                parent=parent_ctx,
+                start_time=_time.time(),
+                render="result",
+            )
+            parent_ctx.children.append(exec_ctx)
+            _emit_event("node_created", exec_ctx)
 
-        if context is None and ctx is not None:
+        # --- Context: exec node summarizes itself ---
+        if context is None and exec_ctx is not None:
             if self.has_session:
-                if ctx.prompt:
-                    context = ctx.prompt
+                if parent_ctx.prompt and parent_ctx.name not in self._prompted_functions:
+                    context = parent_ctx.prompt
+                    self._prompted_functions.add(parent_ctx.name)
             else:
-                if ctx._summarize_kwargs:
-                    context = ctx.summarize(**ctx._summarize_kwargs)
-                else:
-                    context = ctx.summarize()
+                kwargs = dict(parent_ctx._summarize_kwargs) if parent_ctx._summarize_kwargs else {}
+                kwargs["prompted_functions"] = self._prompted_functions
+                context = exec_ctx.summarize(**kwargs)
 
-        # Append previous exchanges for continuation
-        if is_continuation and ctx is not None and ctx.exchanges and context:
-            for ex in ctx.exchanges:
-                context += (
-                    "\n→ Task:\n" + ex["content"]
-                    + "\n← Reply:\n" + ex["reply"]
-                )
+        # --- Merge content into context ---
+        full_content = _merge_content(context, content, exec_ctx)
 
-        full_content = []
-        if context:
-            full_content.append({"type": "text", "text": context})
-        full_content.extend(content)
-
-        attempts = ctx.attempts if ctx is not None else []
+        # --- Call the LLM (with retry) ---
+        attempts = exec_ctx.attempts if exec_ctx is not None else []
         for attempt in range(self.max_retries):
             try:
                 reply = await self._async_call(full_content, model=use_model, response_format=response_format)
                 attempts.append({"attempt": attempt + 1, "reply": reply, "error": None})
-                if ctx is not None:
-                    content_text = "\n".join(
-                        b["text"] for b in content if b.get("type") == "text"
-                    )
-                    ctx.exchanges.append({"content": content_text, "reply": reply})
-                    ctx.raw_reply = reply
+                if exec_ctx is not None:
+                    exec_ctx.raw_reply = reply
+                    exec_ctx.output = reply
+                    exec_ctx.status = "success"
+                    exec_ctx.end_time = _time.time()
+                    _emit_event("node_completed", exec_ctx)
+                    parent_ctx.raw_reply = reply
                 return reply
             except (TypeError, NotImplementedError):
                 raise
             except Exception as e:
                 attempts.append({"attempt": attempt + 1, "reply": None, "error": f"{type(e).__name__}: {e}"})
                 if attempt == self.max_retries - 1:
+                    if exec_ctx is not None:
+                        exec_ctx.error = str(e)
+                        exec_ctx.status = "error"
+                        exec_ctx.end_time = _time.time()
+                        _emit_event("node_completed", exec_ctx)
                     error_report = "\n".join(f"Attempt {a['attempt']}: {a['error']}" for a in attempts)
                     raise RuntimeError(
-                        f"async_exec() failed after {self.max_retries} attempts in {ctx.name if ctx else 'unknown'}():\n{error_report}"
+                        f"async_exec() failed after {self.max_retries} attempts in {parent_ctx.name if parent_ctx else 'unknown'}():\n{error_report}"
                     ) from e
 
     def _call(self, content: list[dict], model: str = "default", response_format: dict = None) -> str:
@@ -350,3 +337,51 @@ class Runtime:
             "No async LLM provider configured. Either pass an async `call` to Runtime(), "
             "or subclass Runtime and override _async_call()."
         )
+
+
+# ---------------------------------------------------------------------------
+# Module-level helpers
+# ---------------------------------------------------------------------------
+
+def _merge_content(
+    context: Optional[str],
+    content: list[dict],
+    ctx: Optional["Context"],
+) -> list[dict]:
+    """Merge text content blocks into the context string.
+
+    Text blocks are indented and placed under a "→ Current Task:" marker.
+    Non-text blocks (images, audio, files) stay as separate content blocks.
+    """
+    full_content = []
+    if context and ctx is not None:
+        # Calculate indent relative to outermost ancestor
+        base = ctx._depth()
+        node = ctx.parent
+        while node and node.name:
+            base = node._depth()
+            node = node.parent
+        exec_indent = "    " * (ctx._depth() - base + 1)
+
+        text_parts = []
+        for block in content:
+            if block.get("type") == "text":
+                indented = "\n".join(
+                    exec_indent + line if line.strip() else ""
+                    for line in block["text"].splitlines()
+                )
+                text_parts.append(indented)
+            else:
+                full_content.append(block)
+
+        if text_parts:
+            merged = context + "\n" + exec_indent + "→ Current Task:\n" + "\n".join(text_parts)
+        else:
+            merged = context
+        full_content.insert(0, {"type": "text", "text": merged})
+    elif context:
+        full_content.append({"type": "text", "text": context})
+        full_content.extend(content)
+    else:
+        full_content.extend(content)
+    return full_content

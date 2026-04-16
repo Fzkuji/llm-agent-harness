@@ -299,29 +299,33 @@ def run_with_follow_up(func, *args, **kwargs):
 @dataclass
 class Context:
     """
-    One execution record = one function call.
+    One node in the execution tree.
+
+    Two node types:
+      - "function" — created by @agentic_function, represents a function call
+      - "exec"     — created by runtime.exec(), represents a single LLM call
 
     Users never create or modify Context objects directly.
-    @agentic_function creates them automatically, and runtime.exec()
-    fills in the LLM-related fields.
+    @agentic_function creates function nodes, runtime.exec() creates exec nodes.
 
     Fields are grouped by who sets them:
 
-    Set by @agentic_function (on entry):
+    Set by @agentic_function (on entry, function nodes):
         name, prompt, params, parent, children, render, compress,
         start_time, _summarize_kwargs
 
-    Set by @agentic_function (on exit):
+    Set by @agentic_function (on exit, function nodes):
         output OR error, status, end_time
 
-    Set by runtime.exec() (during execution):
-        raw_reply
+    Set by runtime.exec() (exec nodes):
+        name="_exec", node_type="exec", raw_reply, output, status
     """
 
     # --- Identity & input ---
-    name: str = ""              # Function name (from fn.__name__)
+    name: str = ""              # Function name (from fn.__name__), or "_exec" for exec nodes
     prompt: str = ""            # Docstring (from fn.__doc__) — doubles as LLM prompt
     params: dict = field(default_factory=dict)  # Call arguments
+    node_type: str = "function" # "function" or "exec"
 
     # --- Execution result ---
     output: Any = None          # Return value (set on success)
@@ -369,13 +373,10 @@ class Context:
     # affects how summarize() renders this node. tree() and save() always
     # show the complete structure.
 
-    # --- LLM call record (set by runtime.exec()) ---
-    raw_reply: str = None            # Latest LLM response text (None = not called yet)
-    exchanges: list = field(default_factory=list)
-    # All exec() round-trips within this function:
-    # [{"content": "text sent to LLM", "reply": "LLM response"}, ...]
-    # Allows multiple exec() calls per function. raw_reply always points
-    # to the latest reply for backward compatibility.
+    # --- LLM call record ---
+    raw_reply: str = None            # LLM response text. For function nodes: latest
+                                     # child exec's reply (backward compat). For exec
+                                     # nodes: the reply from this LLM call.
     attempts: list = field(default_factory=list)
     # Each exec() attempt is recorded here, whether it succeeds or fails:
     # {"attempt": 1, "reply": "LLM response" or None, "error": "error msg" or None}
@@ -601,6 +602,10 @@ class Context:
                     break
             if ancestors:
                 base_depth = ancestors[-1]._depth()
+
+            # Build set of nodes on the direct ancestor path (for sibling rendering)
+            ancestor_set = set(id(a) for a in ancestors)
+
             for a in reversed(ancestors):
                 if not _node_allowed(a, include, exclude):
                     continue
@@ -608,9 +613,30 @@ class Context:
                 if a.name in prompted_functions:
                     ancestor_level = "result"
                 else:
-                    prompted_functions.add(a.name)
+                    # Exec nodes don't mark their direct parent as prompted,
+                    # because each exec is an independent LLM call that needs
+                    # to see the parent function's docstring.
+                    if not (self.node_type == "exec" and a is self.parent):
+                        prompted_functions.add(a.name)
                 indent = "    " * (a._depth() - base_depth)
                 lines.append(a._render_traceback(indent, ancestor_level))
+
+                # For exec nodes: render ancestor's completed children that
+                # come before the next node in the ancestor chain. This gives
+                # exec nodes visibility into the broader sibling context
+                # (e.g., step_a's results when inside step_b's exec node).
+                if self.node_type == "exec":
+                    child_indent = "    " * (a._depth() - base_depth + 1)
+                    for child in a.children:
+                        if id(child) in ancestor_set or child is self:
+                            break  # stop before the next ancestor in the chain
+                        if child.status == "running":
+                            continue
+                        if not _node_allowed(child, include, exclude):
+                            continue
+                        child_level = level or child.render
+                        if child_level != "silent":
+                            lines.append(child._render_traceback(child_indent, child_level))
 
         # --- Siblings: previous same-level nodes ---
         if self.parent:
@@ -682,6 +708,21 @@ class Context:
         if level == "silent":
             return ""
 
+        # --- Exec nodes: compact → content / ← reply format ---
+        if self.node_type == "exec":
+            content = self.params.get("_content", "")
+            reply = self.raw_reply or ""
+            if level == "result":
+                return f"{indent}→ {content[:200]}\n{indent}← {reply[:300]}"
+            # summary / detail: show more
+            lines = [f"{indent}→ {content[:500]}"]
+            if reply:
+                lines.append(f"{indent}← {reply[:500]}")
+            if self.error:
+                lines.append(f"{indent}  Error: {self.error}")
+            return "\n".join(lines)
+
+        # --- Function nodes: standard rendering ---
         dur = f", {self.duration_ms:.0f}ms" if self.end_time else ""
         lines = [f"{indent}- {self._call_path()}({_fmt_params(self.params)})"]
 
@@ -699,8 +740,11 @@ class Context:
         if self.error:
             lines.append(f"{indent}    Error: {self.error}")
 
-        # Show failed attempts if any
+        # Show failed attempts (own + exec children's)
         failed_attempts = [a for a in self.attempts if a.get("error")]
+        for child in self.children:
+            if child.node_type == "exec":
+                failed_attempts.extend(a for a in child.attempts if a.get("error"))
         if failed_attempts:
             for a in failed_attempts:
                 lines.append(f"{indent}    [Attempt {a['attempt']} FAILED] {a['error']}")
@@ -710,12 +754,7 @@ class Context:
         lines.append(f"{indent}    Status: {self.status}{dur}")
 
         # detail adds LLM interaction
-        if level == "detail" and self.exchanges:
-            for i, ex in enumerate(self.exchanges):
-                if len(self.exchanges) > 1:
-                    lines.append(f"{indent}    [exec {i + 1}] → {ex['content'][:200]}")
-                lines.append(f"{indent}    LLM reply: {ex['reply'][:500]}")
-        elif level == "detail" and self.raw_reply is not None:
+        if level == "detail" and self.raw_reply is not None:
             lines.append(f"{indent}    LLM reply: {self.raw_reply[:500]}")
 
         return "\n".join(lines)
@@ -909,13 +948,13 @@ class Context:
         return {
             "path": self.path,
             "name": self.name,
+            "node_type": self.node_type,
             "prompt": self.prompt,
             "params": {k: (getattr(v, '__name__', None) or str(v)) if callable(v) else v
                        for k, v in (self.params or {}).items()
                        if k not in ("runtime", "callback")} if self.params else {},
             "output": self.output,
             "raw_reply": self.raw_reply,
-            "exchanges": self.exchanges,
             "attempts": self.attempts,
             "error": self.error,
             "status": self.status,
@@ -939,10 +978,10 @@ class Context:
             render=data.get("render", "summary"),
             compress=data.get("compress", False),
             start_time=data.get("start_time"),
+            node_type=data.get("node_type", "function"),
         )
         ctx.output = data.get("output")
         ctx.raw_reply = data.get("raw_reply")
-        ctx.exchanges = data.get("exchanges", [])
         ctx.attempts = data.get("attempts", [])
         ctx.error = data.get("error")
         ctx.status = data.get("status", "running")

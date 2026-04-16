@@ -19,11 +19,13 @@ def test_successful_exec_records_attempt():
         return runtime.exec(content=[{"type": "text", "text": "test"}])
 
     func()
-    ctx = func.context
-    assert len(ctx.attempts) == 1
-    assert ctx.attempts[0]["attempt"] == 1
-    assert ctx.attempts[0]["reply"] == "ok"
-    assert ctx.attempts[0]["error"] is None
+    # Attempts are on the exec child node
+    exec_node = func.context.children[0]
+    assert exec_node.node_type == "exec"
+    assert len(exec_node.attempts) == 1
+    assert exec_node.attempts[0]["attempt"] == 1
+    assert exec_node.attempts[0]["reply"] == "ok"
+    assert exec_node.attempts[0]["error"] is None
 
 
 def test_retry_records_all_attempts():
@@ -43,13 +45,13 @@ def test_retry_records_all_attempts():
         return runtime.exec(content=[{"type": "text", "text": "test"}])
 
     result = func()
-    ctx = func.context
     assert result == "recovered"
-    assert len(ctx.attempts) == 2
-    assert ctx.attempts[0]["error"] is not None
-    assert "timeout" in ctx.attempts[0]["error"]
-    assert ctx.attempts[1]["reply"] == "recovered"
-    assert ctx.attempts[1]["error"] is None
+    exec_node = func.context.children[0]
+    assert len(exec_node.attempts) == 2
+    assert exec_node.attempts[0]["error"] is not None
+    assert "timeout" in exec_node.attempts[0]["error"]
+    assert exec_node.attempts[1]["reply"] == "recovered"
+    assert exec_node.attempts[1]["error"] is None
 
 
 def test_all_retries_failed_records_all_attempts():
@@ -66,9 +68,10 @@ def test_all_retries_failed_records_all_attempts():
     with pytest.raises(RuntimeError, match="failed after 3 attempts"):
         func()
 
-    ctx = func.context
-    assert len(ctx.attempts) == 3
-    for a in ctx.attempts:
+    # Exec node records all attempts even on failure
+    exec_node = func.context.children[0]
+    assert len(exec_node.attempts) == 3
+    for a in exec_node.attempts:
         assert a["error"] is not None
         assert a["reply"] is None
 
@@ -134,9 +137,12 @@ def test_attempts_in_save(tmp_path):
     path = str(tmp_path / "test.jsonl")
     func.context.save(path)
 
-    data = json.loads(Path(path).read_text().strip().split("\n")[0])
-    assert "attempts" in data
-    assert len(data["attempts"]) == 2
+    records = [json.loads(line) for line in Path(path).read_text().strip().split("\n")]
+    # Find the exec node record (has node_type="exec")
+    exec_records = [r for r in records if r.get("node_type") == "exec"]
+    assert len(exec_records) == 1
+    assert "attempts" in exec_records[0]
+    assert len(exec_records[0]["attempts"]) == 2
 
 
 # ── fix() with new API ────────────────────────────────────────

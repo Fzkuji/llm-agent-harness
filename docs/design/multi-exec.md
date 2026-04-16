@@ -8,15 +8,34 @@
 2. `exec()` 承担了上下文构建的职责（不该是它的事）
 3. 树结构没有真实反映执行过程
 
-## 设计方向
+## 核心设计
 
-**两种节点**：
-- **函数节点**：`@agentic_function` 创建，代表一个函数调用
-- **LLM 调用节点**：`exec()` 创建，代表一次 LLM 交互
+### 两种节点
 
-**职责分离**：
-- `exec()` 只管 LLM 的输入输出（创建 exec 节点、调 `_call()`、记录结果）
-- 上下文结构（preamble 冻结、历史渲染）由函数节点（`Context`）自己管理
+- **函数节点**：`@agentic_function` 创建，代表一个函数调用。docstring 在函数**被调用时**进入树。
+- **LLM 调用节点**：`exec()` 创建，代表一次 LLM 交互。是函数节点的子节点。
+
+### 两个时刻的解耦
+
+| 时刻 | 发生什么 | 谁负责 |
+|------|---------|--------|
+| 函数被调用 | docstring 进入上下文树 | `@agentic_function` 创建函数节点 |
+| exec() 被调用 | 从树上读取内容，发给 LLM | exec 节点调 `summarize()` |
+
+**上下文管理**（信息何时进入树）和 **LLM 输入构建**（信息何时发给 LLM）是分离的。
+树是"上下文管理器"，`summarize()` 是"LLM 输入构建器"。
+
+### 统一流程：每次 exec 都一样
+
+```python
+# 不区分首次/后续。每次 exec 完全相同的流程：
+exec_ctx = Context(name="_exec", node_type="exec", parent=parent_ctx, ...)
+parent_ctx.children.append(exec_ctx)
+context = exec_ctx.summarize(...)   # 从树上读，统一逻辑
+reply = self._call(...)             # 调 LLM
+```
+
+不需要 `_frozen_preamble`，不需要 `is_continuation`，不需要 `build_exec_context()`。
 
 ## 树结构示例
 
@@ -33,103 +52,85 @@ summary:  my_func(file="x.py") → "修复完成"
 detail:   展开显示所有子节点（exec + helper）
 ```
 
-## 上下文模型
+## 每次 exec 的 LLM 输入
 
-上下文是一个**只增不减的文档**，从函数开始运行起就存在。
+exec 节点调 `summarize()`，自然看到祖先 + 兄弟。每次 exec 逻辑完全一样。
 
-### 三个规则
-
-1. **Preamble 冻结**：树上下文（祖先 + 兄弟）+ docstring 在第一次 exec 时计算，之后不再重新计算。
-2. **文档只增不减**：每次 exec 追加一个 LLM 节点。子函数调用也作为节点出现。上下文单调增长。
-3. **外部视角不变**：多次 exec 的函数完成后，对兄弟节点的呈现与单次 exec 完全一致。
-
-### 第 1 次 exec 的 LLM 输入
+### 第 1 次 exec
 
 ```
 [祖先链]
-    my_func(file="x.py")              ← 父函数（祖先）
-        """my_func 的 docstring"""
+    my_func(file="x.py")              ← 父函数是祖先
+        """my_func 的 docstring"""     ← docstring 在函数被调用时就进了树
     [无兄弟]
-    _exec()  <-- Current Call          ← 当前 LLM 节点
+    _exec()  <-- Current Call
 → Current Task:
     分析这个文件
 ```
 
-### 第 2 次 exec 的 LLM 输入（中间调了 helper）
+### 第 2 次 exec（中间调了 helper）
 
 ```
 [祖先链]
-    my_func(file="x.py")              ← 父函数（祖先，preamble 冻结）
-        """my_func 的 docstring"""     ← 包含在冻结的 preamble 中
-    → 分析这个文件                      ← 第1次 exec 作为兄弟
-    ← 文件有 3 个 bug...
+    my_func(file="x.py")              ← 同一个父函数
+        """my_func 的 docstring"""     ← 同样的 docstring（见下方 _prompted_functions 修复）
+    _exec()                            ← 第1次 exec 作为兄弟
+        → 分析这个文件
+        ← 文件有 3 个 bug...
     helper(data=...) → {valid: true}   ← 子函数作为兄弟
-    _exec()  <-- Current Call          ← 当前 LLM 节点
+    _exec()  <-- Current Call
 → Current Task:
     根据分析结果修复
 ```
 
-### Docstring 处理
+第 1 次和第 N 次的逻辑完全一样：创建 exec 节点 → summarize() → 调 LLM。
+上下文**只增不减**（每次 exec 多一个兄弟），prompt cache 自然命中前缀。
 
-上下文模型中，docstring 属于父函数节点，在 summarize 的祖先链中渲染。
-概念上它只出现一次（在 preamble 中）。
+### _prompted_functions 修复
 
-实现上：
-- **API（无状态）**：每次 exec 都发送完整 preamble（含 docstring），通过 prompt cache 命中前缀
-- **Session/Client（有状态）**：preamble 在 session 中已有，只发新内容
+当前问题：exec_0 的 summarize() 把父函数加入 `_prompted_functions`，导致 exec_1 看不到父函数的 docstring。
+但每次 exec 是**独立的 LLM 调用**（无状态 API），LLM 不会"记住"之前的 docstring。
+
+**修复**：exec 节点的 summarize 不把直接父函数加入 `_prompted_functions`。
+
+```python
+# summarize() 中渲染祖先时
+for a in reversed(ancestors):
+    if a.name in prompted_functions:
+        ancestor_level = "result"
+    else:
+        # 只有非直接父节点才加入 prompted_functions
+        if a is not self.parent:
+            prompted_functions.add(a.name)
+```
+
+这样：
+- exec_0 看到父函数 docstring ✓，但不把父函数标记为"已发送"
+- exec_1 也看到父函数 docstring ✓
+- 其他不相关的函数仍受 `_prompted_functions` 优化影响
+
+### API vs Session
+
+| | API（无状态） | Session/Client（有状态） |
+|---|---|---|
+| 上下文管理 | 相同（树结构） | 相同 |
+| LLM 输入 | summarize() 完整输出 | 只发增量（session 记住历史） |
+
+上下文模型是同一个，不同 provider 读取方式不同。
 
 ## 实现方案
 
-### 1. Context 新增字段和方法
+### 1. Context 新增
 
 ```python
 @dataclass
 class Context:
-    # 新增
     node_type: str = "function"
-    # "function" — @agentic_function 创建的函数节点
-    # "exec"     — runtime.exec() 创建的 LLM 调用节点
-
-    _frozen_preamble: Optional[str] = field(default=None, repr=False)
-    # 冻结的 preamble。首次 exec 时计算并缓存。
-    # 不序列化 — 运行时缓存。
-
-    def build_exec_context(self, runtime: "Runtime") -> Optional[str]:
-        """为下一次 exec 构建上下文。由函数节点调用。
-
-        首次调用：计算 preamble（通过 summarize）并冻结。
-        后续调用：冻结 preamble + 渲染已完成的子节点（exec + 函数）。
-        """
-        if runtime.has_session:
-            if self._frozen_preamble is None:
-                self._frozen_preamble = self.prompt or None
-            return self._frozen_preamble
-
-        if self._frozen_preamble is None:
-            # 首次 exec：计算并冻结
-            kwargs = dict(self._summarize_kwargs) if self._summarize_kwargs else {}
-            kwargs["prompted_functions"] = runtime._prompted_functions
-            self._frozen_preamble = self.summarize(**kwargs)
-            if self.name:
-                runtime._prompted_functions.add(self.name)
-            return self._frozen_preamble
-
-        # 后续 exec：frozen preamble + 已完成的子节点
-        parts = [self._frozen_preamble]
-        indent = "    " * max(self._depth() + 1 - self._base_depth(), 1)
-        for child in self.children:
-            if child.status == "running":
-                break  # 当前正在运行的 exec 节点，不渲染
-            if child.node_type == "exec":
-                parts.append(
-                    indent + "→ " + (child.params.get("_content", "")[:300])
-                    + "\n" + indent + "← " + (child.raw_reply or "")[:500]
-                )
-            else:
-                # 子函数节点，用常规渲染
-                parts.append(child._render_traceback(indent, child.render))
-        return "\n".join(parts)
+    # "function" — @agentic_function 创建
+    # "exec"     — runtime.exec() 创建
 ```
+
+不需要 `_frozen_preamble`、`build_exec_context()`、`exchanges`。
 
 ### 2. runtime.exec() 精简
 
@@ -144,7 +145,7 @@ def exec(self, content, context=None, response_format=None, model=None):
     use_model = model or self.model
     content_text = "\n".join(b["text"] for b in content if b.get("type") == "text")
 
-    # --- 创建 LLM 调用节点 ---
+    # --- 创建 exec 子节点 ---
     exec_ctx = None
     if parent_ctx is not None:
         exec_ctx = Context(
@@ -158,14 +159,16 @@ def exec(self, content, context=None, response_format=None, model=None):
         parent_ctx.children.append(exec_ctx)
         _emit_event("node_created", exec_ctx)
 
-    # --- 上下文：由父函数构建 ---
-    if context is None and parent_ctx is not None:
-        context = parent_ctx.build_exec_context(self)
+    # --- 上下文：exec 节点自己 summarize ---
+    if context is None and exec_ctx is not None:
+        kwargs = dict(parent_ctx._summarize_kwargs) if parent_ctx._summarize_kwargs else {}
+        kwargs["prompted_functions"] = self._prompted_functions
+        context = exec_ctx.summarize(**kwargs)
 
-    # --- 合并 content 到 context ---
-    full_content = _merge_content(context, content, parent_ctx)
+    # --- 合并 content ---
+    full_content = _merge_content(context, content, exec_ctx)
 
-    # --- 调 LLM（带重试）---
+    # --- 调 LLM ---
     attempts = exec_ctx.attempts if exec_ctx is not None else []
     for attempt in range(self.max_retries):
         try:
@@ -182,31 +185,28 @@ def exec(self, content, context=None, response_format=None, model=None):
         except (TypeError, NotImplementedError):
             raise
         except Exception as e:
-            attempts.append(...)
+            attempts.append({"attempt": attempt + 1, "reply": None, "error": str(e)})
             if attempt == self.max_retries - 1:
                 if exec_ctx is not None:
                     exec_ctx.error = str(e)
                     exec_ctx.status = "error"
                     exec_ctx.end_time = time.time()
                     _emit_event("node_completed", exec_ctx)
-                raise ...
+                raise
 ```
 
-**关键设计**：
-- `exec()` **不修改 `_current_ctx`**。函数节点始终是当前上下文。
-- exec 节点是函数节点的子节点，和子函数调用并列。
-- 上下文由父函数的 `build_exec_context()` 构建。
-- `exec()` 只管 LLM 调用和 exec 节点的生命周期。
+**关键**：
+- exec() 不修改 `_current_ctx`（函数节点始终是当前上下文）
+- exec 节点自己调 summarize()（和其他节点一样，统一逻辑）
+- 不区分首次/后续
 
 ### 3. _merge_content 提取
 
-从 exec() 中提取 content 合并逻辑（缩进、"→ Current Task:" 标记）为模块级函数。
-去掉 `ctx.parent` 守卫，让顶层函数也能正确合并。
+从 exec() 提取为模块级函数。去掉 `ctx.parent` 守卫。
 
-### 4. 清理 exchanges 字段
+### 4. summarize() 修复 _prompted_functions
 
-`exchanges` 列表不再需要 — 信息已在树的 exec 子节点中。
-保留 `raw_reply` 指向最后一个 exec 节点的 reply（向后兼容）。
+exec 节点渲染祖先时，不把直接父函数标记为"已发送"。
 
 ### 5. _render_traceback 更新
 
@@ -214,39 +214,33 @@ exec 节点的渲染：
 ```python
 if self.node_type == "exec":
     content_preview = self.params.get("_content", "")[:200]
-    if level == "result":
-        return f"{indent}→ {content_preview}\n{indent}← {(self.raw_reply or '')[:300]}"
-    # detail: 更完整
-    return f"{indent}→ {content_preview}\n{indent}← {(self.raw_reply or '')[:500]}"
+    reply_preview = (self.raw_reply or "")[:500]
+    return f"{indent}→ {content_preview}\n{indent}← {reply_preview}"
 ```
 
-### 6. _to_dict / from_dict
+### 6. 清理
 
-添加 `node_type` 字段的序列化。
+- 移除 `exchanges` 字段（信息在 exec 子节点中）
+- 移除 `is_continuation` / `_frozen_preamble` 相关代码
+- 保留 `raw_reply` 指向最后一个 exec 的 reply（向后兼容）
 
-## API vs Session 实现差异
+### 7. _to_dict / from_dict
 
-| | API（无状态） | Session/Client |
-|---|---|---|
-| Preamble | 每次 exec 完整发送（冻结缓存 + prompt cache） | 首次发送，session 记住 |
-| 之前的 exec 结果 | 通过 build_exec_context 渲染子节点 | session 已有 |
-| 当前 Task | 合并到 context 末尾 | 只发新内容 |
+添加 `node_type` 序列化。
 
 ## 需要修改的文件
 
-1. **`agentic/context.py`** — node_type, _frozen_preamble, build_exec_context(), _render_traceback(), 序列化
-2. **`agentic/runtime.py`** — exec() 创建 exec 节点 + 调 build_exec_context, async_exec() 同步, _merge_content 提取
-3. **`agentic/visualize/static/js/ui.js`** — exec 节点的视觉区分
-4. **`tests/test_runtime.py`** — 多次 exec 测试, frozen preamble 测试
-5. **`tests/test_async.py`** — 异步版本
+1. **`agentic/context.py`** — 添加 node_type, 修改 summarize() 的 _prompted_functions 逻辑, 更新 _render_traceback, 序列化, 移除 exchanges/_frozen_preamble
+2. **`agentic/runtime.py`** — exec() 创建 exec 节点 + 用 summarize(), async_exec() 同步, 提取 _merge_content
+3. **`agentic/visualize/static/js/ui.js`** — exec 节点视觉区分
+4. **`tests/test_runtime.py`** — 多次 exec 测试
+5. **`tests/test_async.py`** — 异步多次 exec 测试
 
 ## 验证
 
 ```bash
-# 全部测试通过
 pytest tests/ -v
 
-# 手动验证树结构
 python -c "
 from agentic import agentic_function, Runtime
 rt = Runtime(call=lambda c, **kw: 'ok')
@@ -259,7 +253,6 @@ def demo():
 
 demo()
 print(demo.context.tree())
-# 应显示：
 # demo
 # ├── _exec → ok
 # └── _exec → ok
@@ -268,8 +261,7 @@ print(demo.context.tree())
 
 ## 待讨论
 
-- [ ] exec 节点是否需要自己的 docstring？（目前设计为空）
-- [ ] build_exec_context 中子节点渲染的截断策略（content 300 chars, reply 500 chars 够吗？）
-- [ ] 已有的 `exchanges` 字段是否完全移除，还是保留作为兼容层？
-- [ ] 可视化器中 exec 节点的样式（不同颜色/图标？）
-- [ ] ask_user() 是否也应该创建一个专门的节点？
+- [ ] exec 节点的 render 默认值（"result"? 自定义？）
+- [ ] 子节点渲染的截断策略
+- [ ] 可视化器中 exec 节点的样式
+- [ ] ask_user() 是否也创建节点

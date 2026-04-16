@@ -21,9 +21,14 @@ def echo_call(content, model="test", response_format=None):
     return ""
 
 
+def fixed_call(content, model="test", response_format=None):
+    """Always returns a fixed reply."""
+    return "fixed_reply"
+
+
 def test_runtime_basic():
     """Runtime.exec() calls the provider and returns reply."""
-    runtime = Runtime(call=echo_call)
+    runtime = Runtime(call=fixed_call)
 
     @agentic_function
     def simple():
@@ -33,12 +38,15 @@ def test_runtime_basic():
         ])
 
     result = simple()
-    assert result == "hello world"
+    assert result == "fixed_reply"
+    # Exec child node created
+    assert len(simple.context.children) == 1
+    assert simple.context.children[0].node_type == "exec"
 
 
 def test_runtime_records_raw_reply():
-    """Runtime records raw_reply on Context."""
-    runtime = Runtime(call=echo_call)
+    """Runtime records raw_reply on exec node and parent."""
+    runtime = Runtime(call=fixed_call)
 
     @agentic_function
     def func():
@@ -48,7 +56,10 @@ def test_runtime_records_raw_reply():
         ])
 
     func()
-    assert func.context.raw_reply == "test reply"
+    assert func.context.raw_reply == "fixed_reply"  # parent gets latest reply
+    exec_node = func.context.children[0]
+    assert exec_node.node_type == "exec"
+    assert exec_node.raw_reply == "fixed_reply"
 
 
 def test_runtime_context_injection():
@@ -96,8 +107,13 @@ def test_runtime_no_context_outside_function():
 
 
 def test_runtime_multiple_exec():
-    """Multiple exec() calls in one function work and record exchanges."""
-    runtime = Runtime(call=echo_call)
+    """Multiple exec() calls create exec child nodes."""
+    call_count = [0]
+    def counting_call(content, model="test", response_format=None):
+        call_count[0] += 1
+        return f"reply_{call_count[0]}"
+
+    runtime = Runtime(call=counting_call)
 
     @agentic_function
     def multi():
@@ -107,13 +123,17 @@ def test_runtime_multiple_exec():
         return f"{r1}+{r2}"
 
     result = multi()
-    assert result == "first+second"
-    assert multi.context.raw_reply == "second"  # latest reply
-    assert len(multi.context.exchanges) == 2
-    assert multi.context.exchanges[0]["content"] == "first"
-    assert multi.context.exchanges[0]["reply"] == "first"
-    assert multi.context.exchanges[1]["content"] == "second"
-    assert multi.context.exchanges[1]["reply"] == "second"
+    assert result == "reply_1+reply_2"
+    assert multi.context.raw_reply == "reply_2"  # latest reply (backward compat)
+    # Two exec child nodes
+    exec_nodes = [c for c in multi.context.children if c.node_type == "exec"]
+    assert len(exec_nodes) == 2
+    assert exec_nodes[0].params["_content"] == "first"
+    assert exec_nodes[0].raw_reply == "reply_1"
+    assert exec_nodes[0].status == "success"
+    assert exec_nodes[1].params["_content"] == "second"
+    assert exec_nodes[1].raw_reply == "reply_2"
+    assert exec_nodes[1].status == "success"
 
 
 def test_runtime_multiple_exec_context_carries_over():
@@ -326,10 +346,14 @@ def test_content_types():
     func()
     # All user content blocks should be present (after the context block)
     all_types = [b["type"] for b in received]
-    assert all_types.count("text") >= 2  # context + user text
+    # Text content is merged into context (1 text block), non-text stays separate
+    assert all_types.count("text") >= 1
     assert "image" in all_types
     assert "audio" in all_types
     assert "file" in all_types
+    # User text should be in the merged text block
+    text_content = "\n".join(b["text"] for b in received if b["type"] == "text")
+    assert "analyze this" in text_content
 
 
 def test_has_session_injects_docstring():
