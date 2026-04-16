@@ -304,3 +304,48 @@ class TestAnthropicRuntime:
         assert len(content) == 1
         assert content[0]["type"] == "text"
 
+    def test_usage_is_normalized(self):
+        """Usage metadata keeps a consistent shape across providers."""
+        usage = MagicMock()
+        usage.input_tokens = 80
+        usage.output_tokens = 30
+        usage.cache_read_input_tokens = 20
+        usage.cache_creation_input_tokens = 10
+        response = self.mock_client.messages.create.return_value
+        response.usage = usage
+
+        rt = self._make_runtime()
+        rt._call([{"type": "text", "text": "hello"}])
+
+        assert rt.last_usage == {
+            "input_tokens": 80 + 20 + 10,
+            "output_tokens": 30,
+            "cache_read": 20,
+            "cache_create": 10,
+        }
+
+    def test_list_models_api_call(self):
+        """list_models() calls the API and returns model IDs."""
+        mock_model_1 = MagicMock()
+        mock_model_1.id = "claude-sonnet-4-20250514"
+        mock_model_2 = MagicMock()
+        mock_model_2.id = "claude-haiku-4-5-20251001"
+        mock_response = MagicMock()
+        mock_response.data = [mock_model_1, mock_model_2]
+        self.mock_client.models.list.return_value = mock_response
+
+        rt = self._make_runtime()
+        models = rt.list_models()
+        assert "claude-sonnet-4-20250514" in models
+        assert "claude-haiku-4-5-20251001" in models
+        assert models == sorted(models)
+
+    def test_list_models_fallback_on_error(self):
+        """list_models() returns hardcoded fallback on API error."""
+        self.mock_client.models.list.side_effect = Exception("network error")
+
+        rt = self._make_runtime()
+        models = rt.list_models()
+        assert len(models) > 0
+        assert any("claude" in m for m in models)
+

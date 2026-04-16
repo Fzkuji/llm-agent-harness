@@ -248,4 +248,30 @@ class TestOpenAIRuntime:
             "cache_create": 0,
         }
 
+    def test_list_models_api_call(self):
+        """list_models() calls the API and returns GPT/o-series model IDs."""
+        mock_models = []
+        for name in ["gpt-4o", "gpt-4o-mini", "o4-mini", "dall-e-3", "whisper-1"]:
+            m = MagicMock()
+            m.id = name
+            mock_models.append(m)
+        self.mock_client.models.list.return_value = mock_models
+
+        rt = self._make_runtime()
+        models = rt.list_models()
+        assert "gpt-4o" in models
+        assert "o4-mini" in models
+        # Non-chat models should be filtered out
+        assert "dall-e-3" not in models
+        assert "whisper-1" not in models
+
+    def test_list_models_fallback_on_error(self):
+        """list_models() returns hardcoded fallback on API error."""
+        self.mock_client.models.list.side_effect = Exception("network error")
+
+        rt = self._make_runtime()
+        models = rt.list_models()
+        assert len(models) > 0
+        assert any("gpt" in m for m in models)
+
 

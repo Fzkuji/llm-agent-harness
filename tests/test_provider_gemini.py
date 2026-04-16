@@ -234,6 +234,37 @@ class TestGeminiRuntime:
             "cache_create": 0,
         }
 
+    def test_list_models_api_call(self):
+        """list_models() calls the API and returns generateContent-capable models."""
+        mock_model_1 = MagicMock()
+        mock_model_1.name = "models/gemini-2.5-flash"
+        mock_model_1.supported_generation_methods = ["generateContent"]
+        mock_model_2 = MagicMock()
+        mock_model_2.name = "models/gemini-2.5-pro"
+        mock_model_2.supported_generation_methods = ["generateContent"]
+        mock_model_3 = MagicMock()
+        mock_model_3.name = "models/embedding-001"
+        mock_model_3.supported_generation_methods = ["embedContent"]
+        self.mock_client.models.list.return_value = [mock_model_1, mock_model_2, mock_model_3]
+
+        rt = self._make_runtime()
+        models = rt.list_models()
+        assert "gemini-2.5-flash" in models
+        assert "gemini-2.5-pro" in models
+        # Embedding model should be filtered out
+        assert "embedding-001" not in models
+        # models/ prefix should be stripped
+        assert not any(m.startswith("models/") for m in models)
+
+    def test_list_models_fallback_on_error(self):
+        """list_models() returns hardcoded fallback on API error."""
+        self.mock_client.models.list.side_effect = Exception("network error")
+
+        rt = self._make_runtime()
+        models = rt.list_models()
+        assert len(models) > 0
+        assert any("gemini" in m for m in models)
+
 
 # ══════════════════════════════════════════════════════════════
 # Provider lazy import tests
