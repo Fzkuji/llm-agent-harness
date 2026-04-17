@@ -411,73 +411,94 @@ def _make_stub_from_file(func_name: str, filepath: str):
 def _load_function(func_name: str):
     """Load a function by name. Always reloads to pick up file changes.
 
+    Search order:
+      1. meta/  — create/edit/improve/fix/create_app/create_skill
+      2. buildin/, third_party/  — single-file function modules
+      3. programs/applications/*/.../main.py  — app entry points (e.g. gui_agent)
+
     If a module fails to import, falls back to a stub with the source code so
     edit() can still operate on it.
     """
-    meta_names = ["create", "edit", "create_app", "create_skill"]
-    if func_name in meta_names:
-        try:
-            mod = importlib.import_module(f"openprogram.programs.functions.meta.{func_name}")
-            importlib.reload(mod)
-            return getattr(mod, func_name)
-        except (ImportError, AttributeError):
-            pass
-
     from openprogram.agentic_programming.function import auto_trace_module
-    fn_dir = os.path.join(_PKG_BASE, "functions")
-    try:
-        mod = importlib.import_module(f"openprogram.programs.functions.{func_name}")
-        importlib.reload(mod)
-        auto_trace_module(mod, trace_pkg=os.path.abspath(fn_dir))
-        return getattr(mod, func_name)
-    except (ImportError, AttributeError):
-        pass
-    except Exception:
-        mod_file = os.path.join(fn_dir, f"{func_name}.py")
-        if os.path.isfile(mod_file):
-            stub = _make_stub_from_file(func_name, mod_file)
-            if stub is not None:
-                return stub
 
-    if os.path.isdir(fn_dir):
-        for f in sorted(os.listdir(fn_dir)):
-            if f.endswith(".py") and not f.startswith("_"):
-                mod_name = f"openprogram.programs.functions.{f[:-3]}"
-                try:
-                    mod = importlib.import_module(mod_name)
-                    importlib.reload(mod)
-                    auto_trace_module(mod, trace_pkg=os.path.abspath(fn_dir))
-                    fn = getattr(mod, func_name, None)
-                    if fn is not None:
-                        return fn
-                except Exception:
-                    fpath = os.path.join(fn_dir, f)
-                    stub = _make_stub_from_file(func_name, fpath)
-                    if stub is not None:
-                        return stub
+    fn_root = os.path.join(_PKG_BASE, "programs", "functions")
 
-    import importlib.util as _imputil
-    for search_dir in (os.path.join(_PKG_BASE, "functions"),
-                       os.path.join(_PKG_BASE, "apps")):
-        if not os.path.isdir(search_dir):
+    # 1 + 2: meta / buildin / third_party — each is a proper subpackage
+    for subpkg, trace_root in (
+        ("meta", os.path.join(fn_root, "meta")),
+        ("buildin", os.path.join(fn_root, "buildin")),
+        ("third_party", os.path.join(fn_root, "third_party")),
+    ):
+        mod_name = f"openprogram.programs.functions.{subpkg}.{func_name}"
+        try:
+            mod = importlib.import_module(mod_name)
+            importlib.reload(mod)
+            auto_trace_module(mod, trace_pkg=os.path.abspath(trace_root))
+            fn = getattr(mod, func_name, None)
+            if fn is not None:
+                return fn
+        except ImportError:
             continue
-        for d in os.listdir(search_dir):
-            full_path = os.path.join(search_dir, d)
+        except Exception:
+            mod_file = os.path.join(trace_root, f"{func_name}.py")
+            if os.path.isfile(mod_file):
+                stub = _make_stub_from_file(func_name, mod_file)
+                if stub is not None:
+                    return stub
+
+    # 2b: function name may be defined inside a sibling .py (not matching filename)
+    for subpkg in ("buildin", "third_party"):
+        sub_dir = os.path.join(fn_root, subpkg)
+        if not os.path.isdir(sub_dir):
+            continue
+        for f in sorted(os.listdir(sub_dir)):
+            if not (f.endswith(".py") and not f.startswith("_")):
+                continue
+            mod_name = f"openprogram.programs.functions.{subpkg}.{f[:-3]}"
+            try:
+                mod = importlib.import_module(mod_name)
+                importlib.reload(mod)
+                auto_trace_module(mod, trace_pkg=os.path.abspath(sub_dir))
+                fn = getattr(mod, func_name, None)
+                if fn is not None:
+                    return fn
+            except Exception:
+                fpath = os.path.join(sub_dir, f)
+                stub = _make_stub_from_file(func_name, fpath)
+                if stub is not None:
+                    return stub
+
+    # 3: applications — scan for main.py entry points
+    import importlib.util as _imputil
+    apps_dir = os.path.join(_PKG_BASE, "programs", "applications")
+    if os.path.isdir(apps_dir):
+        for d in os.listdir(apps_dir):
+            full_path = os.path.join(apps_dir, d)
             if not os.path.isdir(full_path) or d.startswith(("_", ".")):
                 continue
             for root, dirs, files in os.walk(full_path):
                 dirs[:] = [x for x in dirs
                            if not x.startswith(("_", ".")) and x not in _SKIP_DIRS]
-                if "main.py" in files:
-                    main_py = os.path.join(root, "main.py")
-                    try:
-                        spec = _imputil.spec_from_file_location(f"openprogram.programs.applications.{d}.main", main_py)
-                        mod = _imputil.module_from_spec(spec)
-                        spec.loader.exec_module(mod)
-                        mod = sys.modules.get(mod.__name__, mod)
-                        fn = getattr(mod, func_name, None)
-                        if fn is not None:
-                            return fn
-                    except Exception:
-                        pass
+                if "main.py" not in files:
+                    continue
+                main_py = os.path.join(root, "main.py")
+                # Each harness expects its parent dir on sys.path so that
+                # `from gui_harness.X import ...` or `from research_harness.Y import ...`
+                # resolves. The harness's main.py sits at <app_root>/<pkg>/main.py,
+                # so we add <app_root> (parent of pkg).
+                harness_root = os.path.dirname(os.path.dirname(main_py))
+                if harness_root not in sys.path:
+                    sys.path.insert(0, harness_root)
+                try:
+                    spec = _imputil.spec_from_file_location(
+                        f"openprogram.programs.applications.{d}.main", main_py
+                    )
+                    mod = _imputil.module_from_spec(spec)
+                    spec.loader.exec_module(mod)
+                    mod = sys.modules.get(mod.__name__, mod)
+                    fn = getattr(mod, func_name, None)
+                    if fn is not None:
+                        return fn
+                except Exception:
+                    pass
     return None

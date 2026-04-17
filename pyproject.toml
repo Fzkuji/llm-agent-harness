@@ -53,13 +53,33 @@ visualize = [
     "uvicorn[standard]>=0.29.0",
     "websockets>=12.0",
 ]
+# GUI-Agent-Harness deps (vision + input control).
+# Note: ultralytics pulls in torch (~2GB); opencv-python-headless avoids the
+# system libGL runtime. Add `easyocr` yourself if you need OCR on non-macOS.
+gui = [
+    "opencv-python-headless>=4.8.0",
+    "numpy>=1.24.0",
+    "Pillow>=10.0.0",
+    "pynput>=1.7.0",
+    "ultralytics>=8.3.0",
+    "requests>=2.31.0",
+]
 all = [
+    # LLM providers
     "anthropic>=0.30.0",
     "openai>=1.30.0",
     "google-genai>=1.0.0",
+    # Web UI
     "fastapi>=0.110.0",
     "uvicorn[standard]>=0.29.0",
     "websockets>=12.0",
+    # GUI harness
+    "opencv-python-headless>=4.8.0",
+    "numpy>=1.24.0",
+    "Pillow>=10.0.0",
+    "pynput>=1.7.0",
+    "ultralytics>=8.3.0",
+    "requests>=2.31.0",
 ]
 
 [project.scripts]

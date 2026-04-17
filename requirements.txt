@@ -1,5 +1,32 @@
-# No runtime dependencies — openprogram core is pure Python.
-# Install your LLM provider SDK separately:
-#   pip install anthropic    # for Anthropic
-#   pip install openai       # for OpenAI
-#   pip install google-generativeai  # for Gemini
+# OpenProgram — one-shot install of everything you might need.
+#
+# Recommended: install via extras instead of this file, e.g.
+#     pip install -e ".[all]"            # providers + web UI + GUI harness
+#     pip install -e ".[web,anthropic]"  # minimal: web UI + Anthropic SDK only
+#
+# This file exists for users who prefer a flat requirements list.
+# Keep it in sync with the [project.optional-dependencies] table in pyproject.toml.
+
+# --- LLM providers ---
+anthropic>=0.30.0
+openai>=1.30.0
+google-genai>=1.0.0
+
+# --- Web UI (openprogram.webui) ---
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+websockets>=12.0
+
+# --- GUI-Agent-Harness (vision + input control) ---
+# Note: ultralytics pulls torch (~2GB). If you don't need the GUI agent,
+# comment out this block or use the web-only extras above.
+opencv-python-headless>=4.8.0
+numpy>=1.24.0
+Pillow>=10.0.0
+pynput>=1.7.0
+ultralytics>=8.3.0
+requests>=2.31.0
+
+# --- Optional: OCR for GUI harness on non-macOS platforms ---
+# macOS uses Apple Vision natively and does not need easyocr.
+# easyocr>=1.7.0

@@ -236,6 +236,7 @@ html, body {
   box-sizing: border-box;
 }
 .sidebar-nav-item:hover {
+  background: var(--bg-hover);
   color: var(--text-bright);
 }
 .sidebar-nav-item:active {

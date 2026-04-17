@@ -52,8 +52,12 @@ Then choose how you want to use it:
 Install the package and start coding:
 
 ```bash
-pip install agentic-programming          # core package
-pip install "agentic-programming[openai]" # add API provider (or [anthropic], [gemini])
+pip install openprogram                   # core package (pure Python, no deps)
+pip install "openprogram[all]"            # everything: providers + web UI + GUI harness
+# …or pick what you need:
+pip install "openprogram[openai]"         #   just the OpenAI SDK  (also [anthropic], [gemini])
+pip install "openprogram[web]"            #   just the web UI
+pip install "openprogram[gui]"            #   GUI-Agent-Harness deps (opencv / torch / ultralytics — ~2GB)
 ```
 
 ```python
@@ -77,52 +81,31 @@ print(result)
 ### Option B: Skills — let your LLM agent use it
 
 ```bash
-pip install agentic-programming
-agentic install-skills                    # auto-detects Claude Code / Gemini CLI
+pip install openprogram
+openprogram install-skills                # auto-detects Claude Code / Gemini CLI
 ```
 
 Or manually:
 
 ```bash
-git clone https://github.com/Fzkuji/Agentic-Programming.git
-cp -r Agentic-Programming/skills/* ~/.claude/skills/    # Claude Code
-cp -r Agentic-Programming/skills/* ~/.gemini/skills/    # Gemini CLI
+git clone https://github.com/Fzkuji/OpenProgram.git
+cp -r OpenProgram/skills/* ~/.claude/skills/    # Claude Code
+cp -r OpenProgram/skills/* ~/.gemini/skills/    # Gemini CLI
 ```
 
 Then talk to your agent: *"Create a function that extracts emails from text"*
 
 The agent picks up the skill, calls `openprogram create`, and the generated function handles everything from there.
 
-### Option C: MCP — connect any MCP client
+Verify your setup with `openprogram providers`.
 
-Install with the MCP extra, then add to your client config:
-
-```bash
-pip install "agentic-programming[mcp]"
-```
-
-```json
-{
-    "mcpServers": {
-        "agentic": {
-            "command": "python",
-            "args": ["-m", "openprogram.mcp"]
-        }
-    }
-}
-```
-
-This starts a local MCP server that any compatible client (Claude Desktop, Cursor, VS Code, etc.) can connect to. Exposes: `list_functions`, `run_function`, `create_function`, `create_application`, `fix_function`.
-
-Verify your setup with `agentic providers`.
-
-### Option D: Web UI
+### Option C: Web UI
 
 A browser-based interface for running functions, managing conversations, and viewing execution trees in real time.
 
 ```bash
-pip install "agentic-programming[web]"
-agentic web
+pip install "openprogram[web]"
+openprogram web
 ```
 
 This opens `http://localhost:8765` with a chat interface where you can create, run, and fix functions interactively. Supports light/dark themes (Settings → General).
@@ -150,7 +133,7 @@ runtime = create_runtime(provider="openai", model="gpt-5")
 To inspect what the library can see on your machine:
 
 ```bash
-agentic providers
+openprogram providers
 ```
 
 ### Retry and recovery
