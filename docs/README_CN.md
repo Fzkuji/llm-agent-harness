@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="../docs/images/logo.svg" alt="OpenProgram" width="400">
+  <img src="../docs/images/logo.svg" alt="OpenProgram" width="300">
 </p>
 
 <p align="center">开源 Agent Harness 框架。支持任意 LLM 和平台。Agentic Programming 范式。</p>

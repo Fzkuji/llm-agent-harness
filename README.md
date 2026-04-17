@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/logo.svg" alt="OpenProgram" width="400">
+  <img src="docs/images/logo.svg" alt="OpenProgram" width="300">
 </p>
 
 <p align="center">The Open Source Agent Harness Framework. Any LLM. Any platform. Agentic Programming Paradigm.</p>
