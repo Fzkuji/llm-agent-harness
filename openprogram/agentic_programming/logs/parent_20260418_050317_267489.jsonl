@@ -1,6 +1,0 @@
-{"event": "enter", "path": "parent", "name": "parent", "node_type": "function", "prompt": "Parent.", "params": {}, "render": "summary", "compress": false, "ts": 1776459797.267463}
-{"event": "enter", "path": "parent/step_a_0", "name": "step_a", "node_type": "function", "prompt": "", "params": {}, "render": "summary", "compress": false, "ts": 1776459797.2674692}
-{"event": "exit", "path": "parent/step_a_0", "status": "success", "output": "a", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.003814697265625, "ts": 1776459797.267473}
-{"event": "enter", "path": "parent/step_b_0", "name": "step_b", "node_type": "function", "prompt": "", "params": {}, "render": "summary", "compress": false, "ts": 1776459797.267476}
-{"event": "exit", "path": "parent/step_b_0", "status": "success", "output": "b", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.0019073486328125, "ts": 1776459797.267478}
-{"event": "exit", "path": "parent", "status": "success", "output": "a,b", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.015974044799804688, "ts": 1776459797.267479}

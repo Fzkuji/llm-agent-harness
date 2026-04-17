@@ -1,2 +1,0 @@
-{"event": "enter", "path": "observe", "name": "observe", "node_type": "function", "prompt": "Observe the screen.", "params": {"task": "find button", "detail": false}, "render": "summary", "compress": false, "ts": 1776459627.992573}
-{"event": "exit", "path": "observe", "status": "success", "output": "observed", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.0040531158447265625, "ts": 1776459627.992577}

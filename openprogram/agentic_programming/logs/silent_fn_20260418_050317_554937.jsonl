@@ -1,2 +1,0 @@
-{"event": "enter", "path": "silent_fn", "name": "silent_fn", "node_type": "function", "prompt": "Hidden task.", "params": {}, "render": "silent", "compress": false, "ts": 1776459797.554925}
-{"event": "exit", "path": "silent_fn", "status": "success", "output": "secret", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.0030994415283203125, "ts": 1776459797.554928}

@@ -21,7 +21,9 @@ import traceback
 import uuid
 from typing import Any, Optional
 
-from openprogram.agentic_programming.context import Context, _current_ctx, on_event, off_event, set_ask_user, ask_user
+from openprogram.agentic_programming.context import Context, _current_ctx
+from openprogram.programs.functions.buildin.ask_user import set_ask_user, ask_user
+from openprogram.agentic_programming.events import on_event, off_event
 from openprogram.agentic_programming.function import agentic_function
 from openprogram.agentic_programming.runtime import Runtime
 

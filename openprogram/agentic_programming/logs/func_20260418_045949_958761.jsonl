@@ -1,4 +1,0 @@
-{"event": "enter", "path": "func", "name": "func", "node_type": "function", "prompt": "", "params": {}, "render": "summary", "compress": false, "ts": 1776459589.958721}
-{"event": "enter", "path": "func/_exec_0", "name": "_exec", "node_type": "exec", "prompt": "", "params": {"_content": "test"}, "render": "result", "compress": false, "ts": 1776459589.9587252}
-{"event": "exit", "path": "func/_exec_0", "status": "error", "output": null, "raw_reply": null, "attempts": [{"attempt": 1, "reply": null, "error": "Exception: fail"}, {"attempt": 2, "reply": null, "error": "Exception: fail"}], "error": "fail", "duration_ms": 0.012636184692382812, "ts": 1776459589.9587379}
-{"event": "exit", "path": "func", "status": "error", "output": null, "raw_reply": null, "attempts": [], "error": "exec() failed after 2 attempts in func():\nAttempt 1: Exception: fail\nAttempt 2: Exception: fail", "duration_ms": 0.019073486328125, "ts": 1776459589.95874}

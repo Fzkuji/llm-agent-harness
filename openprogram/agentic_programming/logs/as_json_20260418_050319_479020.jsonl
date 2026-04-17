@@ -1,2 +1,0 @@
-{"event": "enter", "path": "as_json", "name": "as_json", "node_type": "function", "prompt": "Return a tiny JSON object.", "params": {"value": "x"}, "render": "summary", "compress": false, "ts": 1776459799.478998}
-{"event": "exit", "path": "as_json", "status": "success", "output": "{\"value\": \"x\"}", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.009059906005859375, "ts": 1776459799.479007}

@@ -1,2 +1,0 @@
-{"event": "enter", "path": "my_custom_fn", "name": "my_custom_fn", "node_type": "function", "prompt": "Do something.", "params": {}, "render": "summary", "compress": false, "ts": 1776459629.632876}
-{"event": "exit", "path": "my_custom_fn", "status": "success", "output": "ok", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.0069141387939453125, "ts": 1776459629.6328828}

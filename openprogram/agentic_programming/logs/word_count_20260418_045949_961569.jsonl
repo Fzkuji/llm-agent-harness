@@ -1,2 +1,0 @@
-{"event": "enter", "path": "word_count", "name": "word_count", "node_type": "function", "prompt": "Count the number of words in a text string.\n\n    Args:\n        text: The input text string to count words in.\n\n    Returns:\n        The number of words in the text.\n    ", "params": {"text": "one\ntwo\nthree"}, "render": "summary", "compress": false, "ts": 1776459589.96155}
-{"event": "exit", "path": "word_count", "status": "success", "output": 3, "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.0059604644775390625, "ts": 1776459589.961556}

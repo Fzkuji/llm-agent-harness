@@ -1,2 +1,0 @@
-{"event": "enter", "path": "result_fn", "name": "result_fn", "node_type": "function", "prompt": "Task.", "params": {"x": 5}, "render": "result", "compress": false, "ts": 1776459628.0037289}
-{"event": "exit", "path": "result_fn", "status": "success", "output": {"value": 10}, "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.005245208740234375, "ts": 1776459628.003734}

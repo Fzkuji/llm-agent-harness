@@ -19,13 +19,16 @@ OpenProgram — Agentic Programming 理念的产品化实现。
 """
 
 from openprogram.agentic_programming import (
-    Context, FollowUp, run_with_follow_up, ask_user,
+    Context,
     agentic_function, traced, auto_trace_module, auto_trace_package,
     Runtime,
 )
 from openprogram.providers import detect_provider, create_runtime, check_providers
 from openprogram.programs.functions.meta import (
     create, create_app, edit, fix, improve, create_skill,
+)
+from openprogram.programs.functions.buildin.ask_user import (
+    ask_user, set_ask_user, FollowUp, run_with_follow_up,
 )
 from openprogram.programs.functions.buildin.general_action import general_action
 from openprogram.programs.functions.buildin.agent_loop import agent_loop

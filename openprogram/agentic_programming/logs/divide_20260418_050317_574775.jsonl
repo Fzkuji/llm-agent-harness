@@ -1,2 +1,0 @@
-{"event": "enter", "path": "divide", "name": "divide", "node_type": "function", "prompt": "Divide a by b safely.", "params": {"a": 10, "b": 0}, "render": "summary", "compress": false, "ts": 1776459797.574752}
-{"event": "exit", "path": "divide", "status": "success", "output": "Error: division by zero", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.0050067901611328125, "ts": 1776459797.574757}

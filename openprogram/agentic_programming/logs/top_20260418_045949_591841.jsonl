@@ -1,2 +1,0 @@
-{"event": "enter", "path": "top", "name": "top", "node_type": "function", "prompt": "", "params": {}, "render": "summary", "compress": false, "ts": 1776459589.591794}
-{"event": "exit", "path": "top", "status": "success", "output": "done", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.008106231689453125, "ts": 1776459589.5918021}

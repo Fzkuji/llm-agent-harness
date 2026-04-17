@@ -1,6 +1,0 @@
-{"event": "enter", "path": "parent", "name": "parent", "node_type": "function", "prompt": "Parent function.", "params": {}, "render": "summary", "compress": false, "ts": 1776459628.021041}
-{"event": "enter", "path": "parent/child_0", "name": "child", "node_type": "function", "prompt": "Child function.", "params": {}, "render": "summary", "compress": false, "ts": 1776459628.021046}
-{"event": "enter", "path": "parent/child_0/_exec_0", "name": "_exec", "node_type": "exec", "prompt": "", "params": {"_content": "user prompt"}, "render": "result", "compress": false, "ts": 1776459628.021049}
-{"event": "exit", "path": "parent/child_0/_exec_0", "status": "success", "output": "ok", "raw_reply": "ok", "attempts": [{"attempt": 1, "reply": "ok", "error": null}], "error": "", "duration_ms": 0.015020370483398438, "ts": 1776459628.021064}
-{"event": "exit", "path": "parent/child_0", "status": "success", "output": "ok", "raw_reply": "ok", "attempts": [], "error": "", "duration_ms": 0.01811981201171875, "ts": 1776459628.021064}
-{"event": "exit", "path": "parent", "status": "success", "output": "ok", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.024080276489257812, "ts": 1776459628.021065}

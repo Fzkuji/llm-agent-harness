@@ -13,7 +13,7 @@ So a successful edit needs at least 5 LLM calls:
   5. conclude_fix — returns summary string
 """
 
-from openprogram.agentic_programming.context import set_ask_user
+from openprogram.programs.functions.buildin.ask_user import set_ask_user
 
 
 def make_edit_mock(edited_code, *, answer="Proceed with the edit.", check_prompts=None):

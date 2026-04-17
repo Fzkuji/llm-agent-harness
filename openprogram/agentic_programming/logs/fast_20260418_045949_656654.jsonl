@@ -1,2 +1,0 @@
-{"event": "enter", "path": "fast", "name": "fast", "node_type": "function", "prompt": "Fast task.", "params": {}, "render": "summary", "compress": false, "ts": 1776459589.64557}
-{"event": "exit", "path": "fast", "status": "success", "output": "fast_done", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 11.042118072509766, "ts": 1776459589.6566122}

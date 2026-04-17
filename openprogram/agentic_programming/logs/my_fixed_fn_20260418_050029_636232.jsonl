@@ -1,2 +1,0 @@
-{"event": "enter", "path": "my_fixed_fn", "name": "my_fixed_fn", "node_type": "function", "prompt": "Fixed function.", "params": {}, "render": "summary", "compress": false, "ts": 1776459629.636218}
-{"event": "exit", "path": "my_fixed_fn", "status": "success", "output": "fixed", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.00286102294921875, "ts": 1776459629.636221}

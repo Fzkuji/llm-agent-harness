@@ -1,4 +1,0 @@
-{"event": "enter", "path": "func", "name": "func", "node_type": "function", "prompt": "", "params": {}, "render": "summary", "compress": false, "ts": 1776459589.950342}
-{"event": "enter", "path": "func/_exec_0", "name": "_exec", "node_type": "exec", "prompt": "", "params": {"_content": "test"}, "render": "result", "compress": false, "ts": 1776459589.950345}
-{"event": "exit", "path": "func/_exec_0", "status": "running", "output": null, "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.0, "ts": 0.0}
-{"event": "exit", "path": "func", "status": "error", "output": null, "raw_reply": null, "attempts": [], "error": "exec() received an async call function. Use async_exec() for async providers, or pass a sync function.", "duration_ms": 0.015020370483398438, "ts": 1776459589.950357}

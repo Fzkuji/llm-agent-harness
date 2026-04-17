@@ -27,3 +27,7 @@ openprogram/programs/functions/third_party/*.py
 
 # Scratch skill
 skills/init-research/
+
+# Runtime test logs
+openprogram/agentic_programming/logs/
+openprogram/logs/

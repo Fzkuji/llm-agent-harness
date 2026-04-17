@@ -1,6 +1,0 @@
-{"event": "enter", "path": "multi", "name": "multi", "node_type": "function", "prompt": "Multi exec.", "params": {}, "render": "summary", "compress": false, "ts": 1776459628.04537}
-{"event": "enter", "path": "multi/_exec_0", "name": "_exec", "node_type": "exec", "prompt": "", "params": {"_content": "first"}, "render": "result", "compress": false, "ts": 1776459628.0453792}
-{"event": "exit", "path": "multi/_exec_0", "status": "success", "output": "reply_1", "raw_reply": "reply_1", "attempts": [{"attempt": 1, "reply": "reply_1", "error": null}], "error": "", "duration_ms": 0.011920928955078125, "ts": 1776459628.045391}
-{"event": "enter", "path": "multi/_exec_1", "name": "_exec", "node_type": "exec", "prompt": "", "params": {"_content": "second"}, "render": "result", "compress": false, "ts": 1776459628.0453918}
-{"event": "exit", "path": "multi/_exec_1", "status": "success", "output": "reply_2", "raw_reply": "reply_2", "attempts": [{"attempt": 1, "reply": "reply_2", "error": null}], "error": "", "duration_ms": 0.012159347534179688, "ts": 1776459628.045404}
-{"event": "exit", "path": "multi", "status": "success", "output": "reply_1+reply_2", "raw_reply": "reply_2", "attempts": [], "error": "", "duration_ms": 0.033855438232421875, "ts": 1776459628.045404}

@@ -256,7 +256,7 @@ def test_edit_follow_up_returns_question_text():
 
 def test_edit_clarify_prompt_omits_generation_suffix():
     """edit() keeps generation-only instructions out of check_task()."""
-    from openprogram.agentic_programming.context import set_ask_user
+    from openprogram.programs.functions.buildin.ask_user import set_ask_user
 
     prompts = []
 
@@ -484,7 +484,7 @@ def restored():
 
 def test_edit_uses_follow_up_answer_without_reasking():
     """edit() continues after an answered follow-up without re-clarifying."""
-    from openprogram.agentic_programming.context import set_ask_user
+    from openprogram.programs.functions.buildin.ask_user import set_ask_user
 
     call_count = [0]
     prompts = []

@@ -1,4 +1,0 @@
-{"event": "enter", "path": "func", "name": "func", "node_type": "function", "prompt": "", "params": {}, "render": "summary", "compress": false, "ts": 1776459591.557545}
-{"event": "enter", "path": "func/_exec_0", "name": "_exec", "node_type": "exec", "prompt": "", "params": {"_content": "test"}, "render": "result", "compress": false, "ts": 1776459591.557549}
-{"event": "exit", "path": "func/_exec_0", "status": "error", "output": null, "raw_reply": null, "attempts": [{"attempt": 1, "reply": null, "error": "ValueError: bad input"}, {"attempt": 2, "reply": null, "error": "TimeoutError: too slow"}], "error": "too slow", "duration_ms": 0.013828277587890625, "ts": 1776459591.5575628}
-{"event": "exit", "path": "func", "status": "error", "output": null, "raw_reply": null, "attempts": [], "error": "exec() failed after 2 attempts in func():\nAttempt 1: ValueError: bad input\nAttempt 2: TimeoutError: too slow", "duration_ms": 0.02002716064453125, "ts": 1776459591.557565}

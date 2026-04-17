@@ -1,4 +1,0 @@
-{"event": "enter", "path": "func", "name": "func", "node_type": "function", "prompt": "", "params": {}, "render": "summary", "compress": false, "ts": 1776459589.9782221}
-{"event": "enter", "path": "func/_exec_0", "name": "_exec", "node_type": "exec", "prompt": "", "params": {"_content": "test"}, "render": "result", "compress": false, "ts": 1776459589.978226}
-{"event": "exit", "path": "func/_exec_0", "status": "success", "output": "fine", "raw_reply": "fine", "attempts": [{"attempt": 1, "reply": null, "error": "ValueError: oops"}, {"attempt": 2, "reply": "fine", "error": null}], "error": "", "duration_ms": 0.015020370483398438, "ts": 1776459589.978241}
-{"event": "exit", "path": "func", "status": "success", "output": "fine", "raw_reply": "fine", "attempts": [], "error": "", "duration_ms": 0.018835067749023438, "ts": 1776459589.978241}

@@ -83,7 +83,7 @@ def improve(
     # Step 1: Clarify — enough info?
     check = clarify(task=task, runtime=runtime)
     if not check.get("ready", True):
-        from openprogram.agentic_programming.context import ask_user
+        from openprogram.programs.functions.buildin.ask_user import ask_user
         question = check.get("question", "Need more information.")
         answer = ask_user(question)
         if answer and answer.strip():

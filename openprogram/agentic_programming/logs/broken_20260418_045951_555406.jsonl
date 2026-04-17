@@ -1,2 +1,0 @@
-{"event": "enter", "path": "broken", "name": "broken", "node_type": "function", "prompt": "Add two numbers correctly.", "params": {"a": "2", "b": "3"}, "render": "summary", "compress": false, "ts": 1776459591.555388}
-{"event": "exit", "path": "broken", "status": "success", "output": "5", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.007152557373046875, "ts": 1776459591.5553951}

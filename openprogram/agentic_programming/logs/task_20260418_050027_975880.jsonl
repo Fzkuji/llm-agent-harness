@@ -1,4 +1,0 @@
-{"event": "enter", "path": "task", "name": "task", "node_type": "function", "prompt": "", "params": {}, "render": "summary", "compress": false, "ts": 1776459627.975785}
-{"event": "enter", "path": "task/step_0", "name": "step", "node_type": "function", "prompt": "", "params": {}, "render": "summary", "compress": false, "ts": 1776459627.9758022}
-{"event": "exit", "path": "task/step_0", "status": "success", "output": "step done", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.0057220458984375, "ts": 1776459627.975808}
-{"event": "exit", "path": "task", "status": "success", "output": "done", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.025987625122070312, "ts": 1776459627.975811}

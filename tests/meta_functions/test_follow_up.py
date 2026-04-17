@@ -15,10 +15,9 @@ import time
 
 import pytest
 
-from openprogram.agentic_programming.context import (
-    Context,
+from openprogram.agentic_programming.context import Context, _current_ctx
+from openprogram.programs.functions.buildin.ask_user import (
     FollowUp,
-    _current_ctx,
     ask_user,
     run_with_follow_up,
     set_ask_user,

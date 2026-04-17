@@ -1,2 +1,0 @@
-{"event": "enter", "path": "my_func", "name": "my_func", "node_type": "function", "prompt": "This is the prompt.", "params": {}, "render": "summary", "compress": false, "ts": 1776459627.994561}
-{"event": "exit", "path": "my_func", "status": "success", "output": "ok", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.0021457672119140625, "ts": 1776459627.994563}

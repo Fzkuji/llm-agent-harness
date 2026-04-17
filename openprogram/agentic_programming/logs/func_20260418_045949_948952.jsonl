@@ -1,4 +1,0 @@
-{"event": "enter", "path": "func", "name": "func", "node_type": "function", "prompt": "", "params": {}, "render": "summary", "compress": false, "ts": 1776459589.9489229}
-{"event": "enter", "path": "func/_exec_0", "name": "_exec", "node_type": "exec", "prompt": "", "params": {"_content": "test"}, "render": "result", "compress": false, "ts": 1776459589.948928}
-{"event": "exit", "path": "func/_exec_0", "status": "running", "output": null, "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.0, "ts": 0.0}
-{"event": "exit", "path": "func", "status": "error", "output": null, "raw_reply": null, "attempts": [], "error": "No LLM provider configured. Either pass `call=your_function` to Runtime(), or subclass Runtime and override _call().", "duration_ms": 0.01621246337890625, "ts": 1776459589.948939}

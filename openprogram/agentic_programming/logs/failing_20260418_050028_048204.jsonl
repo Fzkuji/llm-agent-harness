@@ -1,2 +1,0 @@
-{"event": "enter", "path": "failing", "name": "failing", "node_type": "function", "prompt": "Will fail.", "params": {}, "render": "summary", "compress": false, "ts": 1776459628.048189}
-{"event": "exit", "path": "failing", "status": "error", "output": null, "raw_reply": null, "attempts": [], "error": "test error", "duration_ms": 0.0040531158447265625, "ts": 1776459628.048193}

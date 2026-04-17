@@ -33,7 +33,8 @@ import json
 import os
 from typing import Any, Optional
 
-from openprogram.agentic_programming.context import Context, _current_ctx, _emit_event
+from openprogram.agentic_programming.context import Context, _current_ctx
+from openprogram.agentic_programming.events import _emit_event
 
 
 class Runtime:

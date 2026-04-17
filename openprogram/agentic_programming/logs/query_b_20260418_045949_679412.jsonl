@@ -1,4 +1,0 @@
-{"event": "enter", "path": "query_b", "name": "query_b", "node_type": "function", "prompt": "Query B.", "params": {}, "render": "summary", "compress": false, "ts": 1776459589.668094}
-{"event": "enter", "path": "query_b/_exec_0", "name": "_exec", "node_type": "exec", "prompt": "", "params": {"_content": "result_b"}, "render": "result", "compress": false, "ts": 1776459589.668097}
-{"event": "exit", "path": "query_b/_exec_0", "status": "success", "output": "async_reply_7", "raw_reply": "async_reply_7", "attempts": [{"attempt": 1, "reply": "async_reply_7", "error": null}], "error": "", "duration_ms": 11.303901672363281, "ts": 1776459589.679401}
-{"event": "exit", "path": "query_b", "status": "success", "output": "async_reply_7", "raw_reply": "async_reply_7", "attempts": [], "error": "", "duration_ms": 11.307001113891602, "ts": 1776459589.679401}

@@ -1,8 +1,0 @@
-{"event": "enter", "path": "root_fn", "name": "root_fn", "node_type": "function", "prompt": "Root.", "params": {}, "render": "summary", "compress": false, "ts": 1776459589.934453}
-{"event": "enter", "path": "root_fn/mid_fn_0", "name": "mid_fn", "node_type": "function", "prompt": "Mid.", "params": {}, "render": "summary", "compress": false, "ts": 1776459589.934457}
-{"event": "enter", "path": "root_fn/mid_fn_0/leaf_fn_0", "name": "leaf_fn", "node_type": "function", "prompt": "Leaf.", "params": {}, "render": "summary", "compress": false, "ts": 1776459589.9344609}
-{"event": "enter", "path": "root_fn/mid_fn_0/leaf_fn_0/_exec_0", "name": "_exec", "node_type": "exec", "prompt": "", "params": {"_content": "leaf"}, "render": "result", "compress": false, "ts": 1776459589.934464}
-{"event": "exit", "path": "root_fn/mid_fn_0/leaf_fn_0/_exec_0", "status": "success", "output": "leaf", "raw_reply": "leaf", "attempts": [{"attempt": 1, "reply": "leaf", "error": null}], "error": "", "duration_ms": 0.016927719116210938, "ts": 1776459589.934481}
-{"event": "exit", "path": "root_fn/mid_fn_0/leaf_fn_0", "status": "success", "output": "leaf", "raw_reply": "leaf", "attempts": [], "error": "", "duration_ms": 0.0209808349609375, "ts": 1776459589.9344819}
-{"event": "exit", "path": "root_fn/mid_fn_0", "status": "success", "output": "leaf", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.025987625122070312, "ts": 1776459589.934483}
-{"event": "exit", "path": "root_fn", "status": "success", "output": "leaf", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.030040740966796875, "ts": 1776459589.934483}

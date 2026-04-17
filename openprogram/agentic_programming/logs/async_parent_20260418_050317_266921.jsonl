@@ -1,4 +1,0 @@
-{"event": "enter", "path": "async_parent", "name": "async_parent", "node_type": "function", "prompt": "Async parent.", "params": {}, "render": "summary", "compress": false, "ts": 1776459797.2668989}
-{"event": "enter", "path": "async_parent/sync_child_0", "name": "sync_child", "node_type": "function", "prompt": "Sync child.", "params": {}, "render": "summary", "compress": false, "ts": 1776459797.266905}
-{"event": "exit", "path": "async_parent/sync_child_0", "status": "success", "output": "sync_result", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.003814697265625, "ts": 1776459797.266909}
-{"event": "exit", "path": "async_parent", "status": "success", "output": "parent: sync_result", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.010967254638671875, "ts": 1776459797.2669098}

@@ -1,6 +1,0 @@
-{"event": "enter", "path": "multi", "name": "multi", "node_type": "function", "prompt": "Multiple calls.", "params": {}, "render": "summary", "compress": false, "ts": 1776459627.6899781}
-{"event": "enter", "path": "multi/_exec_0", "name": "_exec", "node_type": "exec", "prompt": "", "params": {"_content": "first"}, "render": "result", "compress": false, "ts": 1776459627.689983}
-{"event": "exit", "path": "multi/_exec_0", "status": "success", "output": "async_reply_4", "raw_reply": "async_reply_4", "attempts": [{"attempt": 1, "reply": "async_reply_4", "error": null}], "error": "", "duration_ms": 10.369062423706055, "ts": 1776459627.700352}
-{"event": "enter", "path": "multi/_exec_1", "name": "_exec", "node_type": "exec", "prompt": "", "params": {"_content": "second"}, "render": "result", "compress": false, "ts": 1776459627.700362}
-{"event": "exit", "path": "multi/_exec_1", "status": "success", "output": "async_reply_5", "raw_reply": "async_reply_5", "attempts": [{"attempt": 1, "reply": "async_reply_5", "error": null}], "error": "", "duration_ms": 11.096000671386719, "ts": 1776459627.711458}
-{"event": "exit", "path": "multi", "status": "success", "output": "async_reply_4+async_reply_5", "raw_reply": "async_reply_5", "attempts": [], "error": "", "duration_ms": 21.481990814208984, "ts": 1776459627.71146}

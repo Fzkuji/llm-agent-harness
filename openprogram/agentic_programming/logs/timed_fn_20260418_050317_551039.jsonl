@@ -1,2 +1,0 @@
-{"event": "enter", "path": "timed_fn", "name": "timed_fn", "node_type": "function", "prompt": "Task.", "params": {}, "render": "summary", "compress": false, "ts": 1776459797.550962}
-{"event": "exit", "path": "timed_fn", "status": "success", "output": "ok", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.0629425048828125, "ts": 1776459797.551025}

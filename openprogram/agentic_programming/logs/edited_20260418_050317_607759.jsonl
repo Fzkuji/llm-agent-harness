@@ -1,2 +1,0 @@
-{"event": "enter", "path": "edited", "name": "edited", "node_type": "function", "prompt": "Fixed.", "params": {}, "render": "summary", "compress": false, "ts": 1776459797.607748}
-{"event": "exit", "path": "edited", "status": "success", "output": "ok", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.00286102294921875, "ts": 1776459797.607751}

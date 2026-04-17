@@ -1,4 +1,0 @@
-{"event": "enter", "path": "root_fn", "name": "root_fn", "node_type": "function", "prompt": "", "params": {}, "render": "summary", "compress": false, "ts": 1776459797.539563}
-{"event": "enter", "path": "root_fn/child_fn_0", "name": "child_fn", "node_type": "function", "prompt": "", "params": {}, "render": "summary", "compress": false, "ts": 1776459797.539567}
-{"event": "exit", "path": "root_fn/child_fn_0", "status": "success", "output": "done", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.00286102294921875, "ts": 1776459797.5395699}
-{"event": "exit", "path": "root_fn", "status": "success", "output": "done", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.0069141387939453125, "ts": 1776459797.5395699}

@@ -1,4 +1,0 @@
-{"event": "enter", "path": "failing", "name": "failing", "node_type": "function", "prompt": "This fails.", "params": {}, "render": "summary", "compress": false, "ts": 1776459589.982424}
-{"event": "enter", "path": "failing/_exec_0", "name": "_exec", "node_type": "exec", "prompt": "", "params": {"_content": "test"}, "render": "result", "compress": false, "ts": 1776459589.982429}
-{"event": "exit", "path": "failing/_exec_0", "status": "error", "output": null, "raw_reply": null, "attempts": [{"attempt": 1, "reply": null, "error": "ValueError: some error"}], "error": "some error", "duration_ms": 0.014066696166992188, "ts": 1776459589.982443}
-{"event": "exit", "path": "failing", "status": "error", "output": null, "raw_reply": null, "attempts": [], "error": "exec() failed after 1 attempts in failing():\nAttempt 1: ValueError: some error", "duration_ms": 0.022172927856445312, "ts": 1776459589.9824462}

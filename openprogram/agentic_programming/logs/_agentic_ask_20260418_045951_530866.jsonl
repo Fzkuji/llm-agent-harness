@@ -1,2 +1,0 @@
-{"event": "enter", "path": "_agentic_ask", "name": "_agentic_ask", "node_type": "function", "prompt": "An @agentic_function that calls ask_user.", "params": {"task": "test"}, "render": "summary", "compress": false, "ts": 1776459591.530764}
-{"event": "exit", "path": "_agentic_ask", "status": "success", "output": "Resolved: clarified", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.05507469177246094, "ts": 1776459591.5308192}

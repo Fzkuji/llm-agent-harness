@@ -1,2 +1,0 @@
-{"event": "enter", "path": "add_numbers", "name": "add_numbers", "node_type": "function", "prompt": "Add two numbers together.", "params": {"a": "3", "b": "5"}, "render": "summary", "compress": false, "ts": 1776459591.540451}
-{"event": "exit", "path": "add_numbers", "status": "success", "output": "8", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.010967254638671875, "ts": 1776459591.540462}

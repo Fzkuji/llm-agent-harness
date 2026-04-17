@@ -1,2 +1,0 @@
-{"event": "enter", "path": "timed", "name": "timed", "node_type": "function", "prompt": "", "params": {}, "render": "summary", "compress": false, "ts": 1776459627.9910011}
-{"event": "exit", "path": "timed", "status": "success", "output": "done", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.00286102294921875, "ts": 1776459627.991004}

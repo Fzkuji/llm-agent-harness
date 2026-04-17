@@ -1,6 +1,0 @@
-{"event": "enter", "path": "parent", "name": "parent", "node_type": "function", "prompt": "", "params": {}, "render": "summary", "compress": false, "ts": 1776459628.065255}
-{"event": "enter", "path": "parent/child_0", "name": "child", "node_type": "function", "prompt": "", "params": {}, "render": "summary", "compress": false, "ts": 1776459628.0652642}
-{"event": "enter", "path": "parent/child_0/_exec_0", "name": "_exec", "node_type": "exec", "prompt": "", "params": {"_content": "hi"}, "render": "result", "compress": false, "ts": 1776459628.065269}
-{"event": "exit", "path": "parent/child_0/_exec_0", "status": "error", "output": null, "raw_reply": null, "attempts": [{"attempt": 1, "reply": null, "error": "ValueError: child boom"}], "error": "child boom", "duration_ms": 0.026941299438476562, "ts": 1776459628.065296}
-{"event": "exit", "path": "parent/child_0", "status": "error", "output": null, "raw_reply": null, "attempts": [], "error": "exec() failed after 1 attempts in child():\nAttempt 1: ValueError: child boom", "duration_ms": 0.034809112548828125, "ts": 1776459628.065299}
-{"event": "exit", "path": "parent", "status": "error", "output": null, "raw_reply": null, "attempts": [], "error": "exec() failed after 1 attempts in child():\nAttempt 1: ValueError: child boom", "duration_ms": 0.04506111145019531, "ts": 1776459628.0653}

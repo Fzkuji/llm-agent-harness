@@ -1,7 +1,7 @@
 """Test function for follow-up / resume functionality."""
 
 from openprogram.agentic_programming.function import agentic_function
-from openprogram.agentic_programming.context import ask_user
+from openprogram.programs.functions.buildin.ask_user import ask_user
 
 
 @agentic_function

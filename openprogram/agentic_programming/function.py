@@ -25,7 +25,8 @@ import os
 from datetime import datetime
 
 import openprogram.agentic_programming.context as _ctx_module
-from openprogram.agentic_programming.context import Context, _current_ctx, _emit_event
+from openprogram.agentic_programming.context import Context, _current_ctx
+from openprogram.agentic_programming.events import _emit_event
 
 # Runtime shared across the call chain via ContextVar.
 # Entry-point functions auto-create a runtime; child functions inherit it.

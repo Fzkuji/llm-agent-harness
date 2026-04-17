@@ -1,4 +1,0 @@
-{"event": "enter", "path": "llm_fn", "name": "llm_fn", "node_type": "function", "prompt": "Task.", "params": {}, "render": "summary", "compress": false, "ts": 1776459589.930204}
-{"event": "enter", "path": "llm_fn/_exec_0", "name": "_exec", "node_type": "exec", "prompt": "", "params": {"_content": "hello"}, "render": "result", "compress": false, "ts": 1776459589.930209}
-{"event": "exit", "path": "llm_fn/_exec_0", "status": "success", "output": "hello", "raw_reply": "hello", "attempts": [{"attempt": 1, "reply": "hello", "error": null}], "error": "", "duration_ms": 0.0209808349609375, "ts": 1776459589.93023}
-{"event": "exit", "path": "llm_fn", "status": "success", "output": "hello", "raw_reply": "hello", "attempts": [], "error": "", "duration_ms": 0.027179718017578125, "ts": 1776459589.930231}

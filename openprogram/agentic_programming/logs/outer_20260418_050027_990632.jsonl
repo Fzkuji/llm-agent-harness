@@ -1,8 +1,0 @@
-{"event": "enter", "path": "outer", "name": "outer", "node_type": "function", "prompt": "", "params": {}, "render": "summary", "compress": false, "ts": 1776459627.990596}
-{"event": "enter", "path": "outer/branch_node_0", "name": "branch_node", "node_type": "function", "prompt": "", "params": {}, "render": "summary", "compress": false, "ts": 1776459627.9905999}
-{"event": "enter", "path": "outer/branch_node_0/leaf_0", "name": "leaf", "node_type": "function", "prompt": "", "params": {}, "render": "summary", "compress": false, "ts": 1776459627.990604}
-{"event": "exit", "path": "outer/branch_node_0/leaf_0", "status": "success", "output": "leaf done", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.0011920928955078125, "ts": 1776459627.990605}
-{"event": "exit", "path": "outer/branch_node_0", "status": "success", "output": "branch done", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.006198883056640625, "ts": 1776459627.990606}
-{"event": "enter", "path": "outer/inspect_0", "name": "inspect", "node_type": "function", "prompt": "", "params": {}, "render": "summary", "compress": false, "ts": 1776459627.990608}
-{"event": "exit", "path": "outer/inspect_0", "status": "success", "output": "ready", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.0019073486328125, "ts": 1776459627.99061}
-{"event": "exit", "path": "outer", "status": "success", "output": "ready", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.013828277587890625, "ts": 1776459627.99061}

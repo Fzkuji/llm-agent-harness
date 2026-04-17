@@ -283,7 +283,7 @@ def edit(
             return conclude_edit(task=conclude_task, runtime=runtime)
 
         if status == "follow_up":
-            from openprogram.agentic_programming.context import ask_user
+            from openprogram.programs.functions.buildin.ask_user import ask_user
             answer = ask_user(round_result["question"])
             if answer is not None and answer.strip():
                 feedback = f"Q: {round_result['question']}\nA: {answer}"

@@ -323,7 +323,7 @@ def deep_work(
         state["plan_summary"] = clarify_result.get("plan_summary", "")
 
         if not clarify_result.get("clear") and clarify_result.get("questions"):
-            from openprogram.agentic_programming.context import ask_user
+            from openprogram.programs.functions.buildin.ask_user import ask_user
             questions = clarify_result["questions"]
             answers = []
             for q in questions:

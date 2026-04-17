@@ -1,2 +1,0 @@
-{"event": "enter", "path": "slow", "name": "slow", "node_type": "function", "prompt": "Slow task.", "params": {}, "render": "summary", "compress": false, "ts": 1776459797.2679958}
-{"event": "exit", "path": "slow", "status": "success", "output": "slow_done", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 21.04926109313965, "ts": 1776459797.289045}

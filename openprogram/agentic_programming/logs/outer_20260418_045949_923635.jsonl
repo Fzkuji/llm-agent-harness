@@ -1,4 +1,0 @@
-{"event": "enter", "path": "outer", "name": "outer", "node_type": "function", "prompt": "Outer function.", "params": {}, "render": "summary", "compress": false, "ts": 1776459589.923611}
-{"event": "enter", "path": "outer/inner_0", "name": "inner", "node_type": "function", "prompt": "Inner function.", "params": {}, "render": "summary", "compress": false, "ts": 1776459589.923618}
-{"event": "exit", "path": "outer/inner_0", "status": "success", "output": "inner done", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.0030994415283203125, "ts": 1776459589.9236212}
-{"event": "exit", "path": "outer", "status": "success", "output": "done", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.010967254638671875, "ts": 1776459589.923622}

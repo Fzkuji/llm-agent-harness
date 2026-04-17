@@ -1,4 +1,0 @@
-{"event": "enter", "path": "fn", "name": "fn", "node_type": "function", "prompt": "Task.", "params": {}, "render": "summary", "compress": false, "ts": 1776459797.555632}
-{"event": "enter", "path": "fn/_exec_0", "name": "_exec", "node_type": "exec", "prompt": "", "params": {"_content": "data"}, "render": "result", "compress": false, "ts": 1776459797.555636}
-{"event": "exit", "path": "fn/_exec_0", "status": "success", "output": "data", "raw_reply": "data", "attempts": [{"attempt": 1, "reply": "data", "error": null}], "error": "", "duration_ms": 0.013113021850585938, "ts": 1776459797.555649}
-{"event": "exit", "path": "fn", "status": "success", "output": "data", "raw_reply": "data", "attempts": [], "error": "", "duration_ms": 0.016927719116210938, "ts": 1776459797.555649}

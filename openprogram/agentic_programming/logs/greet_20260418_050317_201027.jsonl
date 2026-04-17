@@ -1,2 +1,0 @@
-{"event": "enter", "path": "greet", "name": "greet", "node_type": "function", "prompt": "Say hello.", "params": {"name": "Alice"}, "render": "summary", "compress": false, "ts": 1776459797.200953}
-{"event": "exit", "path": "greet", "status": "success", "output": "Hello, Alice!", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.01811981201171875, "ts": 1776459797.2009711}

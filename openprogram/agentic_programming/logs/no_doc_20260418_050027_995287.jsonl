@@ -1,2 +1,0 @@
-{"event": "enter", "path": "no_doc", "name": "no_doc", "node_type": "function", "prompt": "", "params": {}, "render": "summary", "compress": false, "ts": 1776459627.995237}
-{"event": "exit", "path": "no_doc", "status": "success", "output": "ok", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.009059906005859375, "ts": 1776459627.9952462}

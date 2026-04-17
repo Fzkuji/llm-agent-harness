@@ -1,6 +1,0 @@
-{"event": "enter", "path": "level1", "name": "level1", "node_type": "function", "prompt": "Level 1.", "params": {}, "render": "summary", "compress": false, "ts": 1776459589.925086}
-{"event": "enter", "path": "level1/level2_0", "name": "level2", "node_type": "function", "prompt": "Level 2.", "params": {}, "render": "summary", "compress": false, "ts": 1776459589.925091}
-{"event": "enter", "path": "level1/level2_0/level3_0", "name": "level3", "node_type": "function", "prompt": "Level 3.", "params": {}, "render": "summary", "compress": false, "ts": 1776459589.9251552}
-{"event": "exit", "path": "level1/level2_0/level3_0", "status": "success", "output": "deep", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.0019073486328125, "ts": 1776459589.925157}
-{"event": "exit", "path": "level1/level2_0", "status": "success", "output": "deep", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.0667572021484375, "ts": 1776459589.9251578}
-{"event": "exit", "path": "level1", "status": "success", "output": "deep", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.07295608520507812, "ts": 1776459589.925159}

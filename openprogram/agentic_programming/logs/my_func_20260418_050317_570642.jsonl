@@ -1,4 +1,0 @@
-{"event": "enter", "path": "my_func", "name": "my_func", "node_type": "function", "prompt": "This is the instruction prompt.", "params": {}, "render": "summary", "compress": false, "ts": 1776459797.570616}
-{"event": "enter", "path": "my_func/_exec_0", "name": "_exec", "node_type": "exec", "prompt": "", "params": {"_content": "user input"}, "render": "result", "compress": false, "ts": 1776459797.5706198}
-{"event": "exit", "path": "my_func/_exec_0", "status": "success", "output": "ok", "raw_reply": "ok", "attempts": [{"attempt": 1, "reply": "ok", "error": null}], "error": "", "duration_ms": 0.011205673217773438, "ts": 1776459797.570631}
-{"event": "exit", "path": "my_func", "status": "success", "output": "ok", "raw_reply": "ok", "attempts": [], "error": "", "duration_ms": 0.015974044799804688, "ts": 1776459797.570632}

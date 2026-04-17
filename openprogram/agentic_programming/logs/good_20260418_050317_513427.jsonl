@@ -1,2 +1,0 @@
-{"event": "enter", "path": "good", "name": "good", "node_type": "function", "prompt": "Good.", "params": {}, "render": "summary", "compress": false, "ts": 1776459797.513354}
-{"event": "exit", "path": "good", "status": "success", "output": "ok", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.015020370483398438, "ts": 1776459797.513369}

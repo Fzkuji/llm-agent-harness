@@ -12,7 +12,7 @@ class TestCreateFailFixSucceed:
 
     def test_basic_recovery_flow(self):
         """create() → call fails → edit(fn=...) → call succeeds."""
-        from openprogram.agentic_programming.context import set_ask_user
+        from openprogram.programs.functions.buildin.ask_user import set_ask_user
 
         fix_code = '''@agentic_function
 def divide(a, b):
@@ -73,7 +73,7 @@ def divide(a, b):
 
     def test_edit_preserves_context_tree(self):
         """Fixed function creates proper Context trees."""
-        from openprogram.agentic_programming.context import set_ask_user
+        from openprogram.programs.functions.buildin.ask_user import set_ask_user
 
         create_call_count = [0]
         fix_call_count = [0]

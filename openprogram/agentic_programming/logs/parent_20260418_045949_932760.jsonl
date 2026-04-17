@@ -1,8 +1,0 @@
-{"event": "enter", "path": "parent", "name": "parent", "node_type": "function", "prompt": "Parent.", "params": {}, "render": "summary", "compress": false, "ts": 1776459589.932721}
-{"event": "enter", "path": "parent/hidden_0", "name": "hidden", "node_type": "function", "prompt": "", "params": {}, "render": "silent", "compress": false, "ts": 1776459589.932725}
-{"event": "exit", "path": "parent/hidden_0", "status": "success", "output": "secret", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.0030994415283203125, "ts": 1776459589.932728}
-{"event": "enter", "path": "parent/visible_0", "name": "visible", "node_type": "function", "prompt": "Visible.", "params": {}, "render": "summary", "compress": false, "ts": 1776459589.9327302}
-{"event": "enter", "path": "parent/visible_0/_exec_0", "name": "_exec", "node_type": "exec", "prompt": "", "params": {"_content": "check"}, "render": "result", "compress": false, "ts": 1776459589.9327328}
-{"event": "exit", "path": "parent/visible_0/_exec_0", "status": "success", "output": "check", "raw_reply": "check", "attempts": [{"attempt": 1, "reply": "check", "error": null}], "error": "", "duration_ms": 0.018358230590820312, "ts": 1776459589.9327512}
-{"event": "exit", "path": "parent/visible_0", "status": "success", "output": "check", "raw_reply": "check", "attempts": [], "error": "", "duration_ms": 0.0209808349609375, "ts": 1776459589.9327512}
-{"event": "exit", "path": "parent", "status": "success", "output": "check", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.030994415283203125, "ts": 1776459589.932752}

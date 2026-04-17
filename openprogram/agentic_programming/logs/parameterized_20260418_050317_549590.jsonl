@@ -1,2 +1,0 @@
-{"event": "enter", "path": "parameterized", "name": "parameterized", "node_type": "function", "prompt": "Task.", "params": {"name": "test", "count": 5}, "render": "summary", "compress": false, "ts": 1776459797.549571}
-{"event": "exit", "path": "parameterized", "status": "success", "output": "done", "raw_reply": null, "attempts": [], "error": "", "duration_ms": 0.0059604644775390625, "ts": 1776459797.549577}

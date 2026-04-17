@@ -49,6 +49,13 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 from contextvars import ContextVar
 
+# Event broadcasting (on_event / _emit_event) lives in .events.
+# Persistence (save / from_jsonl / to_dict / to_records) lives in .persistence.
+# ask_user / FollowUp / run_with_follow_up live in
+# openprogram.programs.functions.buildin.ask_user — they're built-in user
+# interaction tools, not paradigm primitives.
+from openprogram.agentic_programming.events import on_event, off_event, _emit_event
+
 
 # ---------------------------------------------------------------------------
 # Global state
@@ -57,239 +64,6 @@ from contextvars import ContextVar
 _current_ctx: ContextVar[Optional["Context"]] = ContextVar(
     "_current_ctx", default=None
 )
-
-# ---------------------------------------------------------------------------
-# Event system — lightweight callbacks for visualization / monitoring
-# ---------------------------------------------------------------------------
-import threading as _threading
-
-_event_callbacks: list[Callable] = []
-_event_lock = _threading.Lock()
-
-
-def on_event(callback: Callable) -> None:
-    """
-    Register a callback for Context tree events.
-
-    The callback receives (event_type: str, data: dict) where event_type is
-    one of: "node_created", "node_updated", "node_completed".
-
-    Thread-safe. Zero overhead when no callbacks are registered (the emit
-    function checks the list length before acquiring the lock).
-    """
-    with _event_lock:
-        _event_callbacks.append(callback)
-
-
-def off_event(callback: Callable) -> None:
-    """Remove a previously registered event callback."""
-    with _event_lock:
-        try:
-            _event_callbacks.remove(callback)
-        except ValueError:
-            pass
-
-
-def _emit_event(event_type: str, ctx: "Context") -> None:
-    """Emit an event to all registered callbacks. No-op if no callbacks."""
-    if not _event_callbacks:
-        return
-    try:
-        data = ctx._to_dict()
-        data["event"] = event_type
-    except Exception:
-        return
-    with _event_lock:
-        cbs = list(_event_callbacks)
-    for cb in cbs:
-        try:
-            cb(event_type, data)
-        except Exception:
-            pass
-
-
-
-# ---------------------------------------------------------------------------
-# User interaction — ask_user for follow-up questions during execution
-# ---------------------------------------------------------------------------
-import queue as _queue
-import threading as _ask_threading
-
-_ask_user_handler_global: Optional[Callable] = None
-_ask_user_lock = _ask_threading.Lock()
-
-
-def set_ask_user(handler: Optional[Callable[[str], str]]):
-    """Register a global handler for ask_user() calls.
-
-    The handler receives a question string and must return the user's answer.
-    It may block (e.g. waiting for WebSocket response).
-    Thread-safe — works across threads (unlike ContextVar).
-    """
-    global _ask_user_handler_global
-    with _ask_user_lock:
-        _ask_user_handler_global = handler
-
-
-def ask_user(question: str) -> Optional[str]:
-    """Ask the user a question during function execution.
-
-    Resolution order:
-      1. Handler on current Context (set by caller via ctx.ask_user_handler)
-      2. Walk up parent chain — nearest ancestor with a handler wins
-      3. Global handler (set by server via set_ask_user())
-      4. Default terminal handler (input()) — only if stdin is a TTY
-
-    The handler receives a question string and must return the user's answer.
-    It may block (e.g. waiting for WebSocket response or terminal input).
-
-    Args:
-        question: The question to ask the user.
-
-    Returns:
-        The user's answer, or None if no handler is available.
-    """
-    # 1-2. Walk up context tree
-    ctx = _current_ctx.get(None)
-    while ctx is not None:
-        if ctx.ask_user_handler is not None:
-            return ctx.ask_user_handler(question)
-        ctx = ctx.parent
-
-    # 3. Global handler (backward compat, used by web server)
-    with _ask_user_lock:
-        handler = _ask_user_handler_global
-    if handler is not None:
-        return handler(question)
-
-    # 4. Default: terminal input (only if interactive)
-    import sys
-    if sys.stdin is not None and sys.stdin.isatty():
-        try:
-            return input(f"[follow-up] {question}\n> ")
-        except EOFError:
-            return None
-
-    return None
-
-
-# ---------------------------------------------------------------------------
-# FollowUp — non-blocking follow-up for agents and external callers
-# ---------------------------------------------------------------------------
-
-class FollowUp:
-    """A pending follow-up question from a running function.
-
-    Returned by run_with_follow_up() when the function calls ask_user().
-    The function's thread is alive but sleeping, waiting for an answer.
-
-    Call .answer(text) to provide the answer. The function resumes from
-    exactly where it paused — all local variables and call stack intact.
-    Returns the next result: either the final return value, another FollowUp,
-    or raises an exception if the function failed.
-
-    Usage:
-        result = run_with_follow_up(my_func, arg1, arg2)
-        while isinstance(result, FollowUp):
-            print(f"Question: {result.question}")
-            answer = get_answer_somehow(result.question)
-            result = result.answer(answer)
-        # result is now the final return value
-    """
-
-    def __init__(self, question: str, _answer_q: _queue.Queue, _result_q: _queue.Queue):
-        self.question = question
-        self._answer_q = _answer_q
-        self._result_q = _result_q
-
-    def answer(self, text: str):
-        """Provide the answer and wait for the next result.
-
-        Returns:
-            The function's final return value, or another FollowUp
-            if the function asks another question.
-
-        Raises:
-            Whatever exception the function raised, if it failed.
-        """
-        self._answer_q.put(text)
-        result = self._result_q.get()
-        if isinstance(result, _WrappedException):
-            raise result.exception
-        return result
-
-    def __repr__(self):
-        return f"FollowUp(question={self.question!r})"
-
-
-class _WrappedException:
-    """Internal wrapper so we can distinguish exceptions from normal results in the queue."""
-    __slots__ = ("exception",)
-    def __init__(self, exc: BaseException):
-        self.exception = exc
-
-
-def run_with_follow_up(func, *args, **kwargs):
-    """Run a function that may call ask_user(), with non-blocking follow-up support.
-
-    Instead of blocking the caller when ask_user() is called, this returns a
-    FollowUp object. The caller can inspect the question, decide the answer
-    (manually, via LLM, etc.), and call follow_up.answer(text) to resume.
-
-    The function runs in a background thread. Its full execution state
-    (local variables, call stack, context tree) is preserved while waiting.
-
-    Args:
-        func: The function to call (typically an @agentic_function).
-        *args, **kwargs: Arguments forwarded to func.
-
-    Returns:
-        The function's return value, or a FollowUp if a question is pending.
-
-    Raises:
-        Whatever exception the function raised.
-
-    Examples:
-        # Agent auto-answering follow-ups:
-        result = run_with_follow_up(edit, fn=broken_func, runtime=rt)
-        while isinstance(result, FollowUp):
-            answer = runtime.exec(f"Answer: {result.question}")
-            result = result.answer(answer)
-
-        # Simple blocking (equivalent to calling func directly with terminal handler):
-        result = run_with_follow_up(my_func, x=1)
-        if isinstance(result, FollowUp):
-            result = result.answer(input(f"{result.question}\\n> "))
-    """
-    answer_q: _queue.Queue = _queue.Queue()
-    result_q: _queue.Queue = _queue.Queue()
-
-    def _handler(question: str) -> str:
-        # Send FollowUp to caller via result_q
-        result_q.put(FollowUp(question, answer_q, result_q))
-        # Block until caller provides answer via answer_q
-        return answer_q.get()
-
-    def _run():
-        prev_handler = None
-        with _ask_user_lock:
-            prev_handler = _ask_user_handler_global
-        set_ask_user(_handler)
-        try:
-            val = func(*args, **kwargs)
-            result_q.put(val)
-        except BaseException as e:
-            result_q.put(_WrappedException(e))
-        finally:
-            set_ask_user(prev_handler)
-
-    thread = _ask_threading.Thread(target=_run, daemon=True)
-    thread.start()
-
-    result = result_q.get()
-    if isinstance(result, _WrappedException):
-        raise result.exception
-    return result
 
 
 # ---------------------------------------------------------------------------
@@ -911,194 +685,35 @@ class Context:
             c._traceback_lines(lines, indent + 1)
 
     # ==================================================================
-    # PERSISTENCE — save the tree to disk
+    # PERSISTENCE — thin delegates to openprogram.agentic_programming.persistence
     # ==================================================================
 
-    def save(self, path: str | os.PathLike[str]):
-        """
-        Save the full tree to a file.
-
-        .md    → human-readable tree view (same as tree())
-        .json  → full tree as one nested JSON object
-        .jsonl → one JSON object per node, machine-readable
-
-        Accepts both plain strings and pathlib.Path / os.PathLike objects.
-        Raises ValueError for unsupported extensions.
-        """
-        path_str = os.fspath(path)
-        path_lower = path_str.lower()
-        os.makedirs(os.path.dirname(os.path.abspath(path_str)), exist_ok=True)
-        if path_lower.endswith(".md"):
-            with open(path_str, "w", encoding="utf-8") as f:
-                f.write(self.tree(color=False))
-        elif path_lower.endswith(".json"):
-            with open(path_str, "w", encoding="utf-8") as f:
-                json.dump(self._to_dict(), f, ensure_ascii=False, default=str, indent=2)
-        elif path_lower.endswith(".jsonl"):
-            with open(path_str, "w", encoding="utf-8") as f:
-                for record in self._to_records():
-                    f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
-        else:
-            raise ValueError(
-                f"Unsupported file extension: {path_str}. Use .md, .json, or .jsonl."
-            )
+    def save(self, path: str | os.PathLike[str]) -> None:
+        """Save the tree to disk. See persistence.save for format details."""
+        from openprogram.agentic_programming.persistence import save as _save
+        _save(self, path)
 
     def _to_dict(self) -> dict:
-        """Serialize the full tree into one nested dict for JSON export."""
-        return {
-            "path": self.path,
-            "name": self.name,
-            "node_type": self.node_type,
-            "prompt": self.prompt,
-            "params": {k: (getattr(v, '__name__', None) or str(v)) if callable(v) else v
-                       for k, v in (self.params or {}).items()
-                       if k not in ("runtime", "callback")} if self.params else {},
-            "output": self.output,
-            "raw_reply": self.raw_reply,
-            "attempts": self.attempts,
-            "error": self.error,
-            "status": self.status,
-            "render": self.render,
-            "compress": self.compress,
-            "source_file": self.source_file,
-            "start_time": self.start_time,
-            "end_time": self.end_time,
-            "duration_ms": self.duration_ms,
-            "children": [c._to_dict() for c in self.children],
-        }
+        from openprogram.agentic_programming.persistence import to_dict
+        return to_dict(self)
 
     @classmethod
     def from_dict(cls, data: dict, parent: Optional["Context"] = None) -> "Context":
-        """Deserialize a Context tree from a dict (inverse of _to_dict)."""
-        ctx = cls(
-            name=data.get("name", "unknown"),
-            prompt=data.get("prompt", ""),
-            params=data.get("params"),
-            parent=parent,
-            render=data.get("render", "summary"),
-            compress=data.get("compress", False),
-            start_time=data.get("start_time"),
-            node_type=data.get("node_type", "function"),
-        )
-        ctx.output = data.get("output")
-        ctx.raw_reply = data.get("raw_reply")
-        ctx.attempts = data.get("attempts", [])
-        ctx.error = data.get("error")
-        ctx.status = data.get("status", "running")
-        ctx.source_file = data.get("source_file", "")
-        ctx.end_time = data.get("end_time") or 0.0
-        if not ctx.end_time and data.get("duration_ms") is not None and ctx.start_time:
-            ctx.end_time = ctx.start_time + data["duration_ms"] / 1000.0
-        for child_data in data.get("children", []):
-            child = cls.from_dict(child_data, parent=ctx)
-            ctx.children.append(child)
-        return ctx
+        from openprogram.agentic_programming.persistence import from_dict as _from_dict
+        return _from_dict(data, parent)
 
     @classmethod
     def from_jsonl(cls, path: str | os.PathLike[str]) -> "Context":
-        """Reconstruct a Context tree from JSONL enter/exit records."""
-        path_str = os.fspath(path)
-        with open(path_str, encoding="utf-8") as f:
-            records = []
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    records.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
-
-        if not records:
-            raise ValueError("No valid records found in JSONL file")
-
-        nodes: dict[str, Context] = {}
-        root: Optional[Context] = None
-
-        def _parent_path(node_path: str) -> Optional[str]:
-            return node_path.rsplit("/", 1)[0] if "/" in node_path else None
-
-        for record in records:
-            node_path = record.get("path")
-            if not node_path:
-                continue
-
-            if record.get("event") == "enter":
-                parent = nodes.get(_parent_path(node_path))
-                ctx = cls(
-                    name=record.get("name", node_path.rsplit("/", 1)[-1].split("_")[0]),
-                    prompt=record.get("prompt", ""),
-                    params=record.get("params") or {},
-                    parent=parent,
-                    render=record.get("render", "summary"),
-                    compress=record.get("compress", False),
-                    start_time=record.get("ts", 0.0),
-                    node_type=record.get("node_type", "function"),
-                )
-                if parent is not None:
-                    parent.children.append(ctx)
-                else:
-                    root = ctx
-                nodes[node_path] = ctx
-            elif record.get("event") == "exit":
-                ctx = nodes.get(node_path)
-                if ctx is None:
-                    continue
-                ctx.status = record.get("status", ctx.status)
-                ctx.output = record.get("output")
-                ctx.raw_reply = record.get("raw_reply")
-                ctx.attempts = record.get("attempts") or []
-                ctx.error = record.get("error") or ""
-                ctx.end_time = record.get("ts") or (
-                    (ctx.start_time + (record["duration_ms"] / 1000.0))
-                    if record.get("duration_ms") is not None and ctx.start_time
-                    else 0.0
-                )
-
-        if root is None:
-            raise ValueError("No valid records found in JSONL file")
-
-        return root
+        from openprogram.agentic_programming.persistence import from_jsonl as _from_jsonl
+        return _from_jsonl(path)
 
     def _to_records(self, tree_depth: int = 0) -> list[dict]:
-        """Flatten the tree into a list of dicts for JSONL export."""
-        node = self._to_dict()
-        node["depth"] = tree_depth
-        records = [node]
-        for c in self.children:
-            records.extend(c._to_records(tree_depth + 1))
-        return records
+        from openprogram.agentic_programming.persistence import to_records
+        return to_records(self, tree_depth)
 
     def _to_event_records(self) -> list[dict]:
-        """Flatten the tree into enter/exit records for crash recovery."""
-        enter = {
-            "event": "enter",
-            "path": self.path,
-            "name": self.name,
-            "node_type": self.node_type,
-            "prompt": self.prompt,
-            "params": {k: (getattr(v, '__name__', None) or str(v)) if callable(v) else v
-                       for k, v in (self.params or {}).items()
-                       if k not in ("runtime", "callback")} if self.params else {},
-            "render": self.render,
-            "compress": self.compress,
-            "ts": self.start_time,
-        }
-        records = [enter]
-        for child in self.children:
-            records.extend(child._to_event_records())
-        records.append({
-            "event": "exit",
-            "path": self.path,
-            "status": self.status,
-            "output": self.output,
-            "raw_reply": self.raw_reply,
-            "attempts": self.attempts,
-            "error": self.error,
-            "duration_ms": self.duration_ms,
-            "ts": self.end_time,
-        })
-        return records
+        from openprogram.agentic_programming.persistence import to_event_records
+        return to_event_records(self)
 
 
 # ======================================================================
