@@ -291,6 +291,19 @@ html, body {
   transform: rotate(6deg) scale(0.98);
 }
 
+/* Programs icon — 2x2 grid, hover makes each square drift toward its corner */
+#navPrograms .sidebar-nav-icon svg rect {
+  transition: transform 0.3s cubic-bezier(0.165, 0.85, 0.45, 1);
+}
+#navPrograms:hover .sidebar-nav-icon svg rect:nth-of-type(1) { transform: translate(-1.2px, -1.2px); }
+#navPrograms:hover .sidebar-nav-icon svg rect:nth-of-type(2) { transform: translate( 1.2px, -1.2px); }
+#navPrograms:hover .sidebar-nav-icon svg rect:nth-of-type(3) { transform: translate(-1.2px,  1.2px); }
+#navPrograms:hover .sidebar-nav-icon svg rect:nth-of-type(4) { transform: translate( 1.2px,  1.2px); }
+#navPrograms:active .sidebar-nav-icon svg rect:nth-of-type(1) { transform: translate(-0.4px, -0.4px); }
+#navPrograms:active .sidebar-nav-icon svg rect:nth-of-type(2) { transform: translate( 0.4px, -0.4px); }
+#navPrograms:active .sidebar-nav-icon svg rect:nth-of-type(3) { transform: translate(-0.4px,  0.4px); }
+#navPrograms:active .sidebar-nav-icon svg rect:nth-of-type(4) { transform: translate( 0.4px,  0.4px); }
+
 .sidebar-nav-label {
   white-space: nowrap;
   overflow: hidden;
