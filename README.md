@@ -5,9 +5,10 @@
 <p align="center">The Open Source Agent Harness Framework. Any LLM. Any platform. Agentic Programming Paradigm.</p>
 
 <p align="center">
-  <a href="https://pypi.org/project/openprogram/"><img src="https://img.shields.io/pypi/v/openprogram?color=blue" alt="PyPI"></a>
-  <a href="https://github.com/Fzkuji/OpenProgram/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Fzkuji/OpenProgram" alt="License"></a>
-  <a href="https://www.python.org/"><img src="https://img.shields.io/pypi/pyversions/openprogram" alt="Python"></a>
+  <a href="https://github.com/Fzkuji/OpenProgram/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green?style=flat-square"></a>
+  <a href="https://www.python.org/"><img alt="Python" src="https://img.shields.io/badge/python-3.11%2B-blue?style=flat-square"></a>
+  <a href="https://github.com/Fzkuji/OpenProgram/actions/workflows/ci.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/Fzkuji/OpenProgram/ci.yml?branch=main&style=flat-square&label=build"></a>
+  <a href="https://github.com/Fzkuji/OpenProgram/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/Fzkuji/OpenProgram?style=flat-square"></a>
 </p>
 
 <p align="center">
