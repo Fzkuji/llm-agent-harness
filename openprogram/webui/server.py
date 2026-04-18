@@ -754,11 +754,24 @@ def _execute_in_context(conv_id: str, msg_id: str, action: str,
                         resolved_function = _load_function(call_kwargs[param_key])
                         if resolved_function is not None:
                             call_kwargs[param_key] = resolved_function
+                # Pull workdir out before it can collide with any function arg.
+                # Decoupled from function signature: purely a runtime-level setting.
+                # Accept both spellings — chat command parsing uses the user-
+                # facing `work_dir=...`, the /api/run handler already renames
+                # to `_work_dir` for clarity.
+                _work_dir = call_kwargs.pop("_work_dir", None) or call_kwargs.pop("work_dir", None)
+
                 # Use exec runtime (separate from chat runtime)
                 # Check if function has no_tools flag (pure text, no shell/tools)
                 _no_tools = getattr(loaded_func, 'no_tools', False)
                 exec_rt = _get_exec_runtime(no_tools=_no_tools)
                 _apply_thinking_effort(exec_rt, exec_thinking_effort)
+                if _work_dir:
+                    _work_dir = os.path.abspath(os.path.expanduser(_work_dir))
+                    os.makedirs(_work_dir, exist_ok=True)
+                    exec_rt.set_workdir(_work_dir)
+                    conv.setdefault("last_workdirs", {})[func_name] = _work_dir
+                    _log(f"[exec] workdir: {_work_dir}")
                 _log(f"[exec] new runtime: provider={type(exec_rt).__name__}, no_tools={_no_tools}, id={id(exec_rt)}, thinking={exec_thinking_effort}")
                 _register_active_runtime(conv_id, exec_rt)
                 _inject_runtime(loaded_func, call_kwargs, exec_rt)
@@ -1875,9 +1888,22 @@ def create_app():
 
     @app.post("/api/run/{function_name}")
     async def run_function(function_name: str, body: dict = None):
-        """Directly run a specific function."""
+        """Directly run a specific function.
+
+        The `work_dir` field in body is a runtime-level setting (not a function
+        argument) — it becomes the cwd for the exec runtime's subprocess. It is
+        required and validated server-side as a defense in depth (the UI also
+        disables Run when empty).
+        """
         kwargs = body or {}
         conv_id = kwargs.pop("_conv_id", None)
+        work_dir = kwargs.pop("work_dir", None)
+        if not work_dir or not str(work_dir).strip():
+            return JSONResponse(
+                content={"error": "work_dir is required"},
+                status_code=400,
+            )
+        kwargs["_work_dir"] = work_dir
         conv = _get_or_create_conversation(conv_id)
         conv_id = conv["id"]
         msg_id = str(uuid.uuid4())[:8]
@@ -1890,6 +1916,66 @@ def create_app():
         ).start()
 
         return JSONResponse(content={"conv_id": conv_id, "msg_id": msg_id})
+
+    @app.get("/api/browse")
+    async def browse_directory(path: str = None):
+        """List subdirectories of a path for the workdir picker.
+
+        Defaults to the user's home when path is absent or unreadable. Only
+        returns directories (not files) — the picker is for choosing a folder.
+        """
+        import pathlib
+        home = str(pathlib.Path.home())
+        target = path or home
+        target = os.path.abspath(os.path.expanduser(target))
+        if not os.path.isdir(target):
+            target = home
+        try:
+            entries = sorted(os.listdir(target))
+        except PermissionError:
+            return JSONResponse(
+                content={"error": f"Permission denied: {target}"},
+                status_code=403,
+            )
+        subdirs = []
+        for name in entries:
+            if name.startswith("."):
+                continue
+            full = os.path.join(target, name)
+            if os.path.isdir(full):
+                subdirs.append({"name": name, "path": full})
+        parent = os.path.dirname(target) if target != "/" else None
+        return JSONResponse(content={
+            "path": target,
+            "parent": parent if parent and parent != target else None,
+            "subdirs": subdirs,
+            "home": home,
+        })
+
+    @app.get("/api/workdir/defaults")
+    async def workdir_defaults(conv_id: str = None, function_name: str = None):
+        """Return suggested workdir values for the UI to prefill.
+
+        - `last` — the workdir this conversation last used for this function
+        - `repo` — OpenProgram repo root (handy shortcut for meta functions
+                   like edit/create/improve that operate on the framework)
+        - `home` — user's home directory (picker starting point)
+        """
+        import pathlib
+        repo_root = os.path.abspath(os.path.join(
+            os.path.dirname(__file__), "..", ".."
+        ))
+        last = None
+        if conv_id and function_name:
+            with _conversations_lock:
+                conv = _conversations.get(conv_id)
+                if conv:
+                    last = conv.get("last_workdirs", {}).get(function_name)
+        return JSONResponse(content={
+            "last": last,
+            "repo": repo_root,
+            "home": str(pathlib.Path.home()),
+        })
 
     @app.get("/api/history")
     async def get_history():

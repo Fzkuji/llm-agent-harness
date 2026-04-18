@@ -639,6 +639,7 @@ function _pinBottomRow(bottomRow) {
 
 function _buildFormHtml(fn, fieldsHtml) {
   // No footer — .input-bottom-row stays as permanent element in wrapper
+  var workdirHtml = (typeof buildWorkdirField === 'function') ? buildWorkdirField() : '';
   return '<div class="fn-form-header">' +
     '<div class="fn-form-title">' +
       '<span class="fn-form-name"><span style="color:var(--text-secondary);font-weight:400">function </span>' + escHtml(fn.name) + '</span>' +
@@ -646,7 +647,7 @@ function _buildFormHtml(fn, fieldsHtml) {
     '</div>' +
     '<button class="fn-form-close" onclick="closeFnForm()" title="Close">&times;</button>' +
   '</div>' +
-  '<div class="fn-form-body">' + fieldsHtml + '</div>';
+  '<div class="fn-form-body">' + workdirHtml + fieldsHtml + '</div>';
 }
 
 function _showFnFormSwitch(fn, wrapper, sendBtn) {
@@ -687,6 +688,7 @@ function _showFnFormSwitch(fn, wrapper, sendBtn) {
   wrapper.dataset.fnName = fn.name;
   sendBtn.setAttribute('onclick', "submitFnForm('" + escAttr(fn.name) + "')");
   if (typeof buildThinkingMenu === 'function') buildThinkingMenu();
+  if (typeof initWorkdirField === 'function') initWorkdirField(fn.name);
 
   // Animate to target height
   requestAnimationFrame(function() {
@@ -837,6 +839,9 @@ function showFnForm(fn) {
       });
     }
   }, 50);
+
+  // --- Prefill workdir from server (remembered per conversation+function) ---
+  if (typeof initWorkdirField === 'function') initWorkdirField(fn.name);
 }
 
 function closeFnForm() {
@@ -994,6 +999,17 @@ function submitFnForm(fnName) {
   var fn = availableFunctions.find(function(f) { return f.name === fnName; });
   if (!fn) return;
 
+  // work_dir is always required — it's a runtime-level setting, not a param.
+  var workdirEl = document.getElementById('fnField_work_dir');
+  var workdirVal = workdirEl ? workdirEl.value.trim() : '';
+  if (!workdirVal) {
+    if (workdirEl) {
+      workdirEl.style.borderColor = 'var(--accent-red)';
+      workdirEl.focus();
+    }
+    return;
+  }
+
   var params = (fn.params_detail || []).filter(function(p) {
     if (p.name === 'runtime' || p.name === 'callback' || p.name === 'exec_runtime' || p.name === 'review_runtime') return false;
     if (p.hidden) return false;
@@ -1024,6 +1040,13 @@ function submitFnForm(fnName) {
     } else {
       parts.push(p.name + '=' + val);
     }
+  }
+
+  // Append work_dir last so user-facing command text keeps function params first.
+  if (workdirVal.indexOf(' ') !== -1 || workdirVal.indexOf('"') !== -1) {
+    parts.push('work_dir=' + JSON.stringify(workdirVal));
+  } else {
+    parts.push('work_dir=' + workdirVal);
   }
 
   var command = parts.join(' ');
