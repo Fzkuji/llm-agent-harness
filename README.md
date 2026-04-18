@@ -61,7 +61,7 @@ from openprogram import agentic_function, create_runtime
 
 # Auto-detects the best available provider (checks API keys and CLIs)
 runtime = create_runtime()
-# Or be explicit: create_runtime(provider="anthropic", model="claude-sonnet-4-20250514")
+# Or be explicit: create_runtime(provider="anthropic", model="claude-sonnet-4-6")
 
 @agentic_function
 def summarize(text):
@@ -123,7 +123,7 @@ You can always override detection explicitly:
 from openprogram import create_runtime
 
 runtime = create_runtime(provider="openai", model="gpt-5")
-# or: provider="anthropic" | "gemini" | "claude_code" | "codex" | "gemini_cli"
+# or: provider="anthropic" | "gemini" | "claude-code" | "codex" | "gemini-cli"
 ```
 
 To inspect what the library can see on your machine:
@@ -294,7 +294,7 @@ The `create → run → fail → fix → run` cycle means programs improve thems
 
 ## Ecosystem
 
-Agentic Programming ships with two built-in apps under `openprogram/programs/applications/`:
+OpenProgram ships with two built-in apps under `openprogram/programs/applications/`:
 
 | App | Description |
 |-----|-------------|
@@ -355,29 +355,28 @@ Six built-in providers: Anthropic, OpenAI, Gemini (API), Claude Code, Codex, Gem
 <summary><strong>Project Structure</strong></summary>
 
 ```
-agentic/
-├── __init__.py              # agentic_function, Runtime, Context, create_runtime
-├── function.py              # @agentic_function decorator
-├── runtime.py               # Runtime (exec + retry + context injection)
-├── context.py               # Context tree
-├── meta_functions/          # Self-evolving code generation
-│   ├── create.py            #   create() — generate a function
-│   ├── create_app.py        #   create_app() — generate a complete app
-│   ├── fix.py               #   fix() — rewrite broken functions
-│   └── create_skill.py      #   create_skill() — generate SKILL.md
-├── providers/               # Anthropic, OpenAI, Gemini, Claude Code, Codex, Gemini CLI
-├── mcp/                     # MCP server (python -m openprogram.mcp)
-├── functions/               # Built-in agentic functions
-│   ├── deep_work.py         #   Autonomous quality loop
-│   ├── agent_loop.py        #   General agent loop
-│   ├── general_action.py    #   Single-task action
-│   └── wait.py              #   Context-aware waiting
-└── apps/                    # built-in & generated apps
-    ├── GUI-Agent-Harness/   #   autonomous GUI agent (pre-installed)
-    └── Research-Agent-Harness/ # autonomous research agent (pre-installed)
-skills/                      # SKILL.md files for agent integration
-examples/                    # runnable demos
-tests/                       # pytest suite
+openprogram/
+├── __init__.py                      # agentic_function, Runtime, Context, create_runtime
+├── cli.py                           # `openprogram` command entry point
+├── agentic_programming/             # engine — paradigm-essential primitives
+│   ├── function.py                  #   @agentic_function decorator
+│   ├── runtime.py                   #   Runtime (exec + retry + context injection)
+│   ├── context.py                   #   Context tree
+│   ├── events.py                    #   streaming events
+│   └── persistence.py               #   load / save traces
+├── providers/                       # Anthropic, OpenAI, Gemini, Claude Code, Codex, Gemini CLI
+├── programs/
+│   ├── functions/
+│   │   ├── meta/                    #   create / create_app / edit / fix / create_skill
+│   │   ├── buildin/                 #   deep_work / agent_loop / general_action / wait / ask_user
+│   │   └── third_party/             #   user-generated via `openprogram create`
+│   └── applications/                # full apps built on OpenProgram
+│       ├── GUI-Agent-Harness/       #   autonomous GUI agent (pre-installed)
+│       └── Research-Agent-Harness/  #   autonomous research agent (pre-installed)
+└── webui/                           # `openprogram web` — browser UI
+skills/                              # SKILL.md files for agent integration
+examples/                            # runnable demos
+tests/                               # pytest suite
 ```
 
 </details>
