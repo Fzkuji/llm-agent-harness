@@ -138,7 +138,7 @@ def create_app(description: str, runtime: Runtime, name: str = "app") -> str:
 
     # Save to openprogram/programs/applications/ directory
     if not os.environ.get("PYTEST_CURRENT_TEST"):
-        apps_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "apps")
+        apps_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "applications")
         os.makedirs(apps_dir, exist_ok=True)
         filepath = os.path.join(apps_dir, f"{name}.py")
         with open(filepath, "w") as f:

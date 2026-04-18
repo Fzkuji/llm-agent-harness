@@ -277,7 +277,7 @@ def _get_runtime(provider=None, model=None):
 
 def _get_functions_dir():
     import os
-    return os.path.join(os.path.dirname(__file__), "functions")
+    return os.path.join(os.path.dirname(__file__), "programs", "functions", "third_party")
 
 
 def _cmd_providers():

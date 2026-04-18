@@ -297,7 +297,7 @@ def save_function(
     """Save generated function source code to openprogram/programs/functions/third_party/."""
     if os.environ.get("PYTEST_CURRENT_TEST"):
         return ""
-    functions_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "functions")
+    functions_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "third_party")
     os.makedirs(functions_dir, exist_ok=True)
 
     init_path = os.path.join(functions_dir, "__init__.py")

@@ -1648,6 +1648,22 @@ def create_app():
         from starlette.responses import RedirectResponse
         return RedirectResponse(url="/new", status_code=302)
 
+    _FAVICON_SVG = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
+        '<text x="16" y="23" font-family="ui-monospace,SFMono-Regular,Consolas,monospace" '
+        'font-size="22" font-weight="800" text-anchor="middle">'
+        '<tspan fill="#3886e5">{</tspan>'
+        '<tspan fill="#ff6b6b">L</tspan>'
+        '<tspan fill="#3886e5">}</tspan>'
+        '</text></svg>'
+    )
+
+    @app.get("/favicon.ico")
+    @app.get("/favicon.svg")
+    async def favicon():
+        from starlette.responses import Response
+        return Response(content=_FAVICON_SVG, media_type="image/svg+xml")
+
     def _inject_sidebar(html: str) -> str:
         """Replace <!-- SIDEBAR --> placeholder with shared sidebar HTML."""
         if "<!-- SIDEBAR -->" not in html:
@@ -2166,8 +2182,12 @@ def create_app():
     async def get_function_source(name: str):
         """Return full source code of a function."""
         base = os.path.dirname(os.path.dirname(__file__))
-        for subdir in ["functions", "meta_functions"]:
-            filepath = os.path.join(base, subdir, f"{name}.py")
+        for rel_subdir, category in (
+            (("programs", "functions", "meta"), "meta"),
+            (("programs", "functions", "buildin"), "builtin"),
+            (("programs", "functions", "third_party"), "external"),
+        ):
+            filepath = os.path.join(base, *rel_subdir, f"{name}.py")
             if os.path.isfile(filepath):
                 with open(filepath) as f:
                     source = f.read()
@@ -2175,10 +2195,10 @@ def create_app():
                     "name": name,
                     "source": source,
                     "filepath": filepath,
-                    "category": "meta" if subdir == "meta_functions" else "builtin",
+                    "category": category,
                 })
         # Search subdirectory projects (app category)
-        fn_dir = os.path.join(base, "functions")
+        fn_dir = os.path.join(base, "programs", "applications")
         if os.path.isdir(fn_dir):
             for d in os.listdir(fn_dir):
                 full_path = os.path.join(fn_dir, d)
@@ -2233,7 +2253,7 @@ def create_app():
         # Fallback: grep for the function definition in app project directories.
         # This handles external projects loaded via symlinks in openprogram/programs/applications/.
         import re
-        apps_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "apps")
+        apps_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "programs", "applications")
         func_pattern = re.compile(rf'def\s+{re.escape(name)}\s*\(')
         if os.path.isdir(apps_dir):
             for root, dirs, files in os.walk(apps_dir, followlinks=True):
@@ -2267,7 +2287,7 @@ def create_app():
         if not body or "source" not in body:
             return JSONResponse(content={"error": "no source provided"}, status_code=400)
         base = os.path.dirname(os.path.dirname(__file__))
-        filepath = os.path.join(base, "functions", f"{name}.py")
+        filepath = os.path.join(base, "programs", "functions", "third_party", f"{name}.py")
         # Only allow editing user/builtin functions, not meta functions
         if not os.path.isfile(filepath):
             # Create new file
@@ -2281,7 +2301,7 @@ def create_app():
         with open(filepath, "w") as f:
             f.write(body["source"])
         # Reload the module
-        mod_name = f"openprogram.programs.functions.{name}"
+        mod_name = f"openprogram.programs.functions.third_party.{name}"
         if mod_name in sys.modules:
             del sys.modules[mod_name]
         return JSONResponse(content={"saved": True, "filepath": filepath})
@@ -2319,7 +2339,7 @@ def create_app():
     async def delete_function(name: str):
         """Delete a user function file."""
         base = os.path.dirname(os.path.dirname(__file__))
-        filepath = os.path.join(base, "functions", f"{name}.py")
+        filepath = os.path.join(base, "programs", "functions", "third_party", f"{name}.py")
         if not os.path.isfile(filepath):
             return JSONResponse(content={"error": "not found"}, status_code=404)
         # Don't allow deleting built-in functions
@@ -2327,7 +2347,7 @@ def create_app():
         if name in builtin_names:
             return JSONResponse(content={"error": "cannot delete built-in function"}, status_code=403)
         os.remove(filepath)
-        mod_name = f"openprogram.programs.functions.{name}"
+        mod_name = f"openprogram.programs.functions.third_party.{name}"
         if mod_name in sys.modules:
             del sys.modules[mod_name]
         return JSONResponse(content={"deleted": True})
