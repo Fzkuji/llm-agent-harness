@@ -19,8 +19,8 @@ from openprogram.programs.functions.buildin._utils import parse_json
 def survey_topic(topic: str, runtime: Runtime) -> str:
     """Survey the literature for a given research topic.
 
-    You are a senior ML researcher conducting a thorough literature review.
-    Search for and organize the most relevant and recent papers.
+    Search for and organize the most relevant and recent papers on this
+    topic.
 
     For each paper found:
     - Title, authors, venue, year

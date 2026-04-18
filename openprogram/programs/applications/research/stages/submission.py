@@ -17,8 +17,8 @@ from openprogram.agentic_programming.runtime import Runtime
 def check_submission(paper_content: str, venue: str, runtime: Runtime) -> str:
     """Pre-submission checklist for academic paper.
 
-    You are a meticulous research assistant doing final checks before
-    paper submission. Check for ALL of the following:
+    Run final checks before paper submission. Check for ALL of the
+    following:
 
     1. Anonymity:
        - No author names, affiliations, or institutional info

@@ -162,8 +162,7 @@ class CodexRuntime(Runtime):
         # Fallback — codex-spark models are included in ChatGPT subscriptions
         return ["gpt-5.3-codex-spark", "gpt-5.4", "gpt-5.4-mini"]
 
-    def _call(self, content: list[dict], model: str = None, response_format: dict = None,
-              no_tools: bool = False) -> str:
+    def _call(self, content: list[dict], model: str = None, response_format: dict = None) -> str:
         """Call Codex CLI with the content list.
 
         Images are passed via -i flag (file paths). Base64 data is
@@ -171,12 +170,6 @@ class CodexRuntime(Runtime):
         text note (Codex CLI only supports local files).
 
         Unsupported block types (audio, video, file) emit warnings and are skipped.
-
-        The `no_tools` kwarg is accepted for signature compatibility with
-        runtime._call_with_opt but is intentionally NOT used to change the
-        sandbox. Enforcement is prompt-only — the framework has already
-        prepended a router-mode instruction. Switching sandbox mid-session
-        would force a fresh Codex thread and break continuity.
         """
         import warnings
 

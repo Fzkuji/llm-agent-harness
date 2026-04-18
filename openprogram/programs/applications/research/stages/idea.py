@@ -19,9 +19,7 @@ from openprogram.programs.functions.buildin._utils import parse_json
 def generate_ideas(topic: str, gaps: str, runtime: Runtime) -> str:
     """Generate research ideas that address identified gaps.
 
-    You are a creative ML researcher brainstorming novel approaches.
-
-    For each idea:
+    Brainstorm novel approaches. For each idea:
     1. Title: concise, descriptive name
     2. Hypothesis: what you believe and why
     3. Approach: high-level method (2-3 sentences)

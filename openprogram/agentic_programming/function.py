@@ -270,7 +270,6 @@ class agentic_function:
         compress = self.compress
         summarize = self.summarize_kwargs
         system = self.system
-        no_tools = self.no_tools
 
         @functools.wraps(fn)
         async def wrapper(*args, **kwargs):
@@ -286,7 +285,6 @@ class agentic_function:
                 name=fn.__name__,
                 prompt=fn.__doc__ or "",
                 system=system or "",
-                no_tools=no_tools,
                 params={},
                 parent=parent,
                 render=render,
@@ -346,7 +344,6 @@ class agentic_function:
         compress = self.compress
         summarize = self.summarize_kwargs
         system = self.system
-        no_tools = self.no_tools
 
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
@@ -363,7 +360,6 @@ class agentic_function:
                 name=fn.__name__,
                 prompt=fn.__doc__ or "",
                 system=system or "",
-                no_tools=no_tools,
                 params={},
                 parent=parent,
                 render=render,

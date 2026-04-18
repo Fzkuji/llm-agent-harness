@@ -54,9 +54,9 @@ from openprogram.programs.functions.buildin.wait import wait
 
 @agentic_function(compress=True, summarize={"siblings": -1})
 def _step(goal: str, step_number: int, runtime: Runtime) -> dict:
-    """You are an autonomous agent working on a complex goal.
+    """Autonomously advance one step toward a complex goal.
 
-    Based on the goal and your execution history (visible in context),
+    Based on the goal and the execution history (visible in context),
     decide what to do next and do it.
 
     You have full freedom to:

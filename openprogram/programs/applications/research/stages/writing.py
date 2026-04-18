@@ -24,7 +24,7 @@ from openprogram.agentic_programming.runtime import Runtime
 def write_section(section: str, context: str, runtime: Runtime) -> str:
     """Write one section of an academic paper in LaTeX.
 
-    You are a senior ML researcher writing for a top venue (NeurIPS/ICML/ICLR).
+    Write at the level expected by a top venue (NeurIPS/ICML/ICLR).
 
     Rules:
     - Start each subsection with WHY (motivation), then HOW (what you did).
@@ -88,8 +88,8 @@ def gather_context(project_dir: str, section: str) -> str:
 def translate_zh2en(text: str, runtime: Runtime) -> str:
     """Translate Chinese academic draft to English LaTeX.
 
-    You are a top scientific writing expert and senior conference reviewer
-    (ICML/ICLR). Zero tolerance for logic holes and language flaws.
+    Translate at the quality level of a top ICML/ICLR submission. Zero
+    tolerance for logic holes and language flaws.
 
     Rules:
     - No bold, italic, or quotes — keep LaTeX clean.
@@ -114,8 +114,8 @@ def translate_zh2en(text: str, runtime: Runtime) -> str:
 def translate_en2zh(text: str, runtime: Runtime) -> str:
     """Translate English LaTeX to readable Chinese text.
 
-    You are a senior CS academic translator helping researchers
-    quickly understand complex English paper paragraphs.
+    Produce a literal Chinese translation that helps researchers quickly
+    understand complex English paper paragraphs.
 
     Rules:
     - Remove all \\cite{}, \\ref{}, \\label{} commands.
@@ -139,8 +139,8 @@ def translate_en2zh(text: str, runtime: Runtime) -> str:
 def polish_rigorous(text: str, runtime: Runtime) -> str:
     """Deep polish for top-tier conference submission (rigor-focused).
 
-    You are a senior academic editor for NeurIPS/ICLR/ICML submissions.
-    Focus on academic rigor, clarity, and zero-error publishing standard.
+    Polish at the NeurIPS/ICLR/ICML editorial standard — academic rigor,
+    clarity, and zero-error publishing quality.
 
     Rules:
     - Optimize sentence structure for top-venue conventions.
@@ -167,8 +167,8 @@ def polish_rigorous(text: str, runtime: Runtime) -> str:
 def polish_natural(text: str, runtime: Runtime) -> str:
     """Polish for naturalness — remove mechanical/AI writing patterns.
 
-    You are a senior editor focused on making academic text sound like
-    it was written by a native English-speaking researcher.
+    Make the academic text sound like it was written by a native
+    English-speaking researcher.
 
     Rules:
     - Replace overused AI words: leverage→use, delve→investigate,
@@ -198,9 +198,7 @@ def polish_natural(text: str, runtime: Runtime) -> str:
 def check_logic(text: str, runtime: Runtime) -> str:
     """Final manuscript check — only flag fatal errors.
 
-    You are an experienced CS paper reviewer doing a final pass.
-
-    Check ONLY for showstoppers:
+    Do a final pass over the manuscript. Check ONLY for showstoppers:
     - Logical contradictions between statements
     - Terminology inconsistency (same concept, different names)
     - Severe grammar errors that affect comprehension
@@ -223,8 +221,8 @@ def check_logic(text: str, runtime: Runtime) -> str:
 def analyze_results(data: str, runtime: Runtime) -> str:
     """Analyze experimental data and write LaTeX analysis paragraphs.
 
-    You are a senior data scientist with sharp insight into experimental
-    results, writing for a top-tier conference.
+    Write at the quality level of a top-tier conference submission, with
+    sharp insight into experimental results.
 
     Rules:
     - ALL conclusions must be strictly based on the input data.

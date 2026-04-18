@@ -180,12 +180,6 @@ class Runtime:
         if system_text:
             full_content.insert(0, {"type": "text", "text": system_text, "role": "system"})
 
-        # --- no_tools: inject a router-mode preamble + reminder (prompt-only) ---
-        no_tools = _find_no_tools_flag(parent_ctx)
-        if no_tools:
-            full_content.insert(0, {"type": "text", "text": _NO_TOOLS_PREAMBLE, "role": "system"})
-            full_content.append({"type": "text", "text": _NO_TOOLS_REMINDER})
-
         # --- Debug: dump LLM input ---
         if os.environ.get("AGENTIC_DUMP_INPUT"):
             import json as _json
@@ -208,7 +202,7 @@ class Runtime:
         attempts = exec_ctx.attempts if exec_ctx is not None else []
         for attempt in range(self.max_retries):
             try:
-                reply = self._call_with_opt(full_content, use_model, response_format, no_tools)
+                reply = self._call(full_content, model=use_model, response_format=response_format)
                 attempts.append({"attempt": attempt + 1, "reply": reply, "error": None})
                 if exec_ctx is not None:
                     exec_ctx.raw_reply = reply
@@ -287,17 +281,11 @@ class Runtime:
         if system_text:
             full_content.insert(0, {"type": "text", "text": system_text, "role": "system"})
 
-        # --- no_tools: inject a router-mode preamble + reminder (prompt-only) ---
-        no_tools = _find_no_tools_flag(parent_ctx)
-        if no_tools:
-            full_content.insert(0, {"type": "text", "text": _NO_TOOLS_PREAMBLE, "role": "system"})
-            full_content.append({"type": "text", "text": _NO_TOOLS_REMINDER})
-
         # --- Call the LLM (with retry) ---
         attempts = exec_ctx.attempts if exec_ctx is not None else []
         for attempt in range(self.max_retries):
             try:
-                reply = await self._async_call_with_opt(full_content, use_model, response_format, no_tools)
+                reply = await self._async_call(full_content, model=use_model, response_format=response_format)
                 attempts.append({"attempt": attempt + 1, "reply": reply, "error": None})
                 if exec_ctx is not None:
                     exec_ctx.raw_reply = reply
@@ -321,25 +309,6 @@ class Runtime:
                     raise RuntimeError(
                         f"async_exec() failed after {self.max_retries} attempts in {parent_ctx.name if parent_ctx else 'unknown'}():\n{error_report}"
                     ) from e
-
-    def _call_with_opt(self, content: list[dict], model: str, response_format: dict, no_tools: bool) -> str:
-        """Internal dispatcher that routes to `_call` with the `no_tools` flag.
-
-        Subclasses may override `_call` (ignores no_tools) or override this method
-        directly to restrict tool use when the caller is a dispatcher.
-        """
-        try:
-            return self._call(content, model=model, response_format=response_format, no_tools=no_tools)
-        except TypeError:
-            # Subclass's _call predates the no_tools kwarg — call without it.
-            return self._call(content, model=model, response_format=response_format)
-
-    async def _async_call_with_opt(self, content: list[dict], model: str, response_format: dict, no_tools: bool) -> str:
-        """Async counterpart of `_call_with_opt`."""
-        try:
-            return await self._async_call(content, model=model, response_format=response_format, no_tools=no_tools)
-        except TypeError:
-            return await self._async_call(content, model=model, response_format=response_format)
 
     def _call(self, content: list[dict], model: str = "default", response_format: dict = None) -> str:
         """
@@ -393,29 +362,6 @@ class Runtime:
 # Module-level helpers
 # ---------------------------------------------------------------------------
 
-# Prepended when an ancestor @agentic_function is marked no_tools=True.
-# Front-loaded role framing — agent CLIs (Codex, Claude Code) otherwise default
-# to "act as a developer, do the work" given any request. We tell them up front
-# this is a routing turn, not an execution turn, and demand a single JSON blob.
-_NO_TOOLS_PREAMBLE = (
-    "You are a ROUTER, not an agent. This turn is a routing/decision step, "
-    "not a work step.\n"
-    "- Do NOT call shell commands, do NOT read files, do NOT edit anything.\n"
-    "- Do NOT explore the workspace. Every fact you need is provided below.\n"
-    "- Respond with exactly ONE JSON object matching the shape specified "
-    "in the caller's instructions — no prose, no markdown fences, no commentary.\n"
-    "- This must take seconds, not minutes. If you're tempted to investigate, stop.\n"
-)
-
-# Appended AFTER the user content so the instruction wins the recency battle
-# against any role-play framing inside the docstring (e.g. "you are a senior
-# researcher…" which otherwise nudges agentic CLIs back into work mode).
-_NO_TOOLS_REMINDER = (
-    "\n[router-mode reminder] Emit only the JSON described above. "
-    "No tools. No file reads. No shell. No commentary."
-)
-
-
 def _find_system_prompt(ctx: Optional["Context"]) -> str:
     """Walk up the Context tree to find the nearest @agentic_function(system=...).
 
@@ -428,21 +374,6 @@ def _find_system_prompt(ctx: Optional["Context"]) -> str:
             return node.system
         node = node.parent
     return ""
-
-
-def _find_no_tools_flag(ctx: Optional["Context"]) -> bool:
-    """Walk up the Context tree looking for @agentic_function(no_tools=True).
-
-    Returns True as soon as any ancestor (including `ctx` itself) is a
-    dispatcher, otherwise False. Closest-wins is not meaningful here — once
-    a dispatcher is entered, every nested call inherits the restriction.
-    """
-    node = ctx
-    while node is not None:
-        if getattr(node, "no_tools", False):
-            return True
-        node = node.parent
-    return False
 
 
 def _merge_content(

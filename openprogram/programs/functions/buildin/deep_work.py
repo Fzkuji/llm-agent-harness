@@ -91,11 +91,11 @@ LEVELS = {
 
 @agentic_function(compress=True, summarize={"depth": 0, "siblings": 0})
 def _clarify(task: str, level: str, runtime: Runtime) -> dict:
-    """You are about to start a complex, autonomous task.
+    """Clarify a complex, autonomous task before execution.
 
-    Before starting, analyze the task and identify anything that is
-    ambiguous, underspecified, or needs confirmation. This is your
-    ONLY chance to ask the user — after this, you work fully autonomously.
+    Analyze the task and identify anything that is ambiguous,
+    underspecified, or needs confirmation. This is the ONLY chance to
+    ask the user — after this the task runs fully autonomously.
 
     Think about:
     - Is the scope clear? What exactly should be delivered?
@@ -139,9 +139,9 @@ def _clarify(task: str, level: str, runtime: Runtime) -> dict:
 @agentic_function(compress=True, summarize={"siblings": -1})
 def _step(task: str, standard: str, step_number: int,
           feedback: Optional[str], runtime: Runtime) -> dict:
-    """You are an autonomous agent working on a complex, high-standard task.
+    """Autonomously advance one step toward a complex, high-standard task.
 
-    Based on the task, quality standard, your execution history (visible
+    Based on the task, quality standard, the execution history (visible
     in context), and any evaluation feedback, decide what to do next and
     do it.
 
@@ -202,9 +202,8 @@ def _evaluate(task: str, standard: str, work_summary: str,
     """Evaluate work quality. Return JSON with passed/score/verdict."""
     reply = runtime.exec(content=[
         {"type": "text", "text": (
-            "You are a strict, independent evaluator. "
             "Evaluate the work below against the quality standard. "
-            "Be thorough, critical, and professional. Do NOT be lenient.\n\n"
+            "Be thorough, critical, and strict. Do NOT be lenient.\n\n"
             "Evaluate on: completeness, quality, correctness, polish.\n"
             "Do NOT run commands or read files — evaluate based on "
             "the content provided here.\n\n"

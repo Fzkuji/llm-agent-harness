@@ -17,9 +17,7 @@ from openprogram.agentic_programming.runtime import Runtime
 def design_experiments(idea: str, runtime: Runtime) -> str:
     """Design a complete experiment plan for a research idea.
 
-    You are a meticulous ML researcher designing rigorous experiments.
-
-    The plan must include:
+    Design a rigorous experiment plan. It must include:
     1. Research Questions (RQ1, RQ2, RQ3...)
     2. Datasets: which ones, why, train/val/test splits
     3. Baselines: recent methods (within 2 years), justify each
