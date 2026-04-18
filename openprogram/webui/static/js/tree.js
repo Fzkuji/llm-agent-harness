@@ -36,7 +36,12 @@ function refreshInlineTrees() {
 }
 
 function _treeHasRunning(node) {
-  if (node.status === 'running') return true;
+  if (!node) return false;
+  // A finished end_time means the node is no longer running even if status
+  // hasn't been updated yet (race on cancellation).
+  var ended = (node.duration_ms && node.duration_ms > 0) ||
+              (node.end_time && node.end_time > 0);
+  if (node.status === 'running' && !ended) return true;
   if (node.children) {
     for (var i = 0; i < node.children.length; i++) {
       if (_treeHasRunning(node.children[i])) return true;
@@ -224,10 +229,22 @@ function renderTreeNode(node) {
   var hasChildren = node.children && node.children.length > 0;
   var isExpanded = expandedNodes.has(node.path);
   var isSelected = node.path === selectedPath;
-  var displayStatus = (isPaused && node.status === 'running') ? 'paused' : node.status;
+
+  // Treat any node with a finite end_time / duration as done, even if status
+  // slipped through as "running" (e.g. cancellation racing with emit events).
+  var hasFinished = (node.duration_ms && node.duration_ms > 0) ||
+                    (node.end_time && node.end_time > 0);
+  var effectiveStatus = (node.status === 'running' && hasFinished) ? 'error' : node.status;
+  var isCancelled = effectiveStatus === 'error' &&
+                    typeof node.error === 'string' &&
+                    /cancel/i.test(node.error);
+
+  var displayStatus = (isPaused && effectiveStatus === 'running') ? 'paused' : effectiveStatus;
 
   var icon = displayStatus === 'success'
     ? '<span style="color:var(--accent-green)">&#10003;</span>'
+    : isCancelled
+    ? '<span style="color:var(--text-muted)" title="Cancelled">&#9673;</span>'
     : displayStatus === 'error'
     ? '<span style="color:var(--accent-red)">&#10007;</span>'
     : displayStatus === 'paused'
@@ -278,8 +295,8 @@ function renderTreeNode(node) {
       '<span class="node-toggle ' + toggleClass + '" onclick="toggleExpand(event, \'' + escAttr(node.path) + '\')">&#9654;</span>' +
       '<span class="node-icon">' + icon + '</span>' +
       nameCell +
-      (isExec ? '' : '<span class="node-status ' + displayStatus + '">' + displayStatus + '</span>') +
-      (dur ? '<span class="node-duration"' + ((displayStatus === 'running' || displayStatus === 'paused') && node.start_time > 0 ? ' data-running="1" data-start="' + node.start_time + '"' : '') + '>' + dur + '</span>' : '') +
+      (isExec ? '' : '<span class="node-status ' + displayStatus + (isCancelled ? ' cancelled' : '') + '">' + (isCancelled ? 'cancelled' : displayStatus) + '</span>') +
+      (dur ? '<span class="node-duration"' + ((displayStatus === 'running' || displayStatus === 'paused') && node.start_time > 0 && !hasFinished ? ' data-running="1" data-start="' + node.start_time + '"' : '') + '>' + dur + '</span>' : '') +
       (preview ? '<span class="node-output-preview exec-preview">' + escHtml(preview) + '</span>' : '') +
       (output ? '<span class="node-output-preview">' + escHtml(output) + '</span>' : '') +
       (canRetry ? '<span class="retry-icon" onclick="event.stopPropagation();toggleRetryPanel(\'' + escAttr(node.path) + '\')" title="Modify">modify</span>' : '') +

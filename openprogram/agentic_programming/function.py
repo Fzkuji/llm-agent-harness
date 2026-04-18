@@ -309,6 +309,10 @@ class agentic_function:
                 ctx.output = result
                 ctx.status = "success"
                 return result
+            except CancelledError:
+                ctx.error = "Cancelled by user"
+                ctx.status = "error"
+                raise
             except Exception as e:
                 ctx.error = str(e)
                 ctx.status = "error"
@@ -380,6 +384,10 @@ class agentic_function:
                 ctx.output = result
                 ctx.status = "success"
                 return result
+            except CancelledError:
+                ctx.error = "Cancelled by user"
+                ctx.status = "error"
+                raise
             except Exception as e:
                 ctx.error = str(e)
                 ctx.status = "error"

@@ -295,6 +295,14 @@ function handleChatResponse(data) {
   setRunning(false);
   loadAgentSettings();
 
+  // Tear down the elapsed-time ticker. Any surviving data-running attribute
+  // after a terminal message (result / error / cancelled) is a zombie — the
+  // tree won't receive further updates, so the numbers would tick forever.
+  if (_elapsedTimer) { clearInterval(_elapsedTimer); _elapsedTimer = null; }
+  document.querySelectorAll('.node-duration[data-running]').forEach(function(el) {
+    el.removeAttribute('data-running');
+  });
+
   if (type === 'retry_result' && data.function && data.attempts) {
     _handleRetryResult(data);
     return;

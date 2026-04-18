@@ -1003,6 +1003,7 @@ def _execute_in_context(conv_id: str, msg_id: str, action: str,
                 "content": "Execution stopped by user.",
                 "function": func_name,
                 "cancelled": True,
+                "context_tree": ctx._to_dict() if ctx is not None else None,
             })
             return
 

@@ -2693,6 +2693,7 @@ select.fn-form-input {
 .node-status.paused { background: rgba(229,192,123,0.12); color: var(--accent-yellow); }
 .node-status.success { background: rgba(152,195,121,0.12); color: var(--accent-green); }
 .node-status.error { background: rgba(224,108,117,0.12); color: var(--accent-red); }
+.node-status.cancelled { background: rgba(128,128,128,0.14); color: var(--text-muted); }
 .node-duration { font-size: 10px; color: var(--text-secondary); flex-shrink: 0; }
 .node-output-preview { font-size: 10px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
 .node-output-preview.exec-preview { font-family: var(--font-mono); color: var(--text-muted); }
