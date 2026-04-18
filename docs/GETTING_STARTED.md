@@ -12,8 +12,8 @@
 
 ```bash
 # Clone the repo
-git clone https://github.com/Fzkuji/Agentic-Programming.git
-cd Agentic-Programming
+git clone https://github.com/Fzkuji/OpenProgram.git
+cd OpenProgram
 
 # Install (zero dependencies for core)
 pip install -e .
@@ -90,7 +90,7 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 from openprogram.providers import AnthropicRuntime
 
 runtime = AnthropicRuntime(
-    model="claude-sonnet-4-20250514",
+    model="claude-sonnet-4-6",
     # api_key="sk-ant-..."  # or use ANTHROPIC_API_KEY env var
 )
 ```
@@ -295,8 +295,8 @@ def my_function(param):
 
 ```bash
 # 克隆仓库
-git clone https://github.com/Fzkuji/Agentic-Programming.git
-cd Agentic-Programming
+git clone https://github.com/Fzkuji/OpenProgram.git
+cd OpenProgram
 
 # 安装（核心零依赖）
 pip install -e .
@@ -373,7 +373,7 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 from openprogram.providers import AnthropicRuntime
 
 runtime = AnthropicRuntime(
-    model="claude-sonnet-4-20250514",
+    model="claude-sonnet-4-6",
     # api_key="sk-ant-..."  # 或者用 ANTHROPIC_API_KEY 环境变量
 )
 ```

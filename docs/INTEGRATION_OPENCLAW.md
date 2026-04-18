@@ -22,11 +22,11 @@ They compose naturally: OpenClaw's skills can use agentic functions internally.
 # In your OpenClaw workspace
 cd ~/.openclaw/workspace
 
-# Clone Agentic Programming
-git clone https://github.com/Fzkuji/Agentic-Programming.git
+# Clone OpenProgram
+git clone https://github.com/Fzkuji/OpenProgram.git
 
 # Install it
-cd Agentic-Programming
+cd OpenProgram
 pip install -e .
 ```
 
@@ -244,11 +244,11 @@ Agentic Programming 和 OpenClaw 解决不同的问题：
 # 在 OpenClaw 工作区
 cd ~/.openclaw/workspace
 
-# 克隆 Agentic Programming
-git clone https://github.com/Fzkuji/Agentic-Programming.git
+# 克隆 OpenProgram
+git clone https://github.com/Fzkuji/OpenProgram.git
 
 # 安装
-cd Agentic-Programming
+cd OpenProgram
 pip install -e .
 ```
 

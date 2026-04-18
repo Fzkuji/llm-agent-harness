@@ -237,10 +237,6 @@ MCP is the *transport*. Agentic Programming is the *execution model*. They're or
 
 ## Key Features
 
-<p align="center">
-  <img src="docs/images/code_hero_old.png" alt="Agentic Programming code example" width="800">
-</p>
-
 ### Automatic Context
 
 Every `@agentic_function` call creates a **Context** node. Nodes form a tree that is automatically injected into LLM calls:

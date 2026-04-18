@@ -164,7 +164,7 @@ class AnthropicRuntime(Runtime):
         )
         return response.content[0].text
 
-runtime = AnthropicRuntime(api_key="sk-...", model="claude-sonnet-4-20250514")
+runtime = AnthropicRuntime(api_key="sk-...", model="claude-sonnet-4-6")
 ```
 
 ### 多个 Runtime 共存

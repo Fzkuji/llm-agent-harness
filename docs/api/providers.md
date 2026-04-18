@@ -41,7 +41,7 @@ from openprogram.providers import AnthropicRuntime
 
 rt = AnthropicRuntime(
     api_key="sk-ant-...",      # 或设置 ANTHROPIC_API_KEY 环境变量
-    model="claude-sonnet-4-20250514",
+    model="claude-sonnet-4-6",
     max_tokens=4096,
     system="You are a helpful assistant.",  # 可选 system prompt
     cache_system=True,          # 缓存 system prompt（默认 True）
@@ -53,7 +53,7 @@ rt = AnthropicRuntime(
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `api_key` | `str \| None` | `None` | API key。`None` 时读 `ANTHROPIC_API_KEY` 环境变量 |
-| `model` | `str` | `"claude-sonnet-4-20250514"` | 默认模型 |
+| `model` | `str` | `"claude-sonnet-4-6"` | 默认模型 |
 | `max_tokens` | `int` | `4096` | 最大输出 token 数 |
 | `system` | `str \| None` | `None` | System prompt |
 | `cache_system` | `bool` | `True` | 是否缓存 system prompt |
