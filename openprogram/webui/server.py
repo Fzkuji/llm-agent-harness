@@ -1917,6 +1917,43 @@ def create_app():
 
         return JSONResponse(content={"conv_id": conv_id, "msg_id": msg_id})
 
+    @app.post("/api/pick-folder")
+    async def pick_folder(body: dict = None):
+        """Open the OS-native folder chooser and return the selected path.
+
+        macOS: AppleScript's `choose folder` dialog. User cancel → 200 with
+        path=null. We run it here because the webui is local — the dialog
+        pops up on the same machine as the browser.
+        """
+        import subprocess
+        import pathlib
+        if sys.platform != "darwin":
+            return JSONResponse(
+                content={"error": "native folder picker only supported on macOS"},
+                status_code=501,
+            )
+        start = (body or {}).get("start") or str(pathlib.Path.home())
+        start = os.path.abspath(os.path.expanduser(start))
+        if not os.path.isdir(start):
+            start = str(pathlib.Path.home())
+        script = (
+            f'POSIX path of (choose folder with prompt '
+            f'"Select working directory" default location '
+            f'POSIX file "{start}")'
+        )
+        try:
+            result = subprocess.run(
+                ["osascript", "-e", script],
+                capture_output=True, text=True, timeout=600,
+            )
+        except Exception as exc:
+            return JSONResponse(content={"error": str(exc)}, status_code=500)
+        if result.returncode != 0:
+            # Most common non-zero: user cancelled.
+            return JSONResponse(content={"path": None})
+        path = result.stdout.strip().rstrip("/")
+        return JSONResponse(content={"path": path or None})
+
     @app.get("/api/browse")
     async def browse_directory(path: str = None):
         """List subdirectories of a path for the workdir picker.

@@ -1003,15 +1003,9 @@ function submitFnForm(fnName) {
   var workdirEl = document.getElementById('fnField_work_dir');
   var workdirVal = workdirEl ? workdirEl.value.trim() : '';
   if (!workdirVal) {
-    var pill = document.getElementById('workdirPill');
-    if (pill) {
-      pill.classList.add('workdir-pill-error');
-      pill.focus && pill.focus();
-      // One-shot: error outline stays until the user opens the menu.
-      pill.addEventListener('click', function handler() {
-        pill.classList.remove('workdir-pill-error');
-        pill.removeEventListener('click', handler);
-      });
+    if (workdirEl) {
+      workdirEl.classList.add('workdir-input-error');
+      workdirEl.focus();
     }
     return;
   }
