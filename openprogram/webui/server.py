@@ -329,6 +329,13 @@ def _on_context_event(event_type: str, data: dict):
     # If we're paused and a node just got created, wait
     if event_type == "node_created":
         wait_if_paused()
+        # When stop fires on a paused task, resume_execution() unblocks this
+        # thread. Raise immediately so the worker aborts at the nearest node
+        # boundary instead of running another full agentic call first.
+        from openprogram.webui._pause_stop import _current_conv_id as _cv
+        _cid = _cv.get(None)
+        if _cid and _is_cancelled(_cid):
+            raise _CancelledError(f"Execution stopped by user (conv={_cid})")
 
     # Store/update root contexts
     path = data.get("path", "")

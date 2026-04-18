@@ -88,6 +88,29 @@ function handleMessage(msg) {
       isPaused = msg.paused;
       if (msg.stopped) {
         isRunning = false;
+        // Optimistically mark every still-running node as cancelled.
+        // The worker thread will broadcast the authoritative tree_update
+        // momentarily, but without this step the tree flashes "running"
+        // (blue pulse) between the stop ack and the worker's final emit.
+        function _markCancelled(node) {
+          if (!node) return;
+          if (node.status === 'running') {
+            node.status = 'error';
+            if (!node.error) node.error = 'Cancelled by user';
+            if (!node.end_time) node.end_time = Date.now() / 1000;
+          }
+          if (node.children) node.children.forEach(_markCancelled);
+        }
+        try { (trees || []).forEach(_markCancelled); } catch(e) {}
+        try {
+          Object.keys(_nodeCache || {}).forEach(function(k) { _markCancelled(_nodeCache[k]); });
+        } catch(e) {}
+        // Tear down the elapsed-time ticker and strip data-running flags so
+        // the frozen durations stop being overwritten.
+        if (_elapsedTimer) { clearInterval(_elapsedTimer); _elapsedTimer = null; }
+        document.querySelectorAll('.node-duration[data-running]').forEach(function(el) {
+          el.removeAttribute('data-running');
+        });
       }
       updatePauseBtn();
       refreshInlineTrees();

@@ -299,8 +299,12 @@ class agentic_function:
             wrapper._last_ctx = ctx
 
             ctx_token = _current_ctx.set(ctx)
-            _emit_event("node_created", ctx)
             try:
+                # Emit node_created inside the try block so any pre-invocation
+                # hook fired by the emit (e.g. pause → stop → CancelledError)
+                # is caught by the except branches below and the ctx is marked
+                # as cancelled/error rather than orphaned.
+                _emit_event("node_created", ctx)
                 bound = sig.bind(*new_args, **new_kwargs)
                 bound.apply_defaults()
                 ctx.params = dict(bound.arguments)
@@ -373,8 +377,12 @@ class agentic_function:
 
             # Set as current context for the duration of the call
             ctx_token = _current_ctx.set(ctx)
-            _emit_event("node_created", ctx)
             try:
+                # Emit node_created inside the try block so any pre-invocation
+                # hook fired by the emit (e.g. pause → stop → CancelledError)
+                # is caught by the except branches below and the ctx is marked
+                # as cancelled/error rather than orphaned.
+                _emit_event("node_created", ctx)
                 # Bind arguments to record params
                 bound = sig.bind(*new_args, **new_kwargs)
                 bound.apply_defaults()
