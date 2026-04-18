@@ -9,7 +9,6 @@ to avoid a circular dep with server.py.
 from __future__ import annotations
 
 import json
-import os
 import threading
 from typing import Optional
 
@@ -93,11 +92,7 @@ def _create_runtime_for_visualizer(provider: str):
     """
     from openprogram.providers import create_runtime
     if provider == "codex":
-        func_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "functions")
-        func_dir = os.path.abspath(func_dir)
-        return create_runtime(
-            provider=provider, session_id=None, search=True, workdir=func_dir,
-        )
+        return create_runtime(provider=provider, session_id=None, search=True)
     return create_runtime(provider=provider)
 
 
@@ -205,10 +200,9 @@ def _get_exec_runtime(no_tools: bool = False):
         )
     if no_tools and _exec_provider == "codex":
         from openprogram.providers import create_runtime
-        func_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "functions")
         rt = create_runtime(
             provider="codex", session_id=None, search=False,
-            full_auto=False, sandbox="read-only", workdir=os.path.abspath(func_dir),
+            full_auto=False, sandbox="read-only",
         )
     elif no_tools and _exec_provider == "claude-code":
         from openprogram.providers import create_runtime
