@@ -1665,6 +1665,7 @@ def create_app():
     static_dir = os.path.join(os.path.dirname(__file__), "static")
     app.mount("/css", StaticFiles(directory=os.path.join(static_dir, "css")), name="css")
     app.mount("/js", StaticFiles(directory=os.path.join(static_dir, "js")), name="js")
+    app.mount("/images", StaticFiles(directory=os.path.join(static_dir, "images")), name="images")
 
     @app.on_event("startup")
     async def _capture_loop():

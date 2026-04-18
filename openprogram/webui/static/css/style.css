@@ -158,25 +158,21 @@ html, body {
 }
 
 .logo {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--text-bright);
-  letter-spacing: -0.3px;
-  white-space: nowrap;
+  display: flex;
+  align-items: center;
   padding-left: 8px;
   height: 32px;
-  line-height: 32px;
-  /* flex: shrink naturally so toggle slides smoothly on collapse */
   flex: 1;
   min-width: 0;
   overflow: hidden;
   transition: opacity 0.15s ease, padding-left 0.3s ease;
 }
 
-.logo-accent { font-family: var(--font-mono); color: var(--accent-blue); }
-.logo-l1 { color: #ff6b6b; }
-.logo-l2 { color: #4ecdc4; }
-.logo-m  { color: #ffe66d; }
+.logo-img {
+  height: 26px;
+  width: auto;
+  display: block;
+}
 
 .sidebar-toggle {
   background: transparent;
@@ -2020,10 +2016,15 @@ a.user-menu-item { text-decoration: none; color: inherit; }
 }
 
 .welcome-logo {
-  font-size: 48px;
-  color: var(--accent-blue);
-  font-weight: 700;
-  font-family: var(--font-mono);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.welcome-logo-img {
+  height: 96px;
+  width: auto;
+  display: block;
 }
 
 .welcome-title {
