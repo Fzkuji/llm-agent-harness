@@ -57,6 +57,20 @@ JWT_CLAIM_PATH = "https://api.openai.com/auth"
 
 ORIGINATOR = "openprogram"
 
+# Known Codex-route model ids as of 2026-04. Curated from OpenClaw's catalog
+# (augmentModelCatalog + resolveCodexForwardCompatModel). The actual set
+# available to a specific ChatGPT account depends on subscription tier.
+_KNOWN_CODEX_MODELS = [
+    "gpt-5.4",
+    "gpt-5.4-mini",
+    "gpt-5.4-pro",
+    "gpt-5.3-codex",
+    "gpt-5.3-codex-spark",
+    "gpt-5.2-codex",
+    "gpt-5.1-codex",
+    "gpt-5.1-codex-mini",
+]
+
 
 # ----------------------------------------------------------------------------
 # auth.json reading + JWT decoding
@@ -414,6 +428,10 @@ class OpenAICodexRuntime(Runtime):
         self.has_session = False  # we don't manage a server-side session
 
     # ----- lifecycle ---------------------------------------------------------
+
+    def list_models(self) -> list[str]:
+        """Curated Codex-route model ids. Actual access depends on your tier."""
+        return list(_KNOWN_CODEX_MODELS)
 
     def _get_client(self) -> httpx.Client:
         if self._client is None:
