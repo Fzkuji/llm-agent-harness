@@ -2084,14 +2084,14 @@ def create_app():
     async def get_providers():
         return JSONResponse(content=_list_providers())
 
-    @app.get("/api/providers/{name}/onboarding")
-    async def get_onboarding(name: str):
-        """Return the onboarding schema (label + step metadata) for a provider."""
-        from openprogram.providers import onboarding as _ob
-        entry = _ob.get_provider(name)
+    @app.get("/api/providers/{name}/configure")
+    async def get_provider_configure(name: str):
+        """Return the configuration schema (label + step metadata) for a provider."""
+        from openprogram.providers import configuration as _cfg
+        entry = _cfg.get_provider(name)
         if entry is None:
             return JSONResponse(
-                content={"error": f"No onboarding for provider {name!r}"},
+                content={"error": f"No configuration for provider {name!r}"},
                 status_code=404,
             )
         return JSONResponse(content={
@@ -2102,12 +2102,12 @@ def create_app():
             "steps": [{"id": s["id"], "label": s["label"]} for s in entry["steps"]],
         })
 
-    @app.post("/api/providers/{name}/onboarding/step/{step_id}")
-    async def run_onboarding_step(name: str, step_id: str, body: dict = None):
-        """Execute one onboarding step. Body is the step context (accumulates state)."""
-        from openprogram.providers import onboarding as _ob
+    @app.post("/api/providers/{name}/configure/step/{step_id}")
+    async def run_configure_step(name: str, step_id: str, body: dict = None):
+        """Execute one configuration step. Body is the step context (accumulates state)."""
+        from openprogram.providers import configuration as _cfg
         ctx = dict(body or {})
-        result = _ob.run_step(name, step_id, ctx)
+        result = _cfg.run_step(name, step_id, ctx)
         # Return both the result and the updated ctx so the client can keep state
         return JSONResponse(content={"result": result, "context": ctx})
 

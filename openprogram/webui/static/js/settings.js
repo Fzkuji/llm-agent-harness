@@ -163,9 +163,9 @@ var _wizardState = null;  // { provider, steps, idx, ctx }
 
 async function openSetupWizard(providerId) {
   try {
-    var resp = await fetch('/api/providers/' + encodeURIComponent(providerId) + '/onboarding');
+    var resp = await fetch('/api/providers/' + encodeURIComponent(providerId) + '/configure');
     if (!resp.ok) {
-      alert('No onboarding for ' + providerId + ' yet.');
+      alert('No configuration wizard for ' + providerId + ' yet.');
       return;
     }
     var schema = await resp.json();
@@ -174,7 +174,7 @@ async function openSetupWizard(providerId) {
     _renderWizard();
     _runWizardStep();
   } catch(e) {
-    alert('Failed to load onboarding: ' + e.message);
+    alert('Failed to load configuration: ' + e.message);
   }
 }
 
@@ -316,7 +316,7 @@ async function _runWizardStep() {
   _renderWizardSteps();  // show spinner-ish state for current
   try {
     var resp = await fetch('/api/providers/' + encodeURIComponent(s.provider) +
-                           '/onboarding/step/' + encodeURIComponent(step.id), {
+                           '/configure/step/' + encodeURIComponent(step.id), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(s.ctx),

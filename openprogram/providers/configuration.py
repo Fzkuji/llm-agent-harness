@@ -1,10 +1,10 @@
 """
-Shared provider onboarding framework.
+Shared provider configuration framework.
 
-Each provider declares a list of onboarding steps (check_cli, check_auth,
+Each provider declares a list of configuration steps (check_cli, check_auth,
 select_model, save, ...) as callables. Both the CLI wizard
 (`openprogram configure`) and the WebUI wizard modal consume this same
-schema, so onboarding logic lives in one place.
+schema, so configuration logic lives in one place.
 
 Step contract:
     fn(context: dict) -> dict with:
@@ -31,7 +31,7 @@ from typing import Any, Callable
 
 
 # ---------------------------------------------------------------------------
-# Codex onboarding steps
+# Codex configuration steps
 # ---------------------------------------------------------------------------
 
 _CODEX_MODELS = [
@@ -165,7 +165,7 @@ def _codex_save(ctx: dict) -> dict:
 # Registry
 # ---------------------------------------------------------------------------
 
-PROVIDER_ONBOARDING: dict[str, dict] = {
+PROVIDER_CONFIG: dict[str, dict] = {
     "openai-codex": {
         "label": "OpenAI Codex (ChatGPT subscription)",
         "type": "cli-oauth",
@@ -184,7 +184,7 @@ PROVIDER_ONBOARDING: dict[str, dict] = {
 
 
 def list_providers() -> list[dict]:
-    """Metadata for every onboardable provider (for menu UIs)."""
+    """Metadata for every configurable provider (for menu UIs)."""
     return [
         {
             "id": pid,
@@ -193,17 +193,17 @@ def list_providers() -> list[dict]:
             "description": entry.get("description", ""),
             "step_ids": [s["id"] for s in entry["steps"]],
         }
-        for pid, entry in PROVIDER_ONBOARDING.items()
+        for pid, entry in PROVIDER_CONFIG.items()
     ]
 
 
 def get_provider(provider: str) -> dict | None:
-    return PROVIDER_ONBOARDING.get(provider)
+    return PROVIDER_CONFIG.get(provider)
 
 
 def run_step(provider: str, step_id: str, context: dict) -> dict:
     """Execute one step by id. Returns the step's result dict."""
-    entry = PROVIDER_ONBOARDING.get(provider)
+    entry = PROVIDER_CONFIG.get(provider)
     if entry is None:
         return {"status": "error", "message": f"Unknown provider: {provider}"}
     for step in entry["steps"]:

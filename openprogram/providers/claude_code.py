@@ -271,10 +271,11 @@ class ClaudeCodeRuntime(Runtime):
             # Context-aware compact: if the previous turn pushed us past the
             # configured threshold, compact before sending the new prompt.
             # Falls back to a full process restart if compact fails.
+            # _last_context_tokens is updated from compact_boundary.post_tokens
+            # during compact(), so no manual reset needed here.
             if self._should_compact():
                 try:
                     self.compact()
-                    self._last_context_tokens = 0  # optimistic reset
                 except Exception:
                     self._restart_process()
 
@@ -349,6 +350,12 @@ class ClaudeCodeRuntime(Runtime):
         # the correct entry out of `modelUsage` (which often contains 2 keys:
         # main model + the Haiku router-helper CLI uses for auxiliary tasks).
         primary_model: Optional[str] = None
+        # If a `compact_boundary` event appears in this stream, the modelUsage
+        # in the result reflects the compact operation's own consumption (it
+        # reads the whole pre-compact session to generate the summary), NOT
+        # the post-compact session size. Capture the real post size here so
+        # the result handler can override _last_context_tokens correctly.
+        post_compact_tokens: Optional[int] = None
 
         while time.time() < deadline:
             # Check if process is still alive
@@ -427,11 +434,16 @@ class ClaudeCodeRuntime(Runtime):
                     if win:
                         self._context_window_tokens = win
                     self._resolved_model_id = picked
-                    self._last_context_tokens = (
-                        mu.get("inputTokens", 0)
-                        + mu.get("cacheReadInputTokens", 0)
-                        + mu.get("cacheCreationInputTokens", 0)
-                    )
+                # modelUsage is CUMULATIVE across the whole subprocess session,
+                # so it can't be used for a per-turn context-size signal.
+                # The top-level `usage` dict reports per-turn tokens — use it.
+                # After /compact, the result event's `usage` is all-zeros (the
+                # compact itself had no user-visible response); override with
+                # compact_boundary.post_tokens in that case.
+                if post_compact_tokens is not None:
+                    self._last_context_tokens = post_compact_tokens
+                else:
+                    self._last_context_tokens = usage_dict["input_tokens"]
 
                 event["result"] = result_text[:200]
                 event["usage"] = usage_dict
@@ -470,6 +482,18 @@ class ClaudeCodeRuntime(Runtime):
             # `system` event — first stream event; carries init model id.
             if msg_type == "system" and primary_model is None:
                 primary_model = data.get("model")
+
+            # `compact_boundary` event — emitted when /compact runs. Its
+            # compact_metadata.post_tokens is the authoritative post-compact
+            # session size. Save it so the result handler can override the
+            # otherwise-misleading modelUsage numbers.
+            if msg_type == "system" and data.get("subtype") == "compact_boundary":
+                meta = data.get("compact_metadata") or {}
+                post = meta.get("post_tokens")
+                if post is not None:
+                    post_compact_tokens = int(post)
+                event["compact_pre"] = meta.get("pre_tokens")
+                event["compact_post"] = post
 
             # Other events (rate_limit, system, etc.)
             events.append(event)
@@ -540,14 +564,23 @@ class ClaudeCodeRuntime(Runtime):
             return False
         return self._last_context_tokens >= thr
 
-    def compact(self):
+    def compact(self, threshold_tokens: Optional[int] = None) -> bool:
         """Send /compact to compress the conversation context.
 
-        This is a Claude Code slash command that summarizes prior messages
-        to free up context window space. Keeps the session alive without
-        restarting the process. Callable from outside (GUI agent loops
-        that want to compress at specific step boundaries).
+        Claude Code slash command that summarizes prior messages to free up
+        context window space. Keeps the session alive without restarting
+        the process. Callable from outside (e.g., GUI agent loops that
+        want to compress at specific step boundaries).
+
+        Args:
+            threshold_tokens: If given, skip when current context is below
+                this size (returns False). If None, always run.
+
+        Returns:
+            True if compact ran, False if skipped due to threshold.
         """
+        if threshold_tokens is not None and self._last_context_tokens < threshold_tokens:
+            return False
         import sys as _sys
         t0 = time.time()
         try:
@@ -572,6 +605,7 @@ class ClaudeCodeRuntime(Runtime):
             )
         except Exception as e:
             print(f"[compact] ERROR after {time.time()-t0:.1f}s: {e}", file=_sys.stderr)
+        return True
 
     def _encode_image(self, block: dict) -> Optional[dict]:
         """Convert an image content block to Anthropic base64 format."""

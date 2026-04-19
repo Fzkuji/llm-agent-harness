@@ -1,55 +1,31 @@
 """
-Codex CLI provider — routes LLM calls through the OpenAI Codex CLI.
+OpenAICodexRuntime — HTTP-direct provider for OpenAI Codex.
 
-Uses `codex exec` (non-interactive mode) with configurable sandbox,
-approval policy, and optional web search.
-No API key needed in the harness — Codex CLI uses its own auth.
+Two modes, both routed through the same Runtime class:
 
-Setup (subscription mode — recommended):
-    Using device auth lets Codex consume your ChatGPT subscription quota
-    instead of burning API credits. Two steps:
+  auth_mode == "chatgpt"  (ChatGPT subscription)
+      URL:  https://chatgpt.com/backend-api/codex/responses
+      Auth: Bearer <OAuth access_token>  + chatgpt-account-id header
+      Creds: read from ~/.codex/auth.json, refreshed against
+             https://auth.openai.com/oauth/token when expired.
 
-    1. Enable device code auth in ChatGPT web settings:
-       Log in to chatgpt.com → Settings → Security →
-       Turn on "为 Codex 应用设备代码授权" (Enable device code authorization for Codex).
+  auth_mode == "apikey"  (standard OpenAI API billing)
+      URL:  https://api.openai.com/v1/responses
+      Auth: Bearer <OPENAI_API_KEY>
+      Creds: auth.json's OPENAI_API_KEY field, or the env var.
 
-    2. Authenticate the CLI:
-       $ codex login --device-auth
-       This opens a browser for OAuth. Once approved, the token is stored
-       in ~/.codex/auth.json and refreshes automatically.
+No codex CLI subprocess is involved at call time. The codex CLI is only
+needed once, for `codex login --device-auth`, to create auth.json.
 
-    Note: If OPENAI_API_KEY is set in your environment, Codex CLI will
-    prioritise it over device auth and consume API credits. This provider
-    automatically strips OPENAI_API_KEY from the subprocess environment
-    so that device auth (subscription) is always used.
-
-Setup (API key mode — alternative):
-    $ export OPENAI_API_KEY=sk-...
-    $ codex login --with-api-key
-    This uses your OpenAI API quota directly. Not recommended if you have
-    a ChatGPT subscription.
-
-Supports:
-- Text content blocks
-- Image content blocks (via -i flag for file paths, temp files for base64)
-- Session continuity (via `codex exec resume <session_id>`)
-
-Unsupported (with warnings):
-- Audio content blocks (Codex CLI does not support audio input)
-- Video content blocks (Codex CLI does not support video input)
-- File/PDF content blocks (Codex CLI does not support document input)
+Protocol + OAuth parameters translated from @mariozechner/pi-ai
+(packages/ai/src/providers/openai-codex-responses.ts and
+packages/ai/src/utils/oauth/openai-codex.ts, MIT license).
 
 Usage:
     from openprogram.providers.openai_codex import OpenAICodexRuntime
 
-    runtime = OpenAICodexRuntime(model="o4-mini")
-
-    @agentic_function
-    def observe(task):
-        return runtime.exec(content=[
-            {"type": "text", "text": f"Find: {task}"},
-            {"type": "image", "path": "screenshot.png"},
-        ])
+    rt = OpenAICodexRuntime(model="gpt-5.4-mini")
+    reply = rt.exec(content=[{"type": "text", "text": "hi"}])
 """
 
 from __future__ import annotations
@@ -58,650 +34,434 @@ import base64
 import json
 import mimetypes
 import os
-import queue
-import shutil
-import subprocess
-import tempfile
+import sys
 import threading
-from typing import Optional
+import time
+from pathlib import Path
+from typing import Any, Optional
+
+import httpx
 
 from openprogram.agentic_programming.runtime import Runtime
 
 
+# ----------------------------------------------------------------------------
+# Protocol constants (from pi-ai)
+# ----------------------------------------------------------------------------
+
+CHATGPT_BACKEND_URL = "https://chatgpt.com/backend-api/codex/responses"
+OPENAI_API_URL = "https://api.openai.com/v1/responses"
+OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token"
+OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
+JWT_CLAIM_PATH = "https://api.openai.com/auth"
+
+ORIGINATOR = "openprogram"
+
+
+# ----------------------------------------------------------------------------
+# auth.json reading + JWT decoding
+# ----------------------------------------------------------------------------
+
+def _codex_home() -> Path:
+    """Honor $CODEX_HOME, default ~/.codex (matches Codex CLI)."""
+    configured = os.environ.get("CODEX_HOME", "").strip()
+    if not configured:
+        return Path.home() / ".codex"
+    if configured == "~":
+        return Path.home()
+    if configured.startswith("~/"):
+        return Path.home() / configured[2:]
+    return Path(configured).resolve()
+
+
+def _auth_path() -> Path:
+    return _codex_home() / "auth.json"
+
+
+def _decode_jwt_payload(token: str) -> dict[str, Any]:
+    """Decode JWT payload section (second segment)."""
+    parts = token.split(".")
+    if len(parts) != 3:
+        raise ValueError("Invalid JWT: not 3 segments")
+    padded = parts[1] + "=" * (-len(parts[1]) % 4)
+    raw = base64.urlsafe_b64decode(padded.encode("ascii"))
+    return json.loads(raw.decode("utf-8"))
+
+
+def _extract_account_id(access_token: str) -> str:
+    """JWT.auth.chatgpt_account_id — required for chatgpt-account-id header."""
+    payload = _decode_jwt_payload(access_token)
+    auth = payload.get(JWT_CLAIM_PATH) or {}
+    account_id = auth.get("chatgpt_account_id")
+    if not isinstance(account_id, str) or not account_id.strip():
+        raise RuntimeError("JWT has no chatgpt_account_id — re-run `codex login --device-auth`")
+    return account_id.strip()
+
+
+def _jwt_expiry_epoch(access_token: str) -> Optional[int]:
+    try:
+        exp = _decode_jwt_payload(access_token).get("exp")
+        return int(exp) if isinstance(exp, (int, float)) else None
+    except Exception:
+        return None
+
+
+# ----------------------------------------------------------------------------
+# OAuth token refresh (when access_token is close to expiring)
+# ----------------------------------------------------------------------------
+
+def _refresh_oauth_token(refresh_token: str, timeout: float = 30.0) -> dict[str, Any]:
+    """POST to auth.openai.com/oauth/token, return new {access_token, refresh_token, expires_in}."""
+    r = httpx.post(
+        OAUTH_TOKEN_URL,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        data={
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": OAUTH_CLIENT_ID,
+        },
+        timeout=timeout,
+    )
+    if r.status_code != 200:
+        raise RuntimeError(f"OAuth refresh failed {r.status_code}: {r.text[:200]}")
+    data = r.json()
+    for k in ("access_token", "refresh_token", "expires_in"):
+        if k not in data:
+            raise RuntimeError(f"OAuth refresh response missing {k!r}")
+    return data
+
+
+def _write_auth_json_atomic(data: dict[str, Any]) -> None:
+    """Rewrite ~/.codex/auth.json atomically (same dir rename)."""
+    path = _auth_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+
+
+# ----------------------------------------------------------------------------
+# Credential resolution (what token do we use, and against which endpoint)
+# ----------------------------------------------------------------------------
+
+class _Credentials:
+    """Resolved auth state for one call.
+
+    mode == "chatgpt":  uses OAuth token + chatgpt backend endpoint
+    mode == "apikey":   uses API key + api.openai.com endpoint
+    """
+
+    def __init__(self, mode: str, token: str, account_id: Optional[str], url: str):
+        self.mode = mode
+        self.token = token
+        self.account_id = account_id
+        self.url = url
+
+
+class _AuthState:
+    """Cached auth.json + refresh logic.
+
+    Shared across calls from the same runtime. Thread-safe.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._auth: Optional[dict[str, Any]] = None
+
+    def _load(self) -> dict[str, Any]:
+        if self._auth is not None:
+            return self._auth
+        path = _auth_path()
+        if not path.exists():
+            raise RuntimeError(
+                f"{path} not found. Run `codex login --device-auth` "
+                "(ChatGPT subscription) or `codex login --with-api-key`."
+            )
+        self._auth = json.loads(path.read_text(encoding="utf-8"))
+        return self._auth
+
+    def resolve(self) -> _Credentials:
+        """Return the current credentials, refreshing the OAuth token if needed."""
+        with self._lock:
+            # Prefer OPENAI_API_KEY env var if set — lets users override auth.json
+            env_key = os.environ.get("OPENAI_API_KEY", "").strip()
+            if env_key:
+                return _Credentials("apikey", env_key, None, OPENAI_API_URL)
+
+            auth = self._load()
+            mode = auth.get("auth_mode")
+
+            if mode == "apikey":
+                tokens = auth.get("tokens") or {}
+                api_key = (
+                    tokens.get("api_key")
+                    or auth.get("OPENAI_API_KEY")
+                    or tokens.get("access_token")
+                )
+                if not api_key:
+                    raise RuntimeError("auth_mode=apikey but no key in auth.json")
+                return _Credentials("apikey", api_key, None, OPENAI_API_URL)
+
+            if mode == "chatgpt":
+                tokens = auth.get("tokens") or {}
+                access = tokens.get("access_token")
+                refresh = tokens.get("refresh_token")
+                if not access or not refresh:
+                    raise RuntimeError("auth_mode=chatgpt but tokens missing")
+
+                exp = _jwt_expiry_epoch(access)
+                if exp is not None and exp - 60 < time.time():
+                    # Refresh: access token expires in <60s
+                    new_tokens = _refresh_oauth_token(refresh)
+                    access = new_tokens["access_token"]
+                    auth["tokens"]["access_token"] = access
+                    auth["tokens"]["refresh_token"] = new_tokens["refresh_token"]
+                    if "id_token" in new_tokens:
+                        auth["tokens"]["id_token"] = new_tokens["id_token"]
+                    _write_auth_json_atomic(auth)
+                    self._auth = auth
+
+                account_id = tokens.get("account_id") or _extract_account_id(access)
+                return _Credentials("chatgpt", access, account_id, CHATGPT_BACKEND_URL)
+
+            raise RuntimeError(f"Unsupported auth_mode {mode!r} in {_auth_path()}")
+
+
+# ----------------------------------------------------------------------------
+# Request construction
+# ----------------------------------------------------------------------------
+
+def _convert_content_to_input(content: list[dict]) -> list[dict]:
+    """OpenProgram content blocks → Responses API `input` (single user message).
+
+    Supported block types:
+      {"type": "text", "text": "..."}
+      {"type": "image", "path": "..."}                (read + base64-encode)
+      {"type": "image", "data": "...", "media_type": "image/png"}  (pre-encoded)
+    """
+    parts: list[dict] = []
+    for block in content:
+        btype = block.get("type", "text")
+        if btype == "text":
+            parts.append({"type": "input_text", "text": block.get("text", "")})
+        elif btype == "image":
+            if "data" in block:
+                mt = block.get("media_type", "image/png")
+                parts.append({
+                    "type": "input_image",
+                    "detail": "auto",
+                    "image_url": f"data:{mt};base64,{block['data']}",
+                })
+            elif "path" in block:
+                path = block["path"]
+                mt = mimetypes.guess_type(path)[0] or "image/png"
+                with open(path, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode("ascii")
+                parts.append({
+                    "type": "input_image",
+                    "detail": "auto",
+                    "image_url": f"data:{mt};base64,{b64}",
+                })
+        # Silently skip unknown block types for now (audio/video/file)
+    return [{"role": "user", "content": parts}]
+
+
+def _build_headers(creds: _Credentials) -> dict[str, str]:
+    h = {
+        "Authorization": f"Bearer {creds.token}",
+        "User-Agent": f"openprogram ({sys.platform})",
+        "content-type": "application/json",
+        "accept": "text/event-stream",
+        "OpenAI-Beta": "responses=experimental",
+    }
+    if creds.mode == "chatgpt":
+        h["chatgpt-account-id"] = creds.account_id
+        h["originator"] = ORIGINATOR
+    return h
+
+
+def _build_body(
+    model: str,
+    content: list[dict],
+    instructions: Optional[str],
+    reasoning_effort: Optional[str],
+    response_format: Optional[dict],
+) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "model": model,
+        "store": False,
+        "stream": True,
+        "input": _convert_content_to_input(content),
+        "tool_choice": "auto",
+        "parallel_tool_calls": True,
+    }
+    if instructions:
+        body["instructions"] = instructions
+    if reasoning_effort:
+        body["reasoning"] = {"effort": reasoning_effort, "summary": "auto"}
+    if response_format:
+        # Nudge model toward a JSON schema reply — approximation of what
+        # OpenAI's "structured outputs" does. Actual schema enforcement
+        # happens in the Responses API via text.format for strict mode.
+        body.setdefault("text", {})["format"] = {
+            "type": "json_schema",
+            "name": response_format.get("name", "response"),
+            "schema": response_format.get("schema", response_format),
+            "strict": True,
+        }
+    return body
+
+
+# ----------------------------------------------------------------------------
+# SSE parsing — accumulate response.output_text.delta, stop at completed/failed
+# ----------------------------------------------------------------------------
+
+def _parse_sse_response(response: httpx.Response) -> tuple[str, dict[str, Any]]:
+    """Consume the SSE stream. Return (final_text, usage_dict)."""
+    text_parts: list[str] = []
+    usage: dict[str, Any] = {}
+    for raw_line in response.iter_lines():
+        if not raw_line:
+            continue
+        if raw_line.startswith("data: "):
+            payload = raw_line[6:]
+        elif raw_line.startswith("data:"):
+            payload = raw_line[5:]
+        else:
+            continue  # skip "event:", comments, etc.
+
+        if payload == "[DONE]":
+            break
+        try:
+            event = json.loads(payload)
+        except json.JSONDecodeError:
+            continue
+
+        etype = event.get("type", "")
+
+        if etype == "response.output_text.delta":
+            delta = event.get("delta", "")
+            if delta:
+                text_parts.append(delta)
+
+        elif etype == "response.output_text.done":
+            # Final assembled text for one output block — prefer it over
+            # accumulated deltas when present (avoids split tokens).
+            full = event.get("text")
+            if isinstance(full, str) and full:
+                text_parts = [full]
+
+        elif etype in ("response.completed", "response.done", "response.incomplete"):
+            resp = event.get("response") or {}
+            usage = resp.get("usage") or usage
+            # Also grab final assembled text from response.output when available
+            output_items = resp.get("output") or []
+            collected: list[str] = []
+            for item in output_items:
+                if item.get("type") != "message":
+                    continue
+                for block in item.get("content") or []:
+                    if block.get("type") == "output_text":
+                        t = block.get("text")
+                        if isinstance(t, str):
+                            collected.append(t)
+            if collected:
+                text_parts = collected
+            break
+
+        elif etype == "response.failed":
+            err = (event.get("response") or {}).get("error") or {}
+            raise RuntimeError(f"Codex failed: {err.get('message') or err.get('code') or event}")
+
+        elif etype == "error":
+            raise RuntimeError(f"Codex error: {event.get('message') or event.get('code') or event}")
+
+    return "".join(text_parts), usage
+
+
+# ----------------------------------------------------------------------------
+# Runtime
+# ----------------------------------------------------------------------------
+
 class OpenAICodexRuntime(Runtime):
     """
-    Runtime that routes LLM calls through the OpenAI Codex CLI.
-
-    Requires `codex` CLI to be installed and authenticated.
-    Uses Codex CLI's own auth (no separate API key needed in harness).
-
-    Supports images via -i flag (file paths) or temp files (base64 data).
-    Supports session continuity via `codex exec resume`.
-
     Args:
-        model:      Model to use (default: None = let CLI choose). Passed to --model flag.
-        timeout:    Max seconds without new CLI output before timing out
-                    (default: 600).
-        cli_path:   Path to codex CLI binary (auto-detected if not specified).
-        session_id: Session ID for continuity. "auto" = capture the CLI's
-                    thread id after the first call. None = stateless.
-        workdir:    Working directory for codex. None = current directory.
-        sandbox:    Sandbox mode: "read-only", "workspace-write", or
-                    "danger-full-access" (default: "workspace-write").
-        full_auto:  Use --full-auto flag (default: True).
-        approval_policy:
-                    Root-level approval policy for non-interactive exec
-                    (default: "never").
-        search:     Enable Codex web search tool for live/current queries
-                    (default: False).
+        model:     Default model id (e.g. "gpt-5.4-mini", "gpt-5.4").
+        timeout:   HTTP request timeout in seconds (default: 300).
+        system:    Optional system prompt, sent as `instructions`.
+
+    Other kwargs are accepted-and-ignored for backward compatibility with
+    the pre-HTTP subprocess version (sandbox, full_auto, session_id, ...).
+    They don't apply when talking directly to the HTTP API.
     """
 
     def __init__(
         self,
         model: str = "gpt-5.4-mini",
-        timeout: int = 600,
-        cli_path: str = None,
-        session_id: str = "auto",
-        workdir: str = None,
-        sandbox: str = "workspace-write",
-        full_auto: bool = True,
-        approval_policy: Optional[str] = "never",
-        search: bool = False,
+        timeout: int = 300,
+        system: Optional[str] = None,
+        **ignored_legacy_kwargs: Any,
     ):
         super().__init__(model=model)
         self.timeout = timeout
-        self.cli_path = cli_path or shutil.which("codex")
-        self.workdir = workdir
-        self.sandbox = sandbox
-        self.full_auto = full_auto
-        self.approval_policy = approval_policy
-        self.search = search
-        self._turn_count = 0
-        self._auto_session = session_id == "auto"
-
-        self._session_id = None if self._auto_session else session_id
-
-        # Once a real Codex thread id is known, the CLI manages context.
-        self.has_session = self._session_id is not None
-
-        # Always track the last thread_id for external use (e.g. modify/resume)
-        # even when session_id=None (stateless mode). Not used for _call resume.
-        self.last_thread_id = None
-
-        # turn.completed reports session-cumulative usage (total_token_usage),
-        # not per-call usage. Track the cumulative baseline so we can diff.
-        self._session_cumulative = {"input_tokens": 0, "output_tokens": 0, "cached_input_tokens": 0}
-
-        # Live handle to the current codex subprocess (or None).
-        # Exposed so webui's kill_active_runtime can terminate mid-call.
-        self._proc: Optional[subprocess.Popen] = None
-
-        if self.cli_path is None:
-            raise FileNotFoundError(
-                "Codex CLI not found. Install: npm install -g @openai/codex"
-            )
-
-    def set_workdir(self, path: str) -> None:
-        """Set the codex --cd target for subsequent exec calls."""
-        self.workdir = path
-
-    def list_models(self) -> list[str]:
-        """Auto-detect available models from Codex CLI's own model cache.
-
-        Reads ~/.codex/models_cache.json which the CLI maintains.
-        Returns models with visibility='list', sorted by priority.
-        Falls back to a reasonable default if the cache doesn't exist.
-        """
-        # Read Codex CLI's own model cache
-        cache_path = os.path.join(os.path.expanduser("~"), ".codex", "models_cache.json")
-        try:
-            with open(cache_path) as f:
-                data = json.load(f)
-            models = []
-            for m in data.get("models", []):
-                if m.get("visibility") == "list":
-                    models.append((m.get("priority", 999), m["slug"]))
-            models.sort()
-            return [slug for _, slug in models]
-        except Exception:
-            pass
-
-        # Fallback — codex-spark models are included in ChatGPT subscriptions
-        return ["gpt-5.3-codex-spark", "gpt-5.4", "gpt-5.4-mini"]
-
-    def _call(self, content: list[dict], model: str = None, response_format: dict = None) -> str:
-        """Call Codex CLI with the content list.
-
-        Images are passed via -i flag (file paths). Base64 data is
-        written to temp files first. URL images are skipped with a
-        text note (Codex CLI only supports local files).
-
-        Unsupported block types (audio, video, file) emit warnings and are skipped.
-        """
-        import warnings
-
-        # Collect text parts and image paths
-        text_parts = []
-        image_paths = []
-        temp_files = []
-
-        # Handle plain string input
-        if isinstance(content, str):
-            content = [{"type": "text", "text": content}]
-
-        try:
-            for block in content:
-                btype = block.get("type", "text")
-
-                if btype == "text":
-                    text_parts.append(block["text"])
-
-                elif btype == "image":
-                    path = self._resolve_image(block, temp_files)
-                    if path:
-                        image_paths.append(path)
-                    elif "url" in block:
-                        # Codex CLI doesn't support URLs — add as text note
-                        text_parts.append(f"[Image URL: {block['url']}]")
-
-                elif btype == "audio":
-                    warnings.warn(
-                        "OpenAICodexRuntime does not support audio content blocks. "
-                        "Audio block will be skipped. Consider using OpenAIRuntime API for audio support.",
-                        UserWarning,
-                        stacklevel=3,
-                    )
-
-                elif btype == "video":
-                    warnings.warn(
-                        "OpenAICodexRuntime does not support video content blocks. "
-                        "Video block will be skipped. Consider using GeminiRuntime for video.",
-                        UserWarning,
-                        stacklevel=3,
-                    )
-
-                elif btype == "file":
-                    warnings.warn(
-                        "OpenAICodexRuntime does not support file/PDF content blocks. "
-                        "File block will be skipped. Consider using OpenAIRuntime API for file support.",
-                        UserWarning,
-                        stacklevel=3,
-                    )
-
-                elif "text" in block:
-                    text_parts.append(block["text"])
-
-            prompt = "\n".join(text_parts)
-            if response_format:
-                prompt += f"\n\nRespond with ONLY valid JSON matching this schema: {json.dumps(response_format)}"
-
-            result = self._run_codex(prompt, image_paths, model)
-            self._turn_count += 1
-            return result
-
-        finally:
-            # Clean up temp files
-            for tf in temp_files:
-                try:
-                    os.unlink(tf)
-                except OSError:
-                    pass
-
-    def _resolve_image(self, block: dict, temp_files: list) -> Optional[str]:
-        """Resolve an image block to a local file path.
-
-        For file paths, returns the path directly.
-        For base64 data, writes to a temp file and returns its path.
-        For URLs, returns None (Codex CLI doesn't support URLs).
-        """
-        if "path" in block:
-            return block["path"]
-
-        if "data" in block:
-            media_type = block.get("media_type", "image/png")
-            ext = mimetypes.guess_extension(media_type) or ".png"
-            fd, tmp_path = tempfile.mkstemp(suffix=ext, prefix="codex_img_")
-            try:
-                os.write(fd, base64.b64decode(block["data"]))
-            finally:
-                os.close(fd)
-            temp_files.append(tmp_path)
-            return tmp_path
-
-        return None
-
-    def _enqueue_stream_lines(self, stream, out_queue: queue.Queue):
-        """Read a subprocess stream in a background thread."""
-        try:
-            while True:
-                line = stream.readline()
-                if not line:
-                    break
-                out_queue.put(line)
-        except Exception:
-            pass
-        finally:
-            out_queue.put(None)
-
-    def _collect_stream_lines(self, stream, lines: list[str]):
-        """Drain a subprocess stream into a list to avoid pipe deadlocks."""
-        try:
-            while True:
-                line = stream.readline()
-                if not line:
-                    break
-                lines.append(line)
-        except Exception:
-            pass
-
-    def _read_line_with_timeout(self, stream_queue: queue.Queue, remaining: float) -> Optional[str]:
-        """Read one queued stdout line, returning '' on timeout and None on EOF."""
-        if remaining <= 0:
-            return ""
-        try:
-            return stream_queue.get(timeout=min(remaining, 1.0))
-        except queue.Empty:
-            return ""
-
-    def _run_codex(self, prompt: str, image_paths: list[str], model: str) -> str:
-        """Build and run the codex exec command."""
-        # Auto mode: resume as soon as we have captured a thread_id. A prior
-        # call may have captured the id via thread.started but then failed
-        # (timeout, network) before _turn_count was incremented — without
-        # this, every failed first call forces Codex to start a fresh
-        # session on retry, losing context.
-        # Manual mode (user-provided session_id): first call creates the
-        # session, so require turn_count > 0 before resuming.
-        is_resume = bool(
-            self._session_id
-            and (self._auto_session or self._turn_count > 0)
-        )
-
-        cmd = [self.cli_path]
-
-        # Root-level flags (before "exec" subcommand)
-        if self.search:
-            cmd.append("--search")
-        if self.approval_policy:
-            cmd.extend(["-a", self.approval_policy])
-
-        if is_resume:
-            # `exec resume` has a limited set of flags
-            cmd.extend(["exec", "resume", self._session_id])
-            if model:
-                cmd.extend(["--model", model])
-            if self.full_auto:
-                cmd.append("--full-auto")
-            cmd.append("--skip-git-repo-check")
-            # Image flags
-            for img_path in image_paths:
-                cmd.extend(["-i", img_path])
-        else:
-            cmd.append("exec")
-            if model:
-                cmd.extend(["--model", model])
-            if self.full_auto:
-                cmd.append("--full-auto")
-            else:
-                if self.sandbox:
-                    cmd.extend(["--sandbox", self.sandbox])
-            if self.workdir:
-                cmd.extend(["--cd", self.workdir])
-            cmd.append("--skip-git-repo-check")
-            # Image flags
-            for img_path in image_paths:
-                cmd.extend(["-i", img_path])
-
-        # Reasoning effort (via config override). Always pass if set — do NOT
-        # skip on "medium"; codex's default is "xhigh" not "medium".
-        effort = getattr(self, '_reasoning_effort', None)
-        if effort:
-            cmd.extend(["-c", f'model_reasoning_effort="{effort}"'])
-
-        # Output: capture last message to a temp file for reliable extraction
-        fd, output_file = tempfile.mkstemp(suffix=".txt", prefix="codex_out_")
-        os.close(fd)
-        try:
-            cmd.append("--json")
-            cmd.extend(["-o", output_file])
-
-            # Pass prompt: resume uses positional arg, exec uses stdin via "-"
-            if is_resume:
-                cmd.append(prompt)
-            else:
-                cmd.append("-")
-
-            # Remove API keys so CLI uses device-auth (subscription) instead of API credits.
-            # If OPENAI_API_KEY is present, Codex CLI prioritises it over device-auth,
-            # which burns API quota even when the user has an active subscription.
-            env = os.environ.copy()
-            env.pop("OPENAI_API_KEY", None)
-            env.pop("ANTHROPIC_API_KEY", None)
-            env.pop("GEMINI_API_KEY", None)
-            env.pop("GOOGLE_API_KEY", None)
-
-            import time as _time
-            start_time = _time.time()
-
-            # Popen (not subprocess.run) so we can stream stdout line-by-line
-            # and expose self._proc for external kill via kill_active_runtime.
-            try:
-                proc = subprocess.Popen(
-                    cmd,
-                    stdin=subprocess.PIPE if not is_resume else subprocess.DEVNULL,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    bufsize=1,  # line-buffered
-                    env=env,
-                )
-            except Exception as e:
-                raise RuntimeError(f"Failed to start Codex CLI: {e}")
-
-            self._proc = proc
-            try:
-                # Feed the prompt over stdin for non-resume calls, then close
-                # the pipe so codex knows the input is complete.
-                if not is_resume and proc.stdin is not None:
-                    try:
-                        proc.stdin.write(prompt)
-                        proc.stdin.close()
-                    except (BrokenPipeError, OSError):
-                        pass
-
-                stdout_lines: list[str] = []
-                stderr_lines: list[str] = []
-                stdout_queue: queue.Queue = queue.Queue()
-
-                stdout_thread = threading.Thread(
-                    target=self._enqueue_stream_lines,
-                    args=(proc.stdout, stdout_queue),
-                    daemon=True,
-                )
-                stderr_thread = threading.Thread(
-                    target=self._collect_stream_lines,
-                    args=(proc.stderr, stderr_lines),
-                    daemon=True,
-                )
-                stdout_thread.start()
-                stderr_thread.start()
-
-                timed_out = False
-                deadline = _time.time() + self.timeout
-                while True:
-                    remaining = deadline - _time.time()
-                    if remaining <= 0:
-                        timed_out = True
-                        try:
-                            proc.terminate()
-                        except Exception:
-                            pass
-                        break
-
-                    line = self._read_line_with_timeout(stdout_queue, remaining)
-                    if line == "":
-                        if proc.poll() is not None and stdout_queue.empty():
-                            break
-                        continue
-                    if line is None:
-                        break
-
-                    stdout_lines.append(line)
-                    stripped = line.strip()
-                    deadline = _time.time() + self.timeout
-                    if not stripped or not stripped.startswith("{"):
-                        continue
-                    try:
-                        event = json.loads(stripped)
-                    except json.JSONDecodeError:
-                        continue
-
-                    elapsed = round(_time.time() - start_time, 1)
-                    etype = event.get("type", "")
-
-                    # Extract thread_id from session events
-                    if etype in ("thread.started", "thread.resumed"):
-                        thread_id = event.get("thread_id")
-                        if thread_id:
-                            self.last_thread_id = thread_id  # always track
-                            # Only capture session ID once; don't overwrite
-                            # on resume (CLI may return a new thread_id).
-                            if self._auto_session and not self._session_id:
-                                self._session_id = thread_id
-                                self.has_session = True
-
-                    streamed = self._stream_codex_event(event, elapsed)
-                    if streamed and self.on_stream:
-                        try:
-                            self.on_stream(streamed)
-                        except Exception:
-                            pass
-
-                # Wait for final exit status
-                try:
-                    proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                    proc.wait(timeout=2)
-
-                stdout_thread.join(timeout=1)
-                stderr_thread.join(timeout=1)
-                stderr_output = "".join(stderr_lines)
-
-                if timed_out:
-                    raise TimeoutError(f"Codex CLI timed out (no output for {self.timeout}s)")
-
-                if proc.returncode != 0:
-                    # Build a pseudo-CompletedProcess-like namespace for
-                    # _handle_error (it reads .returncode/.stdout/.stderr).
-                    class _R:
-                        pass
-                    r = _R()
-                    r.returncode = proc.returncode
-                    r.stdout = "".join(stdout_lines)
-                    r.stderr = stderr_output
-                    self._handle_error(r)
-
-                # Extract thread_id from stdout if session events didn't give it
-                if not self.last_thread_id:
-                    tid = self._extract_thread_id("".join(stdout_lines))
-                    if tid:
-                        self.last_thread_id = tid
-                        if self._auto_session and not self._session_id:
-                            self._session_id = tid
-                            self.has_session = True
-
-                # Read output from the -o file
-                try:
-                    with open(output_file, "r") as f:
-                        result_text = f.read().strip()
-                    if result_text:
-                        return result_text
-                except (FileNotFoundError, IOError):
-                    pass
-
-                stdout_text = "".join(stdout_lines).strip()
-                fallback_text = self._extract_final_text(stdout_text)
-                if fallback_text:
-                    return fallback_text
-
-                # Fall back to raw stdout only when no assistant message was
-                # recoverable from the JSONL stream.
-                return stdout_text
-
-            finally:
-                # Ensure pipes are closed even on unexpected error
-                for _stream in (proc.stdin, proc.stdout, proc.stderr):
-                    try:
-                        if _stream is not None:
-                            _stream.close()
-                    except Exception:
-                        pass
-                self._proc = None
-
-        finally:
-            try:
-                os.unlink(output_file)
-            except OSError:
-                pass
-
-    def _stream_codex_event(self, event: dict, elapsed: float) -> Optional[dict]:
-        """Parse a Codex JSONL event into a stream dict for the frontend.
-
-        Codex JSONL format (v0.120+):
-          {"type": "thread.started", "thread_id": "..."}
-          {"type": "turn.started"}
-          {"type": "item.started",   "item": {"type": "command_execution", "command": "...", ...}}
-          {"type": "item.completed", "item": {"type": "agent_message", "text": "..."}}
-          {"type": "item.completed", "item": {"type": "command_execution", "command": "...",
-                                              "aggregated_output": "...", "exit_code": 0}}
-          {"type": "turn.completed", "usage": {...}}
-        """
-        etype = event.get("type", "")
-        item = event.get("item") or {}
-        item_type = item.get("type", "")
-
-        if etype == "item.completed" and item_type == "agent_message":
-            text = item.get("text", "")
-            if text:
-                return {"type": "text", "elapsed": elapsed, "text": text[:500]}
-
-        if etype == "item.started" and item_type == "command_execution":
-            cmd = item.get("command", "")
-            if cmd:
-                return {"type": "tool_use", "elapsed": elapsed,
-                        "tool": "shell", "input": cmd[:300]}
-
-        if etype == "item.completed" and item_type == "command_execution":
-            output = item.get("aggregated_output", "")
-            exit_code = item.get("exit_code", "?")
-            cmd = item.get("command", "")
-            if output:
-                return {"type": "text", "elapsed": elapsed,
-                        "text": f"[exit {exit_code}] {output[:400]}"}
-            return {"type": "status", "elapsed": elapsed,
-                    "text": f"command done (exit {exit_code})"}
-
-        if etype == "item.completed" and item_type == "file_edit":
-            path = item.get("path", item.get("file", ""))
-            return {"type": "tool_use", "elapsed": elapsed,
-                    "tool": "edit", "input": path[:200]}
-
-        if etype == "turn.completed":
-            usage = event.get("usage", {})
-            tokens = usage.get("output_tokens", 0)
-            # turn.completed reports session-cumulative total_token_usage.
-            # Diff against baseline to get per-call usage.
-            if usage:
-                cum_cached = usage.get("cached_input_tokens", 0)
-                cum_in = usage.get("input_tokens", 0)
-                cum_out = usage.get("output_tokens", 0)
-                base = self._session_cumulative
-                call_in = cum_in - base["input_tokens"]
-                call_out = cum_out - base["output_tokens"]
-                call_cached = cum_cached - base["cached_input_tokens"]
-                self.last_usage = {
-                    "input_tokens": call_in,
-                    "output_tokens": call_out,
-                    "cache_read": call_cached,
-                }
-                # Session-level cumulative (for chat context display)
-                self.session_usage = {
-                    "input_tokens": cum_in,
-                    "output_tokens": cum_out,
-                    "cache_read": cum_cached,
-                }
-                # Update cumulative baseline for next call
-                self._session_cumulative = {
-                    "input_tokens": cum_in,
-                    "output_tokens": cum_out,
-                    "cached_input_tokens": cum_cached,
-                }
-            if tokens:
-                return {"type": "status", "elapsed": elapsed,
-                        "text": f"turn done ({tokens} tokens)"}
-            return None
-
-        # Skip noisy events
-        if etype in ("turn.started", "ping", "pong"):
-            return None
-
-        # Session events
-        thread_id = event.get("thread_id")
-        if thread_id:
-            return {"type": "status", "elapsed": elapsed,
-                    "text": f"session {thread_id[:12]}..."}
-
-        return None
-
-    def _extract_thread_id(self, stdout: str) -> Optional[str]:
-        """Extract the Codex thread id from JSONL exec output."""
-        for line in stdout.splitlines():
-            line = line.strip()
-            if not line or not line.startswith("{"):
-                continue
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-
-            if event.get("type") in {"thread.started", "thread.resumed"}:
-                thread_id = event.get("thread_id")
-                if thread_id:
-                    return thread_id
-
-        return None
-
-    def _extract_final_text(self, stdout: str) -> Optional[str]:
-        """Extract the last assistant text message from Codex JSONL stdout.
-
-        `codex exec --json` normally writes the final assistant message to the
-        `-o` file. When that file is empty, returning the raw JSONL stream
-        breaks downstream callers that expect the assistant's text reply.
-        """
-        last_text = None
-        for line in stdout.splitlines():
-            line = line.strip()
-            if not line or not line.startswith("{"):
-                continue
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-
-            if event.get("type") != "item.completed":
-                continue
-            item = event.get("item") or {}
-            if item.get("type") != "agent_message":
-                continue
-            text = item.get("text")
-            if isinstance(text, str) and text.strip():
-                last_text = text.strip()
-
-        return last_text
-
-    def _handle_error(self, result):
-        """Handle CLI errors with concise messages."""
-        error_msg = result.stderr.strip() or result.stdout.strip() or "Unknown error"
-        error_lower = error_msg.lower()
-        if "auth" in error_lower or "login" in error_lower or "api key" in error_lower:
-            raise ConnectionError(
-                "Codex authentication expired. Please re-login: codex login --device-auth"
-            )
-        if "quota" in error_lower or "rate limit" in error_lower:
-            raise ConnectionError(
-                "Codex rate limited. Try again later, or re-login: codex login --device-auth"
-            )
-        raise RuntimeError(f"Codex CLI error (exit {result.returncode}): {error_msg}")
-
-    def reset(self):
-        """Drop the active Codex session and clear provider-side conversation state."""
-        self._session_id = None
-        self._turn_count = 0
-        self.has_session = False
-        self._prompted_functions.clear()
+        self.system = system
+        self._auth = _AuthState()
+        self._client: Optional[httpx.Client] = None
+        self._reasoning_effort: Optional[str] = None  # set externally by webui
+        self.last_usage: Optional[dict[str, Any]] = None
+        self.has_session = False  # we don't manage a server-side session
+
+    # ----- lifecycle ---------------------------------------------------------
+
+    def _get_client(self) -> httpx.Client:
+        if self._client is None:
+            self._client = httpx.Client(timeout=httpx.Timeout(self.timeout, connect=30.0))
+        return self._client
 
     def close(self):
-        """Clear Codex session and release resources."""
-        self.reset()
+        if self._client is not None:
+            try:
+                self._client.close()
+            except Exception:
+                pass
+            self._client = None
         super().close()
+
+    # ----- the call ----------------------------------------------------------
+
+    def _call(
+        self,
+        content: list[dict],
+        model: str = None,
+        response_format: Optional[dict] = None,
+    ) -> str:
+        creds = self._auth.resolve()
+        chosen_model = model or self.model
+        body = _build_body(
+            model=chosen_model,
+            content=content,
+            instructions=self.system,
+            reasoning_effort=self._reasoning_effort,
+            response_format=response_format,
+        )
+        headers = _build_headers(creds)
+
+        client = self._get_client()
+        with client.stream("POST", creds.url, headers=headers, json=body) as r:
+            if r.status_code != 200:
+                err_body = r.read().decode("utf-8", errors="replace")
+                raise RuntimeError(
+                    f"Codex HTTP {r.status_code} ({creds.mode} mode, {creds.url}): "
+                    f"{err_body[:500]}"
+                )
+            text, usage = _parse_sse_response(r)
+
+        # Normalize usage to the shape the rest of OpenProgram expects
+        if usage:
+            self.last_usage = {
+                "input_tokens": usage.get("input_tokens", 0),
+                "output_tokens": usage.get("output_tokens", 0),
+                "cache_read": (usage.get("input_tokens_details") or {}).get("cached_tokens", 0),
+                "cache_create": 0,
+            }
+        return text

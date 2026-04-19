@@ -109,10 +109,13 @@ def main():
     # providers
     sub.add_parser("providers", help="Show available LLM providers and detection status")
 
-    # configure — interactive provider setup wizard
-    p_cfg = sub.add_parser("configure", help="Interactive wizard to set up a provider (CLI login, API key, model)")
-    p_cfg.add_argument("provider", nargs="?", default=None,
-                       help="Provider id (e.g. openai-codex). If omitted, you pick from a menu.")
+    # config — namespaced configuration commands (provider, ...)
+    p_config = sub.add_parser("config", help="Configure OpenProgram (providers, models, ...)")
+    p_config_sub = p_config.add_subparsers(dest="config_target", metavar="target")
+    p_cfg_provider = p_config_sub.add_parser("provider",
+        help="Interactive wizard to set up a provider (CLI login, API key, model)")
+    p_cfg_provider.add_argument("name", nargs="?", default=None,
+        help="Provider id (e.g. openai-codex). If omitted, you pick from a menu.")
 
     args = parser.parse_args()
 
@@ -137,8 +140,11 @@ def main():
         _cmd_list()
     elif args.command == "providers":
         _cmd_providers()
-    elif args.command == "configure":
-        _cmd_configure(args.provider)
+    elif args.command == "config":
+        if args.config_target == "provider":
+            _cmd_configure(args.name)
+        else:
+            p_config.print_help()
     elif args.command == "create":
         _cmd_create(args.description, args.name, args.as_skill, args.provider, args.model)
     elif args.command == "create-app":
@@ -352,12 +358,12 @@ def _cmd_providers():
 
 
 def _cmd_configure(provider: str | None):
-    """Interactive provider-setup wizard. Drives openprogram.providers.onboarding."""
-    from openprogram.providers import onboarding
+    """Interactive provider-setup wizard. Drives openprogram.providers.configuration."""
+    from openprogram.providers import configuration
 
-    catalog = onboarding.list_providers()
+    catalog = configuration.list_providers()
     if not catalog:
-        print("No provider onboarding is currently registered.")
+        print("No provider configuration is currently registered.")
         return
 
     if provider is None:
@@ -374,7 +380,7 @@ def _cmd_configure(provider: str | None):
             print(f"Invalid choice: {choice}")
             return
 
-    entry = onboarding.get_provider(provider)
+    entry = configuration.get_provider(provider)
     if entry is None:
         print(f"Unknown provider: {provider}")
         print(f"Available: {', '.join(p['id'] for p in catalog)}")
@@ -388,7 +394,7 @@ def _cmd_configure(provider: str | None):
     ctx: dict = {}
     for step in entry["steps"]:
         while True:  # loop on the same step until it's ok or user aborts
-            result = onboarding.run_step(provider, step["id"], ctx)
+            result = configuration.run_step(provider, step["id"], ctx)
             status = result["status"]
             if status == "ok":
                 print(f"  [ok] {step['label']}: {result['message']}")
