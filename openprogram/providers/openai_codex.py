@@ -279,13 +279,42 @@ def _build_headers(creds: _Credentials) -> dict[str, str]:
     }
 
 
+def _to_openai_tool_spec(spec: dict) -> dict:
+    """Normalize a neutral tool spec to the OpenAI Responses API shape.
+
+    Accepts either the OpenAI shape (already wrapped in `type: function`) or a
+    neutral one: {name, description, parameters}. Extra fields are passed
+    through.
+    """
+    if spec.get("type") == "function":
+        return spec
+    return {
+        "type": "function",
+        "name": spec["name"],
+        "description": spec.get("description", ""),
+        "parameters": spec.get("parameters") or {"type": "object", "properties": {}},
+        **{k: v for k, v in spec.items() if k not in ("name", "description", "parameters")},
+    }
+
+
 def _build_body(
     model: str,
-    content: list[dict],
+    content: Optional[list[dict]],
     instructions: Optional[str],
     reasoning_effort: Optional[str],
     response_format: Optional[dict],
+    input_items: Optional[list[dict]] = None,
+    tools: Optional[list[dict]] = None,
+    tool_choice: Any = "auto",
+    parallel_tool_calls: bool = True,
 ) -> dict[str, Any]:
+    # input_items wins over content: tool-loop rounds pass the full growing
+    # transcript (user msg + function_call + function_call_output + ...)
+    if input_items is None:
+        if content is None:
+            raise ValueError("_build_body needs either content or input_items")
+        input_items = _convert_content_to_input(content)
+
     body: dict[str, Any] = {
         "model": model,
         "store": False,
@@ -294,10 +323,12 @@ def _build_body(
         # "Instructions are required"). Send a minimal placeholder when the
         # caller didn't supply a system prompt so the request still validates.
         "instructions": instructions or "You are a helpful assistant.",
-        "input": _convert_content_to_input(content),
-        "tool_choice": "auto",
-        "parallel_tool_calls": True,
+        "input": input_items,
+        "tool_choice": tool_choice,
+        "parallel_tool_calls": parallel_tool_calls,
     }
+    if tools:
+        body["tools"] = [_to_openai_tool_spec(t) for t in tools]
     if reasoning_effort:
         body["reasoning"] = {"effort": reasoning_effort, "summary": "auto"}
     if response_format:
@@ -317,10 +348,16 @@ def _build_body(
 # SSE parsing — accumulate response.output_text.delta, stop at completed/failed
 # ----------------------------------------------------------------------------
 
-def _parse_sse_response(response: httpx.Response) -> tuple[str, dict[str, Any]]:
-    """Consume the SSE stream. Return (final_text, usage_dict)."""
+def _parse_sse_response(response: httpx.Response) -> dict[str, Any]:
+    """Consume the SSE stream. Return {text, tool_calls, usage}.
+
+    tool_calls: list of {call_id, name, arguments} dicts, arguments is a raw
+    JSON string exactly as emitted by the model (decoded by the caller).
+    """
     text_parts: list[str] = []
     usage: dict[str, Any] = {}
+    # output_index -> partial function_call item
+    fcalls: dict[int, dict[str, str]] = {}
     for raw_line in response.iter_lines():
         if not raw_line:
             continue
@@ -352,22 +389,62 @@ def _parse_sse_response(response: httpx.Response) -> tuple[str, dict[str, Any]]:
             if isinstance(full, str) and full:
                 text_parts = [full]
 
+        elif etype == "response.output_item.added":
+            item = event.get("item") or {}
+            if item.get("type") == "function_call":
+                idx = event.get("output_index")
+                fcalls[idx] = {
+                    "call_id": item.get("call_id") or "",
+                    "name": item.get("name") or "",
+                    "arguments": item.get("arguments") or "",
+                }
+
+        elif etype == "response.function_call_arguments.delta":
+            idx = event.get("output_index")
+            if idx in fcalls:
+                fcalls[idx]["arguments"] += event.get("delta", "")
+
+        elif etype == "response.function_call_arguments.done":
+            idx = event.get("output_index")
+            if idx in fcalls and "arguments" in event:
+                # Final assembled arguments string — authoritative over deltas
+                fcalls[idx]["arguments"] = event["arguments"]
+
+        elif etype == "response.output_item.done":
+            item = event.get("item") or {}
+            if item.get("type") == "function_call":
+                idx = event.get("output_index")
+                fcalls[idx] = {
+                    "call_id": item.get("call_id") or fcalls.get(idx, {}).get("call_id", ""),
+                    "name": item.get("name") or fcalls.get(idx, {}).get("name", ""),
+                    "arguments": item.get("arguments") or fcalls.get(idx, {}).get("arguments", ""),
+                }
+
         elif etype in ("response.completed", "response.done", "response.incomplete"):
             resp = event.get("response") or {}
             usage = resp.get("usage") or usage
-            # Also grab final assembled text from response.output when available
+            # Grab final assembled items from response.output — authoritative
             output_items = resp.get("output") or []
-            collected: list[str] = []
+            collected_text: list[str] = []
+            collected_calls: list[dict[str, str]] = []
             for item in output_items:
-                if item.get("type") != "message":
-                    continue
-                for block in item.get("content") or []:
-                    if block.get("type") == "output_text":
-                        t = block.get("text")
-                        if isinstance(t, str):
-                            collected.append(t)
-            if collected:
-                text_parts = collected
+                itype = item.get("type")
+                if itype == "message":
+                    for block in item.get("content") or []:
+                        if block.get("type") == "output_text":
+                            t = block.get("text")
+                            if isinstance(t, str):
+                                collected_text.append(t)
+                elif itype == "function_call":
+                    collected_calls.append({
+                        "call_id": item.get("call_id") or "",
+                        "name": item.get("name") or "",
+                        "arguments": item.get("arguments") or "",
+                    })
+            if collected_text:
+                text_parts = collected_text
+            if collected_calls:
+                fcalls = {i: c for i, c in enumerate(collected_calls)}
             break
 
         elif etype == "response.failed":
@@ -377,7 +454,12 @@ def _parse_sse_response(response: httpx.Response) -> tuple[str, dict[str, Any]]:
         elif etype == "error":
             raise RuntimeError(f"Codex error: {event.get('message') or event.get('code') or event}")
 
-    return "".join(text_parts), usage
+    tool_calls = [fcalls[i] for i in sorted(fcalls.keys())]
+    return {
+        "text": "".join(text_parts),
+        "tool_calls": tool_calls,
+        "usage": usage,
+    }
 
 
 # ----------------------------------------------------------------------------
@@ -434,20 +516,31 @@ class OpenAICodexRuntime(Runtime):
 
     # ----- the call ----------------------------------------------------------
 
-    def _call(
+    def _call_once(
         self,
-        content: list[dict],
-        model: str = None,
+        input_items: list[dict],
+        tools: Optional[list[dict]] = None,
+        tool_choice: Any = "auto",
+        model: Optional[str] = None,
         response_format: Optional[dict] = None,
-    ) -> str:
+    ) -> dict[str, Any]:
+        """One HTTP round trip. Returns {text, tool_calls, usage}.
+
+        input_items is the growing Responses-API transcript (user msg +
+        function_call + function_call_output + ...). Callers building a tool
+        loop pass the full list; one-shot callers pass just the user message.
+        """
         creds = self._auth.resolve()
         chosen_model = model or self.model
         body = _build_body(
             model=chosen_model,
-            content=content,
+            content=None,
             instructions=self.system,
             reasoning_effort=self._reasoning_effort,
             response_format=response_format,
+            input_items=input_items,
+            tools=tools,
+            tool_choice=tool_choice,
         )
         headers = _build_headers(creds)
 
@@ -459,9 +552,9 @@ class OpenAICodexRuntime(Runtime):
                     f"Codex HTTP {r.status_code} from {CHATGPT_BACKEND_URL}: "
                     f"{err_body[:500]}"
                 )
-            text, usage = _parse_sse_response(r)
+            result = _parse_sse_response(r)
 
-        # Normalize usage to the shape the rest of OpenProgram expects
+        usage = result.get("usage") or {}
         if usage:
             self.last_usage = {
                 "input_tokens": usage.get("input_tokens", 0),
@@ -469,4 +562,107 @@ class OpenAICodexRuntime(Runtime):
                 "cache_read": (usage.get("input_tokens_details") or {}).get("cached_tokens", 0),
                 "cache_create": 0,
             }
-        return text
+        return result
+
+    def _call(
+        self,
+        content: list[dict],
+        model: str = None,
+        response_format: Optional[dict] = None,
+    ) -> str:
+        input_items = _convert_content_to_input(content)
+        result = self._call_once(
+            input_items=input_items,
+            tools=None,
+            model=model,
+            response_format=response_format,
+        )
+        return result["text"]
+
+    # ----- tool-use loop -----------------------------------------------------
+
+    def exec_with_tools(
+        self,
+        content: list[dict],
+        tools: list[Any],
+        tool_choice: Any = "auto",
+        parallel_tool_calls: bool = True,
+        max_iterations: int = 20,
+        model: Optional[str] = None,
+    ) -> str:
+        """Run the LLM with tools available, looping until a text reply.
+
+        tools: list of tool objects or specs. Each tool may be:
+          - a neutral spec dict {name, description, parameters}
+          - an OpenAI-shape spec {type:"function", name, ...}
+          - an object with .spec (dict) and .execute (callable) attributes
+          - a dict {"spec": {...}, "execute": callable}
+
+        Unknown tool_calls from the model (name not in our registry) raise;
+        provide only tools you actually handle.
+        """
+        # Normalize to (spec_list, name_to_executor)
+        specs: list[dict] = []
+        executors: dict[str, Any] = {}
+        for t in tools:
+            spec, ex = _resolve_tool(t)
+            specs.append(spec)
+            executors[spec["name"]] = ex
+
+        input_items = _convert_content_to_input(content)
+
+        for _ in range(max_iterations):
+            result = self._call_once(
+                input_items=input_items,
+                tools=specs,
+                tool_choice=tool_choice,
+                model=model,
+            )
+            calls = result.get("tool_calls") or []
+            if not calls:
+                return result.get("text") or ""
+
+            # Append function_call items + their outputs, then loop.
+            for tc in calls:
+                input_items.append({
+                    "type": "function_call",
+                    "call_id": tc["call_id"],
+                    "name": tc["name"],
+                    "arguments": tc["arguments"],
+                })
+                ex = executors.get(tc["name"])
+                if ex is None:
+                    output = f"Error: tool {tc['name']!r} is not registered"
+                else:
+                    try:
+                        args = json.loads(tc["arguments"]) if tc["arguments"] else {}
+                    except json.JSONDecodeError as e:
+                        output = f"Error: invalid JSON arguments: {e}"
+                    else:
+                        try:
+                            raw_out = ex(**args)
+                            output = raw_out if isinstance(raw_out, str) else json.dumps(raw_out, ensure_ascii=False, default=str)
+                        except Exception as e:
+                            output = f"Error: {type(e).__name__}: {e}"
+                input_items.append({
+                    "type": "function_call_output",
+                    "call_id": tc["call_id"],
+                    "output": output,
+                })
+
+        raise RuntimeError(f"exec_with_tools exceeded {max_iterations} iterations without a final reply")
+
+
+def _resolve_tool(t: Any) -> tuple[dict, Any]:
+    """Normalize a tool entry to (spec_dict, executor_callable)."""
+    if isinstance(t, dict) and "spec" in t and "execute" in t:
+        return t["spec"], t["execute"]
+    if hasattr(t, "spec") and hasattr(t, "execute"):
+        return t.spec, t.execute
+    if isinstance(t, dict) and "name" in t:
+        # Bare spec with no executor — caller is expected to supply executors separately
+        raise ValueError(
+            f"Tool {t.get('name')!r} has no executor. Pass a dict {{'spec':..., 'execute':...}} "
+            "or an object with .spec and .execute."
+        )
+    raise TypeError(f"Cannot resolve tool: {t!r}")
