@@ -229,6 +229,17 @@ def test_runtime_no_call_raises():
         func()
 
 
+def test_async_runtime_closed_raises():
+    """async_exec() should reject calls after the runtime is closed."""
+    import asyncio
+
+    runtime = Runtime(call=echo_call)
+    runtime.close()
+
+    with pytest.raises(RuntimeError, match="Runtime is closed"):
+        asyncio.run(runtime.async_exec(content=[{"type": "text", "text": "test"}]))
+
+
 def test_runtime_rejects_zero_retries():
     """max_retries must allow at least one attempt."""
     with pytest.raises(ValueError, match="max_retries"):
