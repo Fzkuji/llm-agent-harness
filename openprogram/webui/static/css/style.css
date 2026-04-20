@@ -760,10 +760,11 @@ a.user-menu-item { text-decoration: none; color: inherit; }
 .settings-input {
   background: var(--bg-primary);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 8px 12px;
-  height: 36px;
-  font-size: 14px;
+  border-radius: 8px;
+  padding: 0 12px;
+  height: 32px;
+  line-height: 30px;
+  font-size: 13px;
   color: var(--text-primary);
   font-family: var(--font-mono);
   width: 280px;
@@ -779,13 +780,15 @@ a.user-menu-item { text-decoration: none; color: inherit; }
   background: var(--accent-blue);
   color: #fff;
   border: none;
-  padding: 0 16px;
-  height: 36px;
-  border-radius: 10px;
-  font-size: 14px;
+  padding: 0 14px;
+  height: 32px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
   transition: opacity 75ms;
   white-space: nowrap;
+  box-sizing: border-box;
 }
 .settings-btn:hover { opacity: 0.85; }
 
@@ -3188,7 +3191,7 @@ textarea.retry-field-input { min-height: 50px; max-height: 200px; resize: vertic
 }
 
 .provider-detail-section {
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
 .provider-detail-section-title {
@@ -3232,12 +3235,12 @@ textarea.retry-field-input { min-height: 50px; max-height: 200px; resize: vertic
   flex-shrink: 0;
 }
 
-/* Toggle switch (Claude-style: 38×22, white knob on blue track when on) */
+/* Toggle switch — compact, Claude-style */
 .toggle-switch {
   position: relative;
   display: inline-block;
-  width: 38px;
-  height: 22px;
+  width: 32px;
+  height: 18px;
   flex-shrink: 0;
   cursor: pointer;
 }
@@ -3252,15 +3255,15 @@ textarea.retry-field-input { min-height: 50px; max-height: 200px; resize: vertic
   position: absolute;
   top: 0; left: 0; right: 0; bottom: 0;
   background: var(--bg-hover);
-  border-radius: 22px;
+  border-radius: 18px;
   transition: 0.15s;
 }
 
 .toggle-switch .slider::before {
   content: "";
   position: absolute;
-  width: 16px;
-  height: 16px;
+  width: 12px;
+  height: 12px;
   left: 3px;
   top: 3px;
   background: var(--text-secondary);
@@ -3273,7 +3276,7 @@ textarea.retry-field-input { min-height: 50px; max-height: 200px; resize: vertic
 }
 
 .toggle-switch input:checked + .slider::before {
-  transform: translateX(16px);
+  transform: translateX(14px);
   background: #fff;
 }
 
@@ -3397,12 +3400,13 @@ textarea.retry-field-input { min-height: 50px; max-height: 200px; resize: vertic
   background: transparent;
   border: 1px solid var(--border);
   color: var(--text-secondary);
-  padding: 3px 9px;
-  height: 22px;
+  padding: 0 9px;
+  height: 26px;
   border-radius: 6px;
   font-size: 12px;
   cursor: pointer;
   transition: 0.12s;
+  box-sizing: border-box;
 }
 .mini-action:hover {
   color: var(--text-bright);
@@ -3512,25 +3516,27 @@ textarea.retry-field-input { min-height: 50px; max-height: 200px; resize: vertic
 .test-result.err { color: var(--accent-red); }
 
 .settings-icon-btn {
-  padding: 0 10px;
-  height: 36px;
+  padding: 0 9px;
+  height: 32px;
+  min-width: 32px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   background: transparent;
   border: 1px solid var(--border);
   color: var(--text-secondary);
-  border-radius: 10px;
+  border-radius: 8px;
   cursor: pointer;
   transition: background 0.12s, color 0.12s;
+  box-sizing: border-box;
 }
 .settings-icon-btn:hover {
   color: var(--text-bright);
   background: var(--bg-hover);
 }
 .settings-icon-btn .cap-icon {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
 }
 .mini-action {
   display: inline-flex;
