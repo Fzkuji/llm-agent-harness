@@ -293,6 +293,28 @@ def test_login_import_codex_when_file_exists(isolated, monkeypatch):
     assert cred.metadata["account_id"] == "acc_xyz"
 
 
+def test_login_import_codex_apikey_mode(isolated, monkeypatch):
+    """Codex CLI in apikey mode stores a bare OPENAI_API_KEY, not OAuth
+    tokens. The import adapter must recognise this shape and produce an
+    api_key Credential (vs. returning None as if nothing was found)."""
+    store, _, tmp, cap = isolated
+    codex_dir = tmp / "fake_codex"
+    codex_dir.mkdir()
+    import json as _json
+    (codex_dir / "auth.json").write_text(_json.dumps({
+        "auth_mode": "apikey",
+        "OPENAI_API_KEY": "sk-proj-from-codex-apikey",
+    }))
+    rc = dispatch(_parse(["login", "openai-codex", "--method", "import_from_cli"]))
+    assert rc == 0
+    pool = store.find_pool("openai-codex", "default")
+    assert pool is not None
+    cred = pool.credentials[0]
+    assert cred.kind == "api_key"
+    assert cred.payload.api_key == "sk-proj-from-codex-apikey"
+    assert cred.metadata["auth_mode"] == "apikey"
+
+
 def test_login_import_codex_when_file_missing(isolated):
     _, _, _, cap = isolated
     rc = dispatch(_parse(["login", "openai-codex", "--method", "import_from_cli"]))

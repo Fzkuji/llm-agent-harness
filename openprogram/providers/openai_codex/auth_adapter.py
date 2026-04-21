@@ -37,6 +37,7 @@ from openprogram.auth.manager import (
     register_provider_config,
 )
 from openprogram.auth.types import (
+    ApiKeyPayload,
     Credential,
     OAuthPayload,
 )
@@ -244,6 +245,29 @@ def import_from_codex_file(
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
+    # The Codex CLI stores two shapes depending on how the user logged in:
+    #   1. ChatGPT OAuth  → {"auth_mode": "chatgpt", "tokens": {...}}
+    #   2. Bare API key   → {"auth_mode": "apikey", "OPENAI_API_KEY": "sk-..."}
+    # We handle both; callers get a Credential either way.
+    auth_mode = (data.get("auth_mode") or "").lower()
+    if auth_mode == "apikey" or (not data.get("tokens") and data.get("OPENAI_API_KEY")):
+        api_key = (data.get("OPENAI_API_KEY") or "").strip()
+        if not api_key:
+            return None
+        return Credential(
+            provider_id=PROVIDER_ID,
+            profile_id=profile_id,
+            kind="api_key",
+            payload=ApiKeyPayload(api_key=api_key),
+            source="codex_cli_import",
+            metadata={
+                "imported_from": "codex_cli",
+                "source_path": str(path),
+                "auth_mode": "apikey",
+            },
+            read_only=False,
+        )
+
     tokens = data.get("tokens") or {}
     access = tokens.get("access_token")
     refresh = tokens.get("refresh_token")
