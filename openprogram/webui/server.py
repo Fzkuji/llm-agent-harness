@@ -43,6 +43,8 @@ from openprogram.webui._pause_stop import (
     reset_current_conv_id as _reset_current_conv_id,
 )
 from openprogram.agentic_programming.function import CancelledError as _CancelledError
+from openprogram.webui.messages import get_store as _get_message_store
+from openprogram.webui._stream_bridge import StreamBridge
 
 
 # ---------------------------------------------------------------------------
@@ -524,6 +526,47 @@ def _get_thinking_config(provider: str) -> dict:
     return _THINKING_CONFIGS.get(provider, _THINKING_CONFIGS.get("openai-codex"))
 
 
+# Short descriptions reused across providers when we build a per-model config
+# from `Model.thinking_levels` (see `_get_thinking_config_for_model`).
+_LEVEL_DESC = {
+    "minimal": "Minimal reasoning",
+    "low": "Quick reasoning",
+    "medium": "Balanced",
+    "high": "Deep reasoning",
+    "xhigh": "Maximum effort",
+}
+
+
+def _get_thinking_config_for_model(provider: str, model_id: str | None) -> dict:
+    """Prefer the model's own thinking_levels if declared, else fall back to the
+    provider's static config. This lets different models under the same
+    provider expose different pickers (e.g. gpt-4o hides the menu, gpt-5
+    shows low/medium/high, Codex Max adds xhigh).
+    """
+    from openprogram.providers import get_model
+    if model_id:
+        model = get_model(provider, model_id)
+        if model is not None and getattr(model, "thinking_levels", None):
+            levels = list(model.thinking_levels)
+            label = _get_thinking_config(provider).get("label", "thinking")
+            return {
+                "label": label,
+                "options": [{"value": v, "desc": _LEVEL_DESC.get(v, v)} for v in levels],
+                "default": model.default_thinking_level or levels[len(levels) // 2],
+                "variant": model.thinking_variant,
+            }
+        # Model found but declares no thinking_levels → hide menu.
+        if model is not None:
+            return {
+                "label": _get_thinking_config(provider).get("label", "thinking"),
+                "options": [],
+                "default": None,
+                "variant": None,
+            }
+    # No model info — keep the old provider-wide default.
+    return _get_thinking_config(provider)
+
+
 def _default_effort_for(runtime) -> str:
     """Resolve the provider-specific default thinking effort for a runtime.
 
@@ -551,35 +594,44 @@ def _resolve_effort(effort, runtime) -> str:
 
 
 def _apply_thinking_effort(runtime, effort: str):
-    """Apply thinking effort setting to a runtime based on its provider type.
+    """Apply thinking effort setting to a runtime.
 
-    Maps effort levels to provider-specific parameters:
-      - Codex CLI:       --reasoning-effort flag (none/low/medium/high/xhigh)
-      - Claude Code CLI: --effort flag (requires process restart if changed)
-      - Anthropic API:   thinking budget parameter
-      - OpenAI API:      reasoning_effort parameter
+    API-backed runtimes share the unified `runtime.thinking_level` attribute
+    (pi-ai ThinkingLevel: off/low/medium/high/xhigh), which flows into the
+    provider's `SimpleStreamOptions.reasoning` — same abstraction opencode/
+    pi-ai use. CLI subprocess runtimes still need provider-specific plumbing
+    because their knobs are command-line flags, not request fields.
     """
     rt_type = type(runtime).__name__
 
     # Resolve None/empty -> provider default (no hardcoded "medium")
     effort = _resolve_effort(effort, runtime)
 
-    if rt_type == "OpenAICodexRuntime":
-        runtime._reasoning_effort = effort
-    elif rt_type == "ClaudeCodeRuntime":
+    if rt_type == "ClaudeCodeRuntime":
+        # Claude Code CLI restarts its subprocess when --effort changes.
         old_effort = getattr(runtime, '_thinking_effort', None)
         if effort != old_effort:
             runtime._thinking_effort = effort
-            # Claude Code CLI needs process restart for effort change
             if hasattr(runtime, '_restart_process'):
                 runtime._restart_process()
-    else:
-        runtime._thinking_effort = effort
+        return
+
+    # OpenAI Codex CLI subprocess runtime also reads `_reasoning_effort`
+    # directly from the subclass attribute to build its `--reasoning-effort`
+    # flag. Keep that plumbing for the subprocess path.
+    if rt_type == "OpenAICodexRuntime":
+        runtime._reasoning_effort = effort
+
+    # Every Runtime (API + CLI subclasses) exposes the unified knob. Setting
+    # it makes AgentSession-based API paths send `reasoning=<level>` straight
+    # through to the provider.
+    runtime.thinking_level = effort or "off"
 
 
 def _execute_in_context(conv_id: str, msg_id: str, action: str,
                         func_name: str = None, kwargs: dict = None, query: str = None,
-                        thinking_effort: str = None, exec_thinking_effort: str = None):
+                        thinking_effort: str = None, exec_thinking_effort: str = None,
+                        tools_flag=None):
     """Execute a chat query or function call within the conversation's Context tree.
 
     This is the core execution engine. Everything runs under the conversation's
@@ -668,8 +720,24 @@ def _execute_in_context(conv_id: str, msg_id: str, action: str,
                 runtime.on_stream = _on_chat_stream
                 _register_active_runtime(conv_id, runtime)
 
+                # Resolve opt-in tools. True -> DEFAULT_TOOLS; list -> subset.
+                exec_tools = None
+                if tools_flag:
+                    try:
+                        from openprogram.tools import get_many, DEFAULT_TOOLS
+                        if isinstance(tools_flag, list):
+                            exec_tools = get_many(tools_flag)
+                        else:
+                            exec_tools = get_many(DEFAULT_TOOLS)
+                    except Exception as e:
+                        _log(f"[exec] tools load failed: {e}; continuing without tools")
+                        exec_tools = None
+
                 try:
-                    result = runtime.exec(content=chat_content)
+                    if exec_tools is not None:
+                        result = runtime.exec(content=chat_content, tools=exec_tools)
+                    else:
+                        result = runtime.exec(content=chat_content)
                 finally:
                     runtime.on_stream = None
                     with _running_tasks_lock:
@@ -677,17 +745,21 @@ def _execute_in_context(conv_id: str, msg_id: str, action: str,
                     _unregister_active_runtime(conv_id)
                 _log(f"[exec] query completed, result length: {len(str(result))}")
 
-                # Store assistant reply
+                # Store assistant reply, including structured blocks so the
+                # thinking/tool folds survive a conversation reload.
+                blocks = list(getattr(runtime, "last_blocks", None) or [])
                 conv["messages"].append({
                     "role": "assistant",
                     "id": msg_id + "_reply",
                     "content": str(result),
+                    "blocks": blocks,
                     "timestamp": time.time(),
                 })
 
                 _broadcast_chat_response(conv_id, msg_id, {
                     "type": "result",
                     "content": str(result),
+                    "blocks": blocks,
                 })
                 _broadcast_context_stats(conv_id, msg_id, chat_runtime=runtime)
 
@@ -1057,7 +1129,9 @@ def _execute_in_context(conv_id: str, msg_id: str, action: str,
             return
 
         error_content = f"Error: {e}\n\n{traceback.format_exc()}"
-        # Persist error to conversation messages
+        # Plain chat errors (action="query", no function) should be shown as
+        # chat messages with a retry button, not as runtime blocks.
+        error_display = "runtime" if func_name else "chat"
         try:
             conv = _get_or_create_conversation(conv_id)
             now = time.time()
@@ -1067,11 +1141,13 @@ def _execute_in_context(conv_id: str, msg_id: str, action: str,
                 "id": msg_id + "_reply",
                 "content": error_content,
                 "function": func_name,
-                "display": "runtime",
+                "display": error_display,
                 "timestamp": now,
                 "attempts": [{"content": error_content, "timestamp": now}],
                 "current_attempt": 0,
             }
+            if not func_name:
+                error_msg["retry_query"] = query
             conv["messages"].append(error_msg)
             _save_conversation(conv_id)
         except Exception:
@@ -1080,7 +1156,8 @@ def _execute_in_context(conv_id: str, msg_id: str, action: str,
             "type": "error",
             "content": error_content,
             "function": func_name,
-            "display": "runtime",
+            "display": error_display,
+            "retry_query": query if not func_name else None,
         })
     finally:
         _reset_current_conv_id(_conv_token)
@@ -1106,7 +1183,6 @@ def _broadcast_context_stats(conv_id: str, msg_id: str, chat_runtime=None, exec_
     # last_usage.input_tokens = total tokens sent in the last call ≈ context size.
     if chat_runtime:
         usage = getattr(chat_runtime, 'last_usage', None)
-        print(f"[DEBUG] chat_runtime.last_usage = {usage}", flush=True)
         if usage and (usage.get("input_tokens") or usage.get("output_tokens") or usage.get("cache_read") or usage.get("cache_create")):
             conv["_chat_usage"] = {
                 "input_tokens": usage.get("input_tokens", 0),
@@ -1114,7 +1190,6 @@ def _broadcast_context_stats(conv_id: str, msg_id: str, chat_runtime=None, exec_
                 "cache_read": usage.get("cache_read", 0),
                 "cache_create": usage.get("cache_create", 0),
             }
-            print(f"[DEBUG] _chat_usage set to: {conv['_chat_usage']}", flush=True)
 
     # --- Exec usage (per-function, not cumulative) ---
     exec_stats = None
@@ -1150,6 +1225,34 @@ def _broadcast_chat_response(conv_id: str, msg_id: str, response: dict):
     # No need to store in messages list — Context tree IS the storage
     msg = json.dumps({"type": "chat_response", "data": response}, default=str)
     _broadcast(msg)
+
+
+# ---------------------------------------------------------------------------
+# MessageStore → WebSocket bridge (v2 streaming protocol)
+# ---------------------------------------------------------------------------
+# Every frame the store emits is wrapped in the same `chat_response` envelope
+# the rest of the chat traffic uses, so the frontend has one dispatcher to
+# route everything. Frames carry their own conv_id so clients filter.
+
+def _wire_message_store_broadcast() -> None:
+    """Install a one-shot global listener on the process-wide store.
+
+    Idempotent: the first call registers, subsequent ones are no-ops. The
+    listener lives for the process lifetime; there's no matching unsubscribe
+    because the store itself is the single source of truth and should keep
+    emitting even across WS reconnects.
+    """
+    if getattr(_wire_message_store_broadcast, "_installed", False):
+        return
+    store = _get_message_store()
+
+    def _on_frame(conv_id: str, frame: dict) -> None:
+        envelope = {"type": "chat_response", "data": dict(frame)}
+        envelope["data"]["conv_id"] = conv_id
+        _broadcast(json.dumps(envelope, default=str))
+
+    store.subscribe_all(_on_frame)
+    _wire_message_store_broadcast._installed = True  # type: ignore[attr-defined]
 
 
 def _parse_chat_input(text: str) -> dict:
@@ -1262,6 +1365,11 @@ async def _websocket_handler(ws):
     """WebSocket endpoint for real-time Context tree updates and chat."""
     await ws.accept()
 
+    # Install the global store→WS broadcaster on first connection. We can't
+    # wire it at module import because the asyncio loop isn't running yet;
+    # the broadcaster needs a live loop to schedule ws.send_text coroutines.
+    _wire_message_store_broadcast()
+
     with _ws_lock:
         _ws_connections.append(ws)
     try:
@@ -1319,12 +1427,35 @@ async def _handle_ws_command(ws, cmd: dict):
     action = cmd.get("action")
     print(f"[ws] command received: action={action}")
 
+    if action == "sync":
+        # Reconnect handshake: client sends the max seq it has seen per
+        # message; server replies with the frames needed to catch up. The
+        # store decides snapshot-vs-replay — see MessageStore.sync.
+        conv_id = cmd.get("conv_id")
+        known_seqs = cmd.get("known_seqs") or {}
+        if not conv_id:
+            return
+        store = _get_message_store()
+        for frame in store.sync(conv_id, known_seqs):
+            envelope = {"type": "chat_response", "data": dict(frame)}
+            envelope["data"]["conv_id"] = conv_id
+            try:
+                await ws.send_text(json.dumps(envelope, default=str))
+            except Exception:
+                break
+        return
+
     if action == "chat":
         text = cmd.get("text", "").strip()
         conv_id = cmd.get("conv_id")
         # None -> resolved per-provider inside _apply_thinking_effort
         thinking_effort = cmd.get("thinking_effort") or None
         exec_thinking_effort = cmd.get("exec_thinking_effort") or None
+        # Opt-in tool use. `tools` payload:
+        #   true  -> inject DEFAULT_TOOLS (bash/read/write/edit/patch/grep/glob/list/todo)
+        #   false / missing -> no tools (light chat mode)
+        #   list  -> explicit tool-name subset
+        tools_flag = cmd.get("tools")
         if not text:
             return
 
@@ -1368,7 +1499,7 @@ async def _handle_ws_command(ws, cmd: dict):
             threading.Thread(
                 target=_execute_in_context,
                 args=(conv_id, msg_id, "query"),
-                kwargs={"query": parsed["raw"], "thinking_effort": thinking_effort},
+                kwargs={"query": parsed["raw"], "thinking_effort": thinking_effort, "tools_flag": tools_flag},
                 daemon=True,
             ).start()
 
@@ -1660,12 +1791,14 @@ def create_app():
 
     app = FastAPI(title="Agentic Visualizer", docs_url=None, redoc_url=None)
 
-    # Mount static files (CSS, JS)
-    from starlette.staticfiles import StaticFiles
-    static_dir = os.path.join(os.path.dirname(__file__), "static")
-    app.mount("/css", StaticFiles(directory=os.path.join(static_dir, "css")), name="css")
-    app.mount("/js", StaticFiles(directory=os.path.join(static_dir, "js")), name="js")
-    app.mount("/images", StaticFiles(directory=os.path.join(static_dir, "images")), name="images")
+    # Auth v2 REST + SSE routes. Kept in a dedicated module so server.py
+    # doesn't accumulate more authentication state than it already has.
+    from ._auth_routes import router as _auth_router
+    app.include_router(_auth_router)
+
+    # Frontend is served separately from web/ (Next.js). This process only
+    # serves /api/* and /ws. Run `cd web && npm run dev` and point the browser
+    # at http://localhost:3000 — Next will proxy /api/* and /ws back to us.
 
     @app.on_event("startup")
     async def _capture_loop():
@@ -1700,119 +1833,7 @@ def create_app():
 
         threading.Thread(target=_do_refresh, daemon=True).start()
 
-    # Serve the HTML frontend
-    @app.get("/", response_class=HTMLResponse)
-    async def root():
-        from starlette.responses import RedirectResponse
-        return RedirectResponse(url="/new", status_code=302)
-
-    _FAVICON_SVG = (
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
-        '<text x="16" y="23" font-family="ui-monospace,SFMono-Regular,Consolas,monospace" '
-        'font-size="22" font-weight="800" text-anchor="middle">'
-        '<tspan fill="#3886e5">{</tspan>'
-        '<tspan fill="#ff6b6b">L</tspan>'
-        '<tspan fill="#3886e5">}</tspan>'
-        '</text></svg>'
-    )
-
-    @app.get("/favicon.ico")
-    @app.get("/favicon.svg")
-    async def favicon():
-        from starlette.responses import Response
-        return Response(content=_FAVICON_SVG, media_type="image/svg+xml")
-
-    def _inject_sidebar(html: str) -> str:
-        """Replace <!-- SIDEBAR --> placeholder with shared sidebar HTML."""
-        if "<!-- SIDEBAR -->" not in html:
-            return html
-        sidebar_path = os.path.join(os.path.dirname(__file__), "static", "_sidebar.html")
-        try:
-            with open(sidebar_path) as f:
-                sidebar_html = f.read()
-        except FileNotFoundError:
-            return html
-        return html.replace("<!-- SIDEBAR -->", sidebar_html)
-
-    @app.get("/new", response_class=HTMLResponse)
-    async def index():
-        from starlette.responses import Response
-        html_path = os.path.join(os.path.dirname(__file__), "static", "index.html")
-        with open(html_path) as f:
-            content = _inject_sidebar(f.read())
-        return Response(
-            content=content,
-            media_type="text/html",
-            headers={
-                "Cache-Control": "no-cache, no-store, must-revalidate",
-                "Pragma": "no-cache",
-                "Expires": "0",
-            },
-        )
-
-    @app.get("/config", response_class=HTMLResponse)
-    async def config_page():
-        from starlette.responses import Response
-        html_path = os.path.join(os.path.dirname(__file__), "static", "config.html")
-        with open(html_path) as f:
-            content = f.read()
-        return Response(
-            content=content,
-            media_type="text/html",
-            headers={
-                "Cache-Control": "no-cache, no-store, must-revalidate",
-                "Pragma": "no-cache",
-                "Expires": "0",
-            },
-        )
-
-    @app.get("/c/{conv_id}", response_class=HTMLResponse)
-    async def conversation_page(conv_id: str):
-        from starlette.responses import Response
-        html_path = os.path.join(os.path.dirname(__file__), "static", "index.html")
-        with open(html_path) as f:
-            content = _inject_sidebar(f.read())
-        return Response(
-            content=content,
-            media_type="text/html",
-            headers={
-                "Cache-Control": "no-cache, no-store, must-revalidate",
-                "Pragma": "no-cache",
-                "Expires": "0",
-            },
-        )
-
-    @app.get("/settings", response_class=HTMLResponse)
-    async def settings_page():
-        from starlette.responses import Response
-        html_path = os.path.join(os.path.dirname(__file__), "static", "settings.html")
-        with open(html_path) as f:
-            content = _inject_sidebar(f.read())
-        return Response(
-            content=content,
-            media_type="text/html",
-            headers={
-                "Cache-Control": "no-cache, no-store, must-revalidate",
-                "Pragma": "no-cache",
-                "Expires": "0",
-            },
-        )
-
-    @app.get("/programs", response_class=HTMLResponse)
-    async def programs_page():
-        from starlette.responses import Response
-        html_path = os.path.join(os.path.dirname(__file__), "static", "programs.html")
-        with open(html_path) as f:
-            content = _inject_sidebar(f.read())
-        return Response(
-            content=content,
-            media_type="text/html",
-            headers={
-                "Cache-Control": "no-cache, no-store, must-revalidate",
-                "Pragma": "no-cache",
-                "Expires": "0",
-            },
-        )
+    # No HTML routes — frontend lives in web/ (Next.js on :3000).
 
     # WebSocket — use Starlette's raw WebSocketRoute to avoid FastAPI routing issues
     from starlette.routing import WebSocketRoute
@@ -2389,12 +2410,15 @@ def create_app():
                 "model": chat_model,
                 "session_id": chat_session_id,
                 "locked": chat_locked,
-                "thinking": _get_thinking_config(chat_provider),
+                "thinking": _get_thinking_config_for_model(chat_provider, chat_model),
             },
             "exec": {
                 "provider": _runtime_management._exec_provider,
                 "model": _runtime_management._exec_model,
-                "thinking": _get_thinking_config(_runtime_management._exec_provider),
+                "thinking": _get_thinking_config_for_model(
+                    _runtime_management._exec_provider,
+                    _runtime_management._exec_model,
+                ),
             },
             "available": _runtime_management._available_providers,
         })
