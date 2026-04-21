@@ -298,3 +298,139 @@ def test_login_import_codex_when_file_missing(isolated):
     rc = dispatch(_parse(["login", "openai-codex", "--method", "import_from_cli"]))
     assert rc == 1
     assert "codex login" in cap.readouterr().err
+
+
+# ---- aliases -------------------------------------------------------------
+
+def test_aliases_list_shows_canonical(isolated):
+    _, _, _, cap = isolated
+    rc = dispatch(_parse(["aliases"]))
+    assert rc == 0
+    out = cap.readouterr().out
+    assert "codex" in out
+    assert "openai-codex" in out
+    assert "claude" in out and "anthropic" in out
+
+
+def test_aliases_json_is_parseable(isolated):
+    _, _, _, cap = isolated
+    rc = dispatch(_parse(["aliases", "--json"]))
+    assert rc == 0
+    body = json.loads(cap.readouterr().out)
+    assert body["codex"] == "openai-codex"
+
+
+def test_login_resolves_alias(isolated, monkeypatch):
+    store, _, _, cap = isolated
+    monkeypatch.setattr("getpass.getpass", lambda prompt: "sk-from-alias-login")
+    # Use the alias 'codex' rather than the canonical id.
+    rc = dispatch(_parse(["login", "codex", "--method", "api_key"]))
+    assert rc == 0
+    # The pool must be stored under the canonical id, not the alias.
+    assert store.find_pool("codex", "default") is None
+    pool = store.find_pool("openai-codex", "default")
+    assert pool is not None
+    assert pool.credentials[0].payload.api_key == "sk-from-alias-login"
+
+
+def test_status_resolves_alias(isolated):
+    store, _, _, cap = isolated
+    store.put_pool(CredentialPool(
+        provider_id="anthropic", profile_id="default",
+        credentials=[Credential(
+            provider_id="anthropic", profile_id="default", kind="api_key",
+            payload=ApiKeyPayload(api_key="sk-ant-abc12345678"),
+            source="cli_paste",
+        )],
+    ))
+    # `claude` → `anthropic`
+    rc = dispatch(_parse(["status", "claude"]))
+    assert rc == 0
+    out = cap.readouterr().out
+    assert "anthropic" in out
+
+
+# ---- doctor --------------------------------------------------------------
+
+def test_doctor_empty_store_warns_no_pools(isolated):
+    _, _, _, cap = isolated
+    rc = dispatch(_parse(["doctor"]))
+    # No ERRORs, just WARN → exit 0.
+    assert rc == 0
+    out = cap.readouterr().out
+    assert "no_pools" in out
+
+
+def test_doctor_json_has_findings_list(isolated):
+    _, _, _, cap = isolated
+    rc = dispatch(_parse(["doctor", "--json"]))
+    assert rc == 0
+    body = json.loads(cap.readouterr().out)
+    assert body["pools_checked"] == 0
+    assert any(f["code"] == "no_pools" for f in body["findings"])
+
+
+def test_doctor_flags_expired_oauth_without_refresh(isolated):
+    store, _, _, cap = isolated
+    # Provider with no refresh registered → expired oauth must be ERROR.
+    from openprogram.auth.types import OAuthPayload
+    store.put_pool(CredentialPool(
+        provider_id="random-oauth-provider", profile_id="default",
+        credentials=[Credential(
+            provider_id="random-oauth-provider", profile_id="default",
+            kind="oauth",
+            payload=OAuthPayload(
+                access_token="tok-expired", refresh_token="r-abc",
+                expires_at_ms=1,  # epoch — definitely expired
+            ),
+            source="cli_paste",
+        )],
+    ))
+    rc = dispatch(_parse(["doctor", "--json"]))
+    body = json.loads(cap.readouterr().out)
+    assert rc == 1, body
+    codes = {f["code"] for f in body["findings"]}
+    assert "expired_no_refresh" in codes
+
+
+def test_doctor_healthy_api_key_pool_passes(isolated):
+    store, _, _, cap = isolated
+    store.put_pool(CredentialPool(
+        provider_id="openai", profile_id="default",
+        credentials=[Credential(
+            provider_id="openai", profile_id="default", kind="api_key",
+            payload=ApiKeyPayload(api_key="sk-healthy-key-12345"),
+            source="cli_paste",
+        )],
+    ))
+    rc = dispatch(_parse(["doctor"]))
+    assert rc == 0
+    out = cap.readouterr().out
+    assert "✗ ERROR" not in out
+
+
+# ---- setup (wizard) ------------------------------------------------------
+
+def test_setup_wizard_aborts_cleanly_on_no(isolated, monkeypatch):
+    _, _, _, cap = isolated
+    # User answers 'n' to the opening "Start?" prompt.
+    answers = iter(["n"])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
+    rc = dispatch(_parse(["setup"]))
+    assert rc == 0
+    assert "Cancelled" in cap.readouterr().out
+
+
+def test_setup_wizard_adopts_detected_env_var(isolated, monkeypatch):
+    store, _, _, cap = isolated
+    for v in ["GH_TOKEN", "GITHUB_TOKEN", "COPILOT_GITHUB_TOKEN"]:
+        monkeypatch.delenv(v, raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-wizard-adopted-12345")
+    # Answer: start? y, adopt all? y, then decline every popular-login offer.
+    answers = iter(["y", "y"] + ["n"] * 10)
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
+    rc = dispatch(_parse(["setup"]))
+    assert rc == 0, cap.readouterr()
+    pool = store.find_pool("openai", "default")
+    assert pool is not None
+    assert pool.credentials[0].payload.api_key == "sk-wizard-adopted-12345"

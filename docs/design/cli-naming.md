@@ -29,17 +29,32 @@ openprogram <noun> [<noun> ...] <verb> [<arg> ...]
 ## Examples (current and future)
 
 ```
-openprogram providers auth login <prov>          ✓
-openprogram providers auth list                  ✓
-openprogram providers auth status <prov>         ✓
-openprogram providers auth profiles list         ✓  (nouns stack: providers > auth > profiles)
-openprogram providers auth profiles create <n>   ✓
+openprogram providers login <prov>               ✓
+openprogram providers list                       ✓
+openprogram providers status <prov>              ✓
+openprogram providers profiles list              ✓  (nouns stack: providers > profiles)
+openprogram providers profiles create <n>        ✓
+openprogram providers doctor                     ✓
+openprogram providers setup                      ✓  (interactive wizard)
 
 openprogram providers models list                (future, same pattern)
-openprogram providers models aliases add         (future, nouns stack)
-openprogram channels auth login discord          (future, same pattern in different domain)
-openprogram tools auth login github              (future)
+openprogram providers aliases add <from> <to>    (future, nouns stack)
+openprogram channels login discord               (future, same pattern in different domain)
+openprogram tools login github                   (future)
 ```
+
+## When to add a namespace layer
+
+Only add a middle noun (e.g. `providers auth login` instead of
+`providers login`) when the parent noun genuinely needs to split into
+*multiple* sibling subgroups. If the parent only ever speaks about
+one subgroup, collapse the layer — a middle noun with no siblings is
+dead weight.
+
+For example, OpenClaw keeps `openclaw models auth login` because
+`models` also has `aliases`, `list`, and other siblings. We keep
+`providers login` flat because every verb on `providers` is
+auth-adjacent.
 
 ## Why this rule
 

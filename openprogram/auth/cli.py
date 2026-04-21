@@ -45,6 +45,7 @@ import sys
 import time
 from typing import Any, Optional
 
+from .aliases import known_aliases, resolve as _resolve_alias
 from .context import auth_scope
 from .manager import AuthManager, get_manager
 from .profiles import (
@@ -127,6 +128,23 @@ def build_parser(sub: "argparse._SubParsersAction") -> None:
     p_status.add_argument("provider")
     p_status.add_argument("--profile", default=DEFAULT_PROFILE_NAME)
 
+    # doctor — diagnostic report over every pool
+    p_doctor = auth_sub.add_parser(
+        "doctor", help="Diagnose credentials (expiry, refresh, cooldown, conflicts)",
+    )
+    p_doctor.add_argument("--json", action="store_true", help="Output JSON")
+
+    # setup — interactive wizard that chains discover → login → status
+    auth_sub.add_parser(
+        "setup", help="Interactive first-time setup wizard",
+    )
+
+    # aliases — show the short-name → canonical table
+    p_aliases = auth_sub.add_parser(
+        "aliases", help="List provider short-name aliases",
+    )
+    p_aliases.add_argument("--json", action="store_true", help="Output JSON")
+
     # profiles (plural noun, per CLI naming convention — see
     # docs/design/cli-naming.md). Verbs follow: list/create/delete.
     p_profiles = auth_sub.add_parser("profiles", help="Profile management")
@@ -151,7 +169,7 @@ def dispatch(args: argparse.Namespace) -> int:
     """
     cmd = args.providers_cmd
     if cmd == "login":
-        return _cmd_login(args.provider, args.profile, args.method)
+        return _cmd_login(_resolve_alias(args.provider), args.profile, args.method)
     if cmd == "list":
         return _cmd_list(args.profile, args.json)
     if cmd == "discover":
@@ -159,14 +177,23 @@ def dispatch(args: argparse.Namespace) -> int:
     if cmd == "adopt":
         return _cmd_adopt(args.source_id, args.profile)
     if cmd == "logout":
-        return _cmd_logout(args.provider, args.profile, skip_confirm=args.yes)
+        return _cmd_logout(
+            _resolve_alias(args.provider), args.profile, skip_confirm=args.yes,
+        )
     if cmd == "status":
-        return _cmd_status(args.provider, args.profile)
+        return _cmd_status(_resolve_alias(args.provider), args.profile)
+    if cmd == "doctor":
+        return _cmd_doctor(args.json)
+    if cmd == "setup":
+        return _cmd_setup()
+    if cmd == "aliases":
+        return _cmd_aliases(args.json)
     if cmd == "profiles":
         return _dispatch_profiles(args)
     # No subcommand — print the help hint.
     print("Usage: openprogram providers <verb>\n"
-          "Verbs: login, logout, list, status, discover, adopt, profiles",
+          "Verbs: login, logout, list, status, discover, adopt, "
+          "doctor, setup, aliases, profiles",
           file=sys.stderr)
     return 2
 
@@ -664,6 +691,352 @@ def _cmd_profile_delete(name: str, skip_confirm: bool) -> int:
         return 1
     print(f"✓ Deleted profile {name}")
     return 0
+
+
+# ---------------------------------------------------------------------------
+# aliases
+# ---------------------------------------------------------------------------
+
+def _cmd_aliases(as_json: bool) -> int:
+    table = known_aliases()
+    if as_json:
+        print(json.dumps(table, indent=2))
+        return 0
+    print(f"{'alias':24s}  canonical")
+    for alias in sorted(table):
+        print(f"{alias:24s}  {table[alias]}")
+    print("\nUse either form: `openprogram providers login codex` and "
+          "`openprogram providers login openai-codex` do the same thing.")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# doctor — diagnostic report
+# ---------------------------------------------------------------------------
+
+def _cmd_doctor(as_json: bool) -> int:
+    """Run the full credential health report.
+
+    The checks are a superset of OpenClaw's ``doctor-auth`` list, adapted
+    for our store layout:
+
+      * every pool's credentials are enumerated
+      * OAuth payloads flagged if expired beyond the provider's skew
+      * refresh configuration surfaced (registered vs. absent)
+      * cooldown state — who's cooling down and for how long
+      * pool exhaustion — no usable credential in the pool
+      * orphaned profiles — profiles with no pools at all
+      * conflicting credentials — same provider/profile with duplicate
+        credential_ids (shouldn't happen; we flag to be loud if it does)
+
+    Exit code 0 = all green. Exit 1 = at least one ERROR. WARN-only
+    reports still exit 0 because the common case is "oauth expired, will
+    refresh on next call" which is informational, not actionable.
+    """
+    from .manager import get_provider_config
+
+    store = get_store()
+    pm = get_profile_manager()
+    profiles = {p.name: p for p in pm.list_profiles()}
+    pools = store.list_pools()
+
+    findings: list[dict[str, Any]] = []
+
+    def add(level: str, code: str, message: str, **extra: Any) -> None:
+        findings.append({"level": level, "code": code, "message": message, **extra})
+
+    if not pools:
+        add("WARN", "no_pools",
+            "No credential pools configured. Run `openprogram providers setup`.")
+
+    # Profiles referenced by pools but not registered with ProfileManager.
+    pool_profile_ids = {p.profile_id for p in pools}
+    orphaned_profile_refs = pool_profile_ids - set(profiles.keys())
+    for pid in sorted(orphaned_profile_refs):
+        add("ERROR", "orphan_profile_ref",
+            f"Pool references profile {pid!r} which no longer exists.",
+            profile=pid)
+
+    # Profiles that exist but nobody's logged into.
+    empty_profiles = sorted(set(profiles.keys()) - pool_profile_ids)
+    for pid in empty_profiles:
+        if pid == DEFAULT_PROFILE_NAME:
+            continue  # default is expected to start empty
+        add("INFO", "empty_profile",
+            f"Profile {pid!r} has no credentials yet.",
+            profile=pid)
+
+    now_ms = int(time.time() * 1000)
+
+    for pool in pools:
+        cfg = get_provider_config(pool.provider_id)
+        refresh_available = cfg.refresh is not None or cfg.async_refresh is not None
+
+        # Dup credential_id detection (flags storage corruption).
+        seen: dict[str, int] = {}
+        for c in pool.credentials:
+            seen[c.credential_id] = seen.get(c.credential_id, 0) + 1
+        for cid, n in seen.items():
+            if n > 1:
+                add("ERROR", "duplicate_credential_id",
+                    f"Pool {pool.provider_id}/{pool.profile_id} has "
+                    f"{n} credentials with id {cid!r}.",
+                    provider=pool.provider_id, profile=pool.profile_id)
+
+        usable = 0
+        for c in pool.credentials:
+            # Cooldown check.
+            cooldown_until = getattr(c, "cooldown_until_ms", 0) or 0
+            if cooldown_until and cooldown_until > now_ms:
+                add("WARN", "cooling_down",
+                    f"{pool.provider_id}/{pool.profile_id} credential "
+                    f"{c.credential_id} cooling down for "
+                    f"{_fmt_duration(cooldown_until - now_ms)}.",
+                    provider=pool.provider_id, profile=pool.profile_id,
+                    credential_id=c.credential_id)
+                continue
+
+            # Expiry on oauth/device_code.
+            if c.kind in ("oauth", "device_code"):
+                exp = getattr(c.payload, "expires_at_ms", 0) or 0
+                if exp and exp <= now_ms:
+                    if refresh_available or c.read_only:
+                        # Read-only: external CLI owns refresh; surface
+                        # as WARN because next call will either refresh
+                        # or raise AuthReadOnlyError clearly.
+                        add("WARN", "expired_token",
+                            f"{pool.provider_id}/{pool.profile_id} access "
+                            "token expired; will refresh on next use."
+                            + (" (read-only — external CLI)" if c.read_only else ""),
+                            provider=pool.provider_id,
+                            profile=pool.profile_id,
+                            credential_id=c.credential_id)
+                        usable += 1  # refresh path makes it usable
+                    else:
+                        add("ERROR", "expired_no_refresh",
+                            f"{pool.provider_id}/{pool.profile_id} access "
+                            "token expired and no refresh configured. "
+                            f"Run `openprogram providers login {pool.provider_id}`.",
+                            provider=pool.provider_id,
+                            profile=pool.profile_id,
+                            credential_id=c.credential_id)
+                        continue
+                else:
+                    usable += 1
+            else:
+                usable += 1
+
+            # Refresh wiring sanity — if we have an oauth cred but no
+            # refresh registered AND it's not read-only, the user can
+            # still use it until expiry but should know.
+            if (
+                c.kind == "oauth"
+                and not refresh_available
+                and not c.read_only
+            ):
+                add("WARN", "no_refresh_registered",
+                    f"{pool.provider_id} has an OAuth credential but no "
+                    "refresh callback registered — will need manual re-login "
+                    "after expiry.",
+                    provider=pool.provider_id,
+                    profile=pool.profile_id)
+
+        if usable == 0 and pool.credentials:
+            add("ERROR", "pool_exhausted",
+                f"{pool.provider_id}/{pool.profile_id} has "
+                f"{len(pool.credentials)} credential(s) but none are usable.",
+                provider=pool.provider_id, profile=pool.profile_id)
+
+    if as_json:
+        print(json.dumps({
+            "pools_checked": len(pools),
+            "profiles_checked": len(profiles),
+            "findings": findings,
+        }, indent=2))
+    else:
+        _print_doctor_report(pools, profiles, findings)
+
+    has_error = any(f["level"] == "ERROR" for f in findings)
+    return 1 if has_error else 0
+
+
+def _print_doctor_report(pools, profiles, findings) -> None:
+    print(f"Checked {len(pools)} pool(s) across {len(profiles)} profile(s).\n")
+    if not findings:
+        print("✓ All checks passed.")
+        return
+    order = {"ERROR": 0, "WARN": 1, "INFO": 2}
+    findings_sorted = sorted(findings, key=lambda f: (order.get(f["level"], 3), f["code"]))
+    tag = {"ERROR": "✗ ERROR", "WARN": "⚠ WARN ", "INFO": "· INFO "}
+    counts = {"ERROR": 0, "WARN": 0, "INFO": 0}
+    for f in findings_sorted:
+        counts[f["level"]] = counts.get(f["level"], 0) + 1
+        print(f"{tag.get(f['level'], f['level']):8s}  [{f['code']}] {f['message']}")
+    print()
+    print(f"Summary: {counts.get('ERROR', 0)} error(s), "
+          f"{counts.get('WARN', 0)} warning(s), "
+          f"{counts.get('INFO', 0)} info.")
+
+
+# ---------------------------------------------------------------------------
+# setup — first-time wizard
+# ---------------------------------------------------------------------------
+
+def _cmd_setup() -> int:
+    """Interactive wizard inspired by OpenClaw's ``setup.ts``.
+
+    Flow:
+      1. intro — explain what we're about to do
+      2. scan — run discover; surface any adoptable credentials
+      3. offer per-finding: adopt / skip
+      4. offer manual login for popular providers not already covered
+      5. outro — point at `providers list` and `providers doctor`
+
+    Entirely prompt-driven. No TUI framework dependency — plain input()
+    so it works over SSH, in CI logs, and inside screen/tmux. On
+    EOF/^C the wizard exits cleanly with a summary of what was done.
+    """
+    try:
+        return _run_setup_wizard()
+    except (KeyboardInterrupt, EOFError):
+        print("\n\nSetup interrupted. Run `openprogram providers setup` again "
+              "when you're ready. Progress so far is already saved.",
+              file=sys.stderr)
+        return 130
+
+
+def _run_setup_wizard() -> int:
+    from openprogram.auth.sources import (
+        ClaudeCodeSource,
+        CodexCliSource,
+        EnvApiKeySource,
+        GhCliSource,
+        QwenCliSource,
+    )
+
+    store = get_store()
+    pm = get_profile_manager()
+    default = pm.get_profile(DEFAULT_PROFILE_NAME)
+
+    print("═" * 60)
+    print("  OpenProgram — provider setup")
+    print("═" * 60)
+    print()
+    print("This wizard walks you through connecting AI providers.")
+    print("We'll scan for existing logins (Codex CLI, Claude Code, env")
+    print("variables, etc.) and offer to import them. You can skip any")
+    print("step. Nothing is sent anywhere; everything stays on this box.")
+    print()
+    if _confirm("Start?", default=True) is False:
+        print("Cancelled.")
+        return 0
+
+    # --- step 1: scan -----------------------------------------------------
+    print("\n[1/3] Scanning for existing credentials...\n")
+    sources: list[Any] = [
+        CodexCliSource(),
+        ClaudeCodeSource(),
+        QwenCliSource(),
+        GhCliSource(),
+    ]
+    from openprogram.providers.env_api_keys import PROVIDER_ENV_VARS
+    for provider, env_var in PROVIDER_ENV_VARS.items():
+        sources.append(EnvApiKeySource(provider_id=provider, env_var=env_var))
+
+    findings: list[tuple[Any, list[Credential]]] = []
+    for src in sources:
+        try:
+            creds = src.try_import(default.root)
+        except Exception:
+            continue
+        if creds:
+            findings.append((src, creds))
+
+    if not findings:
+        print("  (nothing detected)")
+    else:
+        print(f"  Found {sum(len(c) for _, c in findings)} adoptable credential(s):")
+        for src, creds in findings:
+            for c in creds:
+                print(f"    · {src.source_id:24s} → {c.provider_id} "
+                      f"({_payload_summary(c)})")
+
+    # --- step 2: adopt ----------------------------------------------------
+    adopted = 0
+    if findings:
+        print()
+        adopt_all = _confirm("Import all of them?", default=True)
+        for src, creds in findings:
+            for cred in creds:
+                if adopt_all is False:
+                    pick = _confirm(
+                        f"  Import {src.source_id} → {cred.provider_id}?",
+                        default=True,
+                    )
+                    if not pick:
+                        continue
+                # Existing pool? Skip silently to avoid clobbering.
+                existing = store.find_pool(cred.provider_id, cred.profile_id)
+                if existing and any(
+                    c.credential_id == cred.credential_id for c in existing.credentials
+                ):
+                    continue
+                try:
+                    store.add_credential(cred)
+                    adopted += 1
+                except Exception as e:
+                    print(f"    (failed to add: {e})")
+        print(f"\n  Imported {adopted} credential(s).")
+
+    # --- step 3: manual login for missing popular providers ---------------
+    print("\n[2/3] Manual login for providers not yet covered...\n")
+    popular = [
+        ("openai-codex", "OpenAI via Codex CLI (ChatGPT account)"),
+        ("anthropic",    "Anthropic (Claude)"),
+        ("google-gemini-cli", "Google Gemini via CLI"),
+        ("github-copilot", "GitHub Copilot"),
+        ("openai",       "OpenAI (raw API key)"),
+    ]
+    for prov_id, label in popular:
+        if store.find_pool(prov_id, DEFAULT_PROFILE_NAME) is not None:
+            continue
+        pick = _confirm(f"  Log into {label} now?", default=False)
+        if not pick:
+            continue
+        try:
+            rc = _cmd_login(prov_id, DEFAULT_PROFILE_NAME, method=None)
+            if rc != 0:
+                print(f"    (skipped — {prov_id} login exited {rc})")
+        except (KeyboardInterrupt, EOFError):
+            print("\n    (aborted)")
+            continue
+
+    # --- outro ------------------------------------------------------------
+    print("\n[3/3] Done.\n")
+    print("  Verify anytime:")
+    print("    openprogram providers list")
+    print("    openprogram providers doctor")
+    print("    openprogram providers status <provider>")
+    print()
+    return 0
+
+
+def _confirm(question: str, *, default: bool) -> bool:
+    """Prompt for y/n; Enter accepts ``default``. Returns the bool.
+
+    Accepts y/yes/n/no (case-insensitive). Any other input repeats the
+    prompt. EOF/^C propagate — the wizard handles them at the top
+    level so each sub-step doesn't have to."""
+    hint = "[Y/n]" if default else "[y/N]"
+    while True:
+        raw = input(f"{question} {hint} ").strip().lower()
+        if raw == "":
+            return default
+        if raw in ("y", "yes"):
+            return True
+        if raw in ("n", "no"):
+            return False
+        print("  (answer y or n)")
 
 
 __all__ = ["build_parser", "dispatch"]
