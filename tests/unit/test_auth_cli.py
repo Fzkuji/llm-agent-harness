@@ -1,0 +1,292 @@
+"""Tests for openprogram.auth.cli — the auth command tree."""
+from __future__ import annotations
+
+import argparse
+import io
+import json
+import sys
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+
+from openprogram.auth.cli import build_parser, dispatch
+from openprogram.auth.manager import AuthManager, set_manager_for_testing
+from openprogram.auth.profiles import (
+    DEFAULT_PROFILE_NAME,
+    ProfileManager,
+    set_profile_manager_for_testing,
+)
+from openprogram.auth.store import AuthStore, set_store_for_testing
+from openprogram.auth.types import (
+    ApiKeyPayload,
+    Credential,
+    CredentialPool,
+)
+
+
+@pytest.fixture
+def isolated(tmp_path, monkeypatch, capsys):
+    store = AuthStore(root=tmp_path / "store")
+    set_store_for_testing(store)
+    set_manager_for_testing(AuthManager(store=store))
+    pm = ProfileManager(root=tmp_path / "profiles")
+    set_profile_manager_for_testing(pm)
+    # Redirect Codex path so imports don't touch the real file.
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "fake_codex"))
+    yield store, pm, tmp_path, capsys
+    set_store_for_testing(None)
+    set_manager_for_testing(None)
+    set_profile_manager_for_testing(None)
+
+
+def _parse(argv):
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="command")
+    build_parser(sub)
+    return parser.parse_args(["auth", *argv])
+
+
+# ---- list ----------------------------------------------------------------
+
+def test_list_empty_suggests_next_steps(isolated):
+    _, _, _, cap = isolated
+    rc = dispatch(_parse(["list"]))
+    assert rc == 0
+    out = cap.readouterr().out
+    assert "No credential pools yet" in out
+    assert "auth discover" in out
+    assert "auth login" in out
+
+
+def test_list_json_emits_array(isolated):
+    store, _, _, cap = isolated
+    store.put_pool(CredentialPool(
+        provider_id="openai", profile_id="default",
+        credentials=[Credential(
+            provider_id="openai", profile_id="default", kind="api_key",
+            payload=ApiKeyPayload(api_key="sk-deadbeef1234"),
+            source="cli_paste",
+        )],
+    ))
+    rc = dispatch(_parse(["list", "--json"]))
+    assert rc == 0
+    body = json.loads(cap.readouterr().out)
+    assert len(body) == 1
+    assert body[0]["provider_id"] == "openai"
+    assert body[0]["credentials"][0]["kind"] == "api_key"
+    # Preview is masked — must not contain the full secret.
+    assert "sk-deadbeef1234" not in body[0]["credentials"][0]["preview"]
+
+
+def test_list_respects_profile_filter(isolated):
+    store, pm, _, cap = isolated
+    pm.create_profile("work")
+    for prof, tag in [("default", "personal"), ("work", "work")]:
+        store.put_pool(CredentialPool(
+            provider_id="openai", profile_id=prof,
+            credentials=[Credential(
+                provider_id="openai", profile_id=prof, kind="api_key",
+                payload=ApiKeyPayload(api_key=f"sk-{tag}-11112222"),
+            )],
+        ))
+    rc = dispatch(_parse(["list", "--profile", "work", "--json"]))
+    body = json.loads(cap.readouterr().out)
+    assert len(body) == 1
+    assert body[0]["profile_id"] == "work"
+
+
+# ---- discover ------------------------------------------------------------
+
+def test_discover_picks_up_env_var(isolated, monkeypatch):
+    _, _, _, cap = isolated
+    for v in ["GH_TOKEN", "GITHUB_TOKEN", "COPILOT_GITHUB_TOKEN"]:
+        monkeypatch.delenv(v, raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-found-on-machine")
+    rc = dispatch(_parse(["discover", "--json"]))
+    assert rc == 0
+    body = json.loads(cap.readouterr().out)
+    env = [e for e in body if e.get("source_id") == "env:OPENAI_API_KEY"]
+    assert env, body
+    # Still masked in the discover output.
+    assert "sk-found-on-machine" not in env[0]["preview"]
+
+
+# ---- adopt ---------------------------------------------------------------
+
+def test_adopt_env_var(isolated, monkeypatch):
+    store, _, _, cap = isolated
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-adopt-me-please-123")
+    rc = dispatch(_parse(["adopt", "env:OPENAI_API_KEY"]))
+    assert rc == 0
+    pool = store.find_pool("openai", "default")
+    assert pool is not None
+    assert len(pool.credentials) == 1
+    assert pool.credentials[0].payload.api_key == "sk-adopt-me-please-123"
+
+
+def test_adopt_unknown_source(isolated):
+    _, _, _, cap = isolated
+    rc = dispatch(_parse(["adopt", "made_up_source"]))
+    assert rc == 1
+    err = cap.readouterr().err
+    assert "Unknown source" in err
+
+
+def test_adopt_routes_to_non_default_profile(isolated, monkeypatch):
+    store, pm, _, cap = isolated
+    pm.create_profile("work")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-adopt-to-work-1")
+    rc = dispatch(_parse(["adopt", "env:OPENAI_API_KEY", "--profile", "work"]))
+    assert rc == 0
+    assert store.find_pool("openai", "work") is not None
+    assert store.find_pool("openai", "default") is None
+
+
+# ---- logout --------------------------------------------------------------
+
+def test_logout_removes_pool(isolated, monkeypatch):
+    store, _, _, cap = isolated
+    store.put_pool(CredentialPool(
+        provider_id="openai", profile_id="default",
+        credentials=[Credential(
+            provider_id="openai", profile_id="default", kind="api_key",
+            payload=ApiKeyPayload(api_key="sk-goodbye-12345"),
+        )],
+    ))
+    # --yes skips confirmation.
+    rc = dispatch(_parse(["logout", "openai", "--yes"]))
+    assert rc == 0
+    assert store.find_pool("openai", "default") is None
+    out = cap.readouterr().out
+    assert "Removed 1 credential" in out
+
+
+def test_logout_no_pool_is_noop(isolated):
+    _, _, _, cap = isolated
+    rc = dispatch(_parse(["logout", "nothing-here", "--yes"]))
+    assert rc == 0
+    assert "nothing to remove" in cap.readouterr().out
+
+
+# ---- status --------------------------------------------------------------
+
+def test_status_reports_missing_credential(isolated):
+    _, _, _, cap = isolated
+    rc = dispatch(_parse(["status", "openai"]))
+    assert rc == 1
+    out = cap.readouterr().out
+    assert "No credential configured" in out
+    assert "openprogram auth login openai" in out
+
+
+def test_status_reports_valid_credential(isolated):
+    store, _, _, cap = isolated
+    store.put_pool(CredentialPool(
+        provider_id="openai", profile_id="default",
+        credentials=[Credential(
+            provider_id="openai", profile_id="default", kind="api_key",
+            payload=ApiKeyPayload(api_key="sk-working-key-555"),
+            source="cli_paste",
+        )],
+    ))
+    rc = dispatch(_parse(["status", "openai"]))
+    assert rc == 0
+    out = cap.readouterr().out
+    assert "Kind:     api_key" in out
+    # Status line's preview must still be masked.
+    assert "sk-working-key-555" not in out
+
+
+# ---- login (api_key with mocked getpass) ---------------------------------
+
+def test_login_paste_api_key(isolated, monkeypatch):
+    store, _, _, cap = isolated
+    monkeypatch.setattr("getpass.getpass", lambda prompt: "sk-pasted-from-cli")
+    # --method skips the interactive method selection.
+    rc = dispatch(_parse(["login", "openai", "--method", "api_key"]))
+    assert rc == 0
+    pool = store.find_pool("openai", "default")
+    assert pool and pool.credentials[0].payload.api_key == "sk-pasted-from-cli"
+
+
+def test_login_paste_empty_fails(isolated, monkeypatch):
+    _, _, _, cap = isolated
+    monkeypatch.setattr("getpass.getpass", lambda prompt: "   ")
+    rc = dispatch(_parse(["login", "openai", "--method", "api_key"]))
+    assert rc == 1
+    assert "empty API key" in cap.readouterr().err
+
+
+def test_login_unknown_method(isolated):
+    _, _, _, cap = isolated
+    rc = dispatch(_parse(["login", "openai", "--method", "telepathy"]))
+    assert rc == 1
+    assert "not available" in cap.readouterr().err
+
+
+# ---- profile -------------------------------------------------------------
+
+def test_profile_list(isolated):
+    _, pm, _, cap = isolated
+    pm.create_profile("work")
+    rc = dispatch(_parse(["profile", "list"]))
+    assert rc == 0
+    out = cap.readouterr().out
+    assert "work" in out
+    assert DEFAULT_PROFILE_NAME in out
+
+
+def test_profile_create_and_delete(isolated):
+    _, _, _, cap = isolated
+    assert dispatch(_parse(["profile", "create", "scratch"])) == 0
+    assert "Created profile scratch" in cap.readouterr().out
+    assert dispatch(_parse(["profile", "delete", "scratch", "--yes"])) == 0
+    assert "Deleted profile scratch" in cap.readouterr().out
+
+
+def test_profile_create_duplicate(isolated):
+    _, _, _, cap = isolated
+    dispatch(_parse(["profile", "create", "dup"]))
+    cap.readouterr()
+    rc = dispatch(_parse(["profile", "create", "dup"]))
+    assert rc == 1
+
+
+# ---- codex login via import ---------------------------------------------
+
+def test_login_import_codex_when_file_exists(isolated, monkeypatch):
+    store, _, tmp, cap = isolated
+    # Seed a fake ~/.codex/auth.json via CODEX_HOME (set in the fixture).
+    codex_dir = tmp / "fake_codex"
+    codex_dir.mkdir()
+    import base64, json as _json, time as _time
+    header = base64.urlsafe_b64encode(b'{"alg":"none"}').rstrip(b"=").decode()
+    body = base64.urlsafe_b64encode(_json.dumps({
+        "exp": int(_time.time()) + 3600,
+        "https://api.openai.com/auth": {"chatgpt_account_id": "acc_xyz"},
+    }).encode()).rstrip(b"=").decode()
+    jwt = f"{header}.{body}.sig"
+    (codex_dir / "auth.json").write_text(_json.dumps({
+        "auth_mode": "chatgpt",
+        "tokens": {
+            "access_token": jwt, "refresh_token": "R-abc",
+            "account_id": "acc_xyz",
+        },
+    }))
+
+    rc = dispatch(_parse(["login", "openai-codex", "--method", "import_from_cli"]))
+    assert rc == 0
+    pool = store.find_pool("openai-codex", "default")
+    assert pool is not None
+    cred = pool.credentials[0]
+    assert cred.kind == "oauth"
+    assert cred.payload.refresh_token == "R-abc"
+    assert cred.metadata["account_id"] == "acc_xyz"
+
+
+def test_login_import_codex_when_file_missing(isolated):
+    _, _, _, cap = isolated
+    rc = dispatch(_parse(["login", "openai-codex", "--method", "import_from_cli"]))
+    assert rc == 1
+    assert "codex login" in cap.readouterr().err

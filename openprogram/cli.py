@@ -109,6 +109,10 @@ def main():
     # providers
     sub.add_parser("providers", help="Show available LLM providers and detection status")
 
+    # auth — v2 credential management (login, logout, list, discover, profile)
+    from openprogram.auth.cli import build_parser as _build_auth_parser
+    _build_auth_parser(sub)
+
     # config — namespaced configuration commands (provider, ...)
     p_config = sub.add_parser("config", help="Configure OpenProgram (providers, models, ...)")
     p_config_sub = p_config.add_subparsers(dest="config_target", metavar="target")
@@ -140,6 +144,9 @@ def main():
         _cmd_list()
     elif args.command == "providers":
         _cmd_providers()
+    elif args.command == "auth":
+        from openprogram.auth.cli import dispatch as _auth_dispatch
+        sys.exit(_auth_dispatch(args))
     elif args.command == "config":
         if args.config_target == "provider":
             _cmd_configure(args.name)
