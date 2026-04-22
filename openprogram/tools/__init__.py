@@ -34,6 +34,7 @@ _builtin_list = list
 
 from .apply_patch import TOOL as APPLY_PATCH
 from .bash import TOOL as BASH
+from .canvas import TOOL as CANVAS
 from .clarify import TOOL as CLARIFY
 from .edit import TOOL as EDIT
 from .execute_code import TOOL as EXECUTE_CODE
@@ -76,6 +77,7 @@ ALL_TOOLS: dict[str, dict[str, Any]] = {
     "clarify": CLARIFY,
     "execute_code": EXECUTE_CODE,
     "mixture_of_agents": MIXTURE_OF_AGENTS,
+    "canvas": CANVAS,
 }
 
 # Default tool set (à la Claude Code): dedicated file ops for safe common
@@ -106,7 +108,7 @@ TOOLSETS: dict[str, list[str]] = {
     "research": _builtin_list(DEFAULT_TOOLS) + [
         "web_fetch", "web_search", "image_generate", "image_analyze",
         "pdf", "spawn_program", "memory", "clarify", "execute_code",
-        "mixture_of_agents",
+        "mixture_of_agents", "canvas",
     ],
     "full": _builtin_list(ALL_TOOLS.keys()),
 }
@@ -195,6 +197,7 @@ __all__ = [
     "CLARIFY",
     "EXECUTE_CODE",
     "MIXTURE_OF_AGENTS",
+    "CANVAS",
     "get",
     "get_many",
     "list_available",
