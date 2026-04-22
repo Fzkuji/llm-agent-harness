@@ -1,44 +1,63 @@
-// Conversation History — SVG DAG view.
+// Conversation History — PyCharm-style DAG view.
 //
-// The server ships `conversation_loaded.data.graph`: every message in
-// the conversation with id/parent_id/role. We lay it out as a tidy
-// tree (leaves get lanes left-to-right, parents center over children)
-// and render as a compact minimap. No inline labels — hover shows a
-// floating tooltip with the role + preview.
+// Layout model (mirrors IntelliJ/PyCharm's Git log panel):
+//   * Each LEAF of the DAG owns one lane (column). Walking up from the
+//     leaf, every ancestor not yet claimed by an earlier leaf is painted
+//     in that lane's colour. The result: each branch reads as a single
+//     continuous coloured ribbon from its tip up to the fork point.
+//   * Colour encodes BRANCH (lane). Shape encodes ROLE:
+//       user      → circle
+//       assistant → triangle
+//       runtime   → diamond
+//     Using both channels means we never rely on colour alone for role,
+//     which would collide with the branch palette.
+//   * HEAD is highlighted with a ring + subtle drop shadow regardless of
+//     which lane it sits on.
+//   * Click any node on a branch → checkout that branch's TIP. "Clicking
+//     on a branch" means "switch to that branch" in the git sense, not
+//     "rewind to this exact commit".
 //
-// Public:
-//   window.renderHistoryGraph(graph, headId)
-// Clicks on a node POST /api/chat/checkout, then ask the server to
-// reload the conversation so the DAG + main chat refresh together.
+// Public: window.renderHistoryGraph(graph, headId)
 
 (function () {
-  var ROW_H = 26;
-  var COL_W = 26;
+  var ROW_H = 28;
+  var COL_W = 22;
   var NODE_R = 5;
-  var HEAD_R = 6.5;
-  var PAD = 14;
+  var HEAD_HALO = 8;
+  var PAD_X = 18;
+  var PAD_Y = 16;
+
+  // Branch palette — distinct hues, first one is the HEAD branch's
+  // colour so the active line reads as the canonical blue.
+  var LANE_COLORS = [
+    '#3b82f6', // blue
+    '#22c55e', // green
+    '#f59e0b', // amber
+    '#a855f7', // purple
+    '#ef4444', // red
+    '#06b6d4', // cyan
+    '#ec4899', // pink
+    '#84cc16', // lime
+    '#14b8a6', // teal
+    '#f97316', // orange
+  ];
 
   var _currentHead = null;
   var _tooltip = null;
   var _lastSignature = null;
+  var _leafOfNode = Object.create(null); // msgId -> leaf msgId (branch tip)
 
-  // Fingerprint of the graph so repeated renders of the same snapshot
-  // (e.g. streaming updates that don't touch structure) can short-
-  // circuit without tearing down the SVG — no flash on same-conv refresh.
+  function _laneColor(i) {
+    return LANE_COLORS[i % LANE_COLORS.length];
+  }
+
   function _signature(graph, headId) {
     if (!graph || !graph.length) return 'empty|' + (headId || '');
     var parts = graph.map(function (m) {
-      return m.id + ':' + (m.parent_id || '') + ':' + (m.role || '');
+      return m.id + ':' + (m.parent_id || '') + ':' + (m.role || '') + ':' + (m.display || '');
     });
     parts.sort();
     return parts.join(',') + '|' + (headId || '');
-  }
-
-  function _roleColor(role, display) {
-    if (display === 'runtime') return 'var(--accent-yellow, #d4a017)';
-    if (role === 'user') return 'var(--accent-blue, #3b82f6)';
-    if (role === 'assistant') return 'var(--accent-green, #22c55e)';
-    return 'var(--text-muted, #888)';
   }
 
   function _buildTree(graph) {
@@ -56,36 +75,129 @@
     return { roots: roots, byId: byId };
   }
 
-  function _layout(roots) {
-    var lane = 0;
-    function visit(node, depth) {
-      node._depth = depth;
-      if (!node.children.length) { node._x = lane++; return; }
-      node.children.forEach(function (c) { visit(c, depth + 1); });
-      var xs = node.children.map(function (c) { return c._x; });
-      node._x = (xs[0] + xs[xs.length - 1]) / 2;
+  // Depth assignment (row). Parent is always above its children.
+  function _assignDepth(roots) {
+    var maxDepth = 0;
+    function walk(n, d) {
+      n._depth = d;
+      if (d > maxDepth) maxDepth = d;
+      n.children.forEach(function (c) { walk(c, d + 1); });
     }
-    roots.forEach(function (r) { visit(r, 0); });
-    return lane;
+    roots.forEach(function (r) { walk(r, 0); });
+    return maxDepth;
   }
 
-  function _headChain(byId, headId) {
-    var set = Object.create(null);
+  // Walk from headId up to root, collecting ids. Returns [] if head unknown.
+  function _headAncestors(byId, headId) {
+    var out = [];
     var cur = headId;
-    while (cur && byId[cur]) { set[cur] = true; cur = byId[cur].parent_id; }
-    return set;
+    while (cur && byId[cur]) { out.push(cur); cur = byId[cur].parent_id; }
+    return out;
   }
 
-  function _edgePath(x1, y1, x2, y2) {
-    var mid = (y1 + y2) / 2;
-    return 'M' + x1 + ',' + y1 +
-           ' C' + x1 + ',' + mid + ' ' + x2 + ',' + mid + ' ' + x2 + ',' + y2;
+  // Find the leaf reachable from `start` by always taking the latest child.
+  // Used when head itself isn't a leaf (unusual but possible after rewind).
+  function _tipFrom(byId, start) {
+    var cur = byId[start];
+    while (cur && cur.children.length) {
+      cur = cur.children[cur.children.length - 1];
+    }
+    return cur ? cur.id : start;
+  }
+
+  // Lane assignment — PyCharm-style.
+  //   1. Order leaves so the HEAD's branch leaf is first (lane 0).
+  //   2. For each leaf, walk parent chain and claim every un-claimed
+  //      ancestor into the leaf's lane. This gives the HEAD branch the
+  //      full spine from head-tip to root, and each fork inherits its
+  //      own lane from branch-point downward.
+  function _assignLanes(byId, roots, headId) {
+    var leaves = [];
+    Object.keys(byId).forEach(function (id) {
+      if (!byId[id].children.length) leaves.push(byId[id]);
+    });
+
+    // Sort leaves: HEAD's branch leaf first, then by recency (newest next).
+    var headLeafId = headId ? _tipFrom(byId, headId) : null;
+    leaves.sort(function (a, b) {
+      if (a.id === headLeafId && b.id !== headLeafId) return -1;
+      if (b.id === headLeafId && a.id !== headLeafId) return 1;
+      return (b.created_at || 0) - (a.created_at || 0);
+    });
+
+    // Claim ancestors.
+    var leafOfNode = Object.create(null);
+    leaves.forEach(function (leaf, laneIdx) {
+      leaf._lane = laneIdx;
+      var cur = leaf;
+      while (cur) {
+        if (cur._lane === undefined) cur._lane = laneIdx;
+        leafOfNode[cur.id] = leaf.id;
+        var parent = cur.parent_id ? byId[cur.parent_id] : null;
+        // Stop climbing as soon as we reach a node already owned by an
+        // earlier leaf — that ancestor (and everything above it) belongs
+        // to the earlier branch.
+        if (parent && parent._lane !== undefined && parent._lane !== laneIdx) break;
+        cur = parent;
+      }
+    });
+
+    // Orphan fallback (shouldn't happen, but be safe).
+    Object.keys(byId).forEach(function (id) {
+      if (byId[id]._lane === undefined) byId[id]._lane = 0;
+      if (!(id in leafOfNode)) leafOfNode[id] = id;
+    });
+
+    return { leaves: leaves, laneCount: leaves.length || 1, leafOfNode: leafOfNode };
   }
 
   function _svg(tag, attrs) {
     var el = document.createElementNS('http://www.w3.org/2000/svg', tag);
     if (attrs) Object.keys(attrs).forEach(function (k) { el.setAttribute(k, attrs[k]); });
     return el;
+  }
+
+  // Edge geometry. When child & parent share a lane, draw a dead-straight
+  // vertical segment — that's what makes the branch read as a continuous
+  // ribbon. Cross-lane edges (forks) curve smoothly from parent's lane
+  // into the child's lane and are painted in the CHILD's colour, so the
+  // new branch's colour takes over exactly at the fork.
+  function _edgePath(x1, y1, x2, y2) {
+    if (x1 === x2) return 'M' + x1 + ',' + y1 + ' L' + x2 + ',' + y2;
+    var my = (y1 + y2) / 2;
+    return 'M' + x1 + ',' + y1 +
+           ' C' + x1 + ',' + my + ' ' + x2 + ',' + my + ' ' + x2 + ',' + y2;
+  }
+
+  function _shapeFor(node) {
+    var role = node.role;
+    var display = node.display;
+    if (display === 'runtime') return 'diamond';
+    if (role === 'assistant') return 'triangle';
+    if (role === 'user') return 'circle';
+    return 'circle';
+  }
+
+  function _appendShape(parent, shape, color, isHead) {
+    var r = NODE_R;
+    var common = {
+      fill: color,
+      stroke: isHead ? 'var(--text-bright, #fff)' : 'rgba(0,0,0,0.35)',
+      'stroke-width': isHead ? 1.6 : 1,
+    };
+    if (shape === 'circle') {
+      parent.appendChild(_svg('circle', Object.assign({ r: r }, common)));
+    } else if (shape === 'triangle') {
+      // Equilateral-ish triangle pointing up. Use slightly larger bbox
+      // so visual weight matches the circle.
+      var t = r + 1.2;
+      var pts = '0,' + (-t) + ' ' + t + ',' + (t * 0.85) + ' ' + (-t) + ',' + (t * 0.85);
+      parent.appendChild(_svg('polygon', Object.assign({ points: pts }, common)));
+    } else if (shape === 'diamond') {
+      var d = r + 0.8;
+      var dpts = '0,' + (-d) + ' ' + d + ',0 0,' + d + ' ' + (-d) + ',0';
+      parent.appendChild(_svg('polygon', Object.assign({ points: dpts }, common)));
+    }
   }
 
   function _ensureTooltip(body) {
@@ -109,7 +221,6 @@
     var p = document.createElement('div');
     p.textContent = node.preview || '(empty)';
     tip.appendChild(p);
-    // Position: left of the node if there's room, else right.
     var bw = body.clientWidth;
     tip.classList.add('visible');
     var tw = tip.offsetWidth;
@@ -139,20 +250,20 @@
       empty.textContent = 'No messages yet.';
       body.replaceChildren(empty);
       _tooltip = null;
+      _leafOfNode = Object.create(null);
       return;
     }
 
     var tree = _buildTree(graph);
-    var laneCount = _layout(tree.roots);
-    var headChain = _headChain(tree.byId, headId);
+    var maxDepth = _assignDepth(tree.roots);
+    var lanes = _assignLanes(tree.byId, tree.roots, headId);
+    _leafOfNode = lanes.leafOfNode;
 
-    var maxDepth = 0;
-    Object.keys(tree.byId).forEach(function (id) {
-      if (tree.byId[id]._depth > maxDepth) maxDepth = tree.byId[id]._depth;
-    });
+    var headAncestors = Object.create(null);
+    _headAncestors(tree.byId, headId).forEach(function (id) { headAncestors[id] = true; });
 
-    var width = PAD * 2 + COL_W * Math.max(laneCount - 1, 0);
-    var height = PAD * 2 + ROW_H * maxDepth;
+    var width = PAD_X * 2 + COL_W * Math.max(lanes.laneCount - 1, 0);
+    var height = PAD_Y * 2 + ROW_H * maxDepth;
 
     var svg = _svg('svg', {
       class: 'history-svg',
@@ -167,42 +278,59 @@
     svg.appendChild(nodeG);
 
     function pos(n) {
-      return { x: PAD + n._x * COL_W, y: PAD + n._depth * ROW_H };
+      return { x: PAD_X + n._lane * COL_W, y: PAD_Y + n._depth * ROW_H };
     }
 
+    // Edges first (so nodes overlap them cleanly).
+    Object.keys(tree.byId).forEach(function (id) {
+      var node = tree.byId[id];
+      if (!node.parent_id || !tree.byId[node.parent_id]) return;
+      var parent = tree.byId[node.parent_id];
+      var p = pos(parent), c = pos(node);
+      // Edge colour = CHILD's lane colour. This is what makes fork edges
+      // (cross-lane) "hand off" into the new branch's colour at the top.
+      var color = _laneColor(node._lane);
+      var onHead = headAncestors[id] && headAncestors[node.parent_id];
+      edgeG.appendChild(_svg('path', {
+        d: _edgePath(p.x, p.y, c.x, c.y),
+        stroke: color,
+        'stroke-width': onHead ? 2 : 1.6,
+        fill: 'none',
+        'stroke-linecap': 'round',
+        opacity: onHead ? 1 : 0.85,
+        class: 'history-edge' + (onHead ? ' on-head' : ''),
+      }));
+    });
+
+    // Nodes.
     Object.keys(tree.byId).forEach(function (id) {
       var node = tree.byId[id];
       var p = pos(node);
-      if (node.parent_id && tree.byId[node.parent_id]) {
-        var pp = pos(tree.byId[node.parent_id]);
-        var onChain = headChain[id] && headChain[node.parent_id];
-        edgeG.appendChild(_svg('path', {
-          d: _edgePath(pp.x, pp.y, p.x, p.y),
-          class: 'history-edge' + (onChain ? ' on-head' : ''),
-        }));
-      }
       var isHead = id === headId;
+      var color = _laneColor(node._lane);
       var g = _svg('g', {
         class: 'history-node' + (isHead ? ' is-head' : ''),
         transform: 'translate(' + p.x + ',' + p.y + ')',
         'data-msg-id': id,
       });
-      g.appendChild(_svg('circle', {
-        r: isHead ? HEAD_R : NODE_R,
-        fill: _roleColor(node.role, node.display),
-      }));
-      // Hover handlers piggy-back on the <g>. Stash the node data on it
-      // so the handler doesn't need another lookup.
+      if (isHead) {
+        g.appendChild(_svg('circle', {
+          r: HEAD_HALO,
+          fill: 'none',
+          stroke: color,
+          'stroke-width': 1,
+          opacity: 0.5,
+          class: 'history-head-halo',
+        }));
+      }
+      _appendShape(g, _shapeFor(node), color, isHead);
       g._nodeData = node;
       nodeG.appendChild(g);
     });
 
-    // Atomic swap — no blank frame between old & new graph.
     body.replaceChildren(svg);
     _tooltip = null;
 
-    // Delegated hover — attach once per body element to avoid leaking
-    // listeners on repeated renders.
     if (!body._historyHoverWired) {
       body._historyHoverWired = true;
       body.addEventListener('mousemove', function (e) {
@@ -219,12 +347,17 @@
 
   async function _checkout(msgId) {
     var convId = window.currentConvId;
-    if (!convId || !msgId || msgId === _currentHead) return;
+    if (!convId || !msgId) return;
+    // Clicking any node on a branch = switch to that branch's TIP.
+    // This matches the "git checkout <branch>" mental model the user
+    // asked for: one click = one branch switch, never mid-branch rewind.
+    var target = _leafOfNode[msgId] || msgId;
+    if (target === _currentHead) return;
     try {
       var r = await fetch('/api/chat/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ conv_id: convId, msg_id: msgId }),
+        body: JSON.stringify({ conv_id: convId, msg_id: target }),
       });
       if (!r.ok) throw new Error(await r.text());
       if (window.ws && window.ws.readyState === WebSocket.OPEN) {

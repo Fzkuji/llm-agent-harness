@@ -73,28 +73,22 @@
   margin: 0 auto;
 }
 
-.history-edge {
-  fill: none;
-  stroke: var(--border-color);
-  stroke-width: 1.2;
-  opacity: 0.5;
-}
-.history-edge.on-head {
-  stroke: var(--accent-blue, #3b82f6);
-  stroke-width: 1.6;
-  opacity: 0.9;
-}
+/* Edge colour / stroke-width are set inline per-lane in history-graph.js
+   so every branch reads as its own continuous ribbon. No CSS overrides
+   here beyond fill:none (belt-and-braces in case the inline drops). */
+.history-edge { fill: none; }
 
 .history-node { cursor: pointer; }
-.history-node circle {
-  transition: r 0.1s ease-out, filter 0.1s ease-out;
+.history-node circle,
+.history-node polygon {
+  transition: filter 0.1s ease-out;
 }
-.history-node:hover circle { filter: brightness(1.25); }
-.history-node.is-head circle {
-  stroke: var(--text-bright, #fff);
-  stroke-width: 1.6;
-  filter: drop-shadow(0 0 5px var(--accent-blue, #3b82f6));
+.history-node:hover circle,
+.history-node:hover polygon {
+  filter: brightness(1.2);
 }
+.history-node.is-head { filter: drop-shadow(0 0 4px rgba(255,255,255,0.35)); }
+.history-head-halo { pointer-events: none; }
 
 .history-tooltip {
   position: absolute;
