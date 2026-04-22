@@ -149,14 +149,24 @@ def main():
     elif args.command == "list":
         _cmd_list()
     elif args.command == "providers":
-        # Bare `providers` — show the old detection-status overview.
-        # Any verb gets dispatched through the credential-management
-        # handler (every verb is auth-adjacent at the moment).
+        # Bare `providers` is equivalent to `providers list` with an
+        # extra footer pointing at the other verbs — `doctor`, `setup`,
+        # `aliases`, `profiles`. Any explicit verb just dispatches.
+        from openprogram.auth.cli import dispatch as _providers_dispatch
         if getattr(args, "providers_cmd", None) is None:
-            _cmd_providers()
-        else:
-            from openprogram.auth.cli import dispatch as _providers_dispatch
-            sys.exit(_providers_dispatch(args))
+            args.providers_cmd = "list"
+            args.profile = None
+            args.json = False
+            rc = _providers_dispatch(args)
+            print(
+                "\nMore commands:\n"
+                "  openprogram providers setup     # interactive first-time wizard\n"
+                "  openprogram providers doctor    # diagnose credentials\n"
+                "  openprogram providers aliases   # show short-name table\n"
+                "  openprogram providers login <prov>   # connect a provider\n"
+            )
+            sys.exit(rc)
+        sys.exit(_providers_dispatch(args))
     elif args.command == "config":
         if args.config_target == "provider":
             _cmd_configure(args.name)
@@ -308,70 +318,6 @@ def _get_runtime(provider=None, model=None):
 def _get_functions_dir():
     import os
     return os.path.join(os.path.dirname(__file__), "programs", "functions", "third_party")
-
-
-def _cmd_providers():
-    """Show available providers and which one would be auto-detected."""
-    import os
-    import shutil
-    from openprogram.legacy_providers import PROVIDERS
-
-    print("Available LLM providers:\n")
-
-    # Check what's available
-    detected = None
-    statuses = {}
-
-    cli_checks = {
-        "claude-code": ("claude", "Claude Code CLI"),
-        "openai-codex": ("codex", "Codex CLI"),
-        "gemini-cli": ("gemini", "Gemini CLI"),
-    }
-    api_checks = {
-        "anthropic": (("ANTHROPIC_API_KEY",), "Anthropic API"),
-        "openai": (("OPENAI_API_KEY",), "OpenAI API"),
-        "gemini": (("GOOGLE_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY"), "Gemini API"),
-    }
-
-    # Detection order matches detect_provider()
-    detection_order = ["claude-code", "openai-codex", "gemini-cli", "anthropic", "openai", "gemini"]
-
-    for name in detection_order:
-        _, _, default_model = PROVIDERS[name]
-
-        if name in cli_checks:
-            cmd, label = cli_checks[name]
-            found = shutil.which(cmd) is not None
-            status = "ready" if found else "not found"
-            how = f"`{cmd}` in PATH" if found else f"install: npm install -g ..."
-        else:
-            env_vars, label = api_checks[name]
-            found_var = next((env_var for env_var in env_vars if os.environ.get(env_var)), None)
-            found = found_var is not None
-            status = "ready" if found else "not set"
-            if found:
-                how = f"${found_var}"
-            elif len(env_vars) == 1:
-                how = f"export {env_vars[0]}=..."
-            else:
-                how = " or ".join(f"export {env_var}=..." for env_var in env_vars)
-
-        if found and detected is None:
-            detected = name
-            marker = " <-- auto-detected"
-        else:
-            marker = ""
-
-        icon = "+" if found else "-"
-        print(f"  [{icon}] {name:14s}  ({label:16s})  model: {default_model:30s}  [{status}]{marker}")
-
-    print()
-    if detected:
-        print(f"Auto-detected provider: {detected}")
-        print(f"Override with: agentic <command> --provider <name> --model <model>")
-    else:
-        print("No provider detected. Set up one of the above to get started.")
-        print("See: https://github.com/Fzkuji/Agentic-Programming#quick-start")
 
 
 def _cmd_configure(provider: str | None):

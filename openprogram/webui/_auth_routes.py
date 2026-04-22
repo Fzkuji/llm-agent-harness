@@ -337,6 +337,40 @@ def _build_credential(
 # Discovery — non-destructive scan of external sources
 # ---------------------------------------------------------------------------
 
+@router.post("/doctor")
+def run_doctor_route() -> dict[str, Any]:
+    """Run the credential health diagnostic and return findings.
+
+    Same shape as the CLI's ``providers doctor --json`` output. Used by
+    the Settings UI's "Run diagnostic" button. No mutation; safe to
+    call repeatedly.
+    """
+    from openprogram.auth.cli import run_doctor
+    return run_doctor()
+
+
+@router.post("/adopt_all")
+def adopt_all_route(profile: Optional[str] = None) -> dict[str, Any]:
+    """Batch-adopt every credential discover() finds.
+
+    Server-side equivalent of ``providers adopt --all``. Idempotent —
+    existing credentials (keyed by source label) are skipped. Returns a
+    structured report with per-adoption events so the UI can render a
+    toast per success.
+    """
+    from openprogram.auth.cli import run_adopt_all
+    target_profile = profile or DEFAULT_PROFILE_NAME
+    return run_adopt_all(target_profile)
+
+
+@router.get("/aliases")
+def list_aliases_route() -> dict[str, str]:
+    """Return the provider-alias table so the UI can render short names
+    alongside canonical ids in pickers and tooltips."""
+    from openprogram.auth.aliases import known_aliases
+    return known_aliases()
+
+
 @router.post("/discover")
 def discover_credentials() -> dict[str, Any]:
     """Scan every registered :class:`CredentialSource` without writing.

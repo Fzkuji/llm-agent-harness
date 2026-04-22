@@ -319,3 +319,60 @@ def test_put_nowait_with_drop_drops_oldest_on_overflow():
     second = q.get_nowait()
     assert first.credential_id == "c_b"
     assert second.credential_id == "c_c"
+
+
+# ---- doctor / adopt_all / aliases ----------------------------------------
+
+def test_doctor_route_empty_store(client):
+    c, _, _ = client
+    resp = c.post("/api/providers/doctor")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["pools_checked"] == 0
+    codes = {f["code"] for f in body["findings"]}
+    assert "no_pools" in codes
+
+
+def test_doctor_route_flags_expired_oauth(client):
+    c, store, _ = client
+    store.put_pool(CredentialPool(
+        provider_id="random-oauth-provider", profile_id="default",
+        credentials=[Credential(
+            provider_id="random-oauth-provider", profile_id="default",
+            kind="oauth",
+            payload=OAuthPayload(
+                access_token="t-expired", refresh_token="r-abc",
+                expires_at_ms=1,
+            ),
+            source="cli_paste",
+        )],
+    ))
+    body = c.post("/api/providers/doctor").json()
+    codes = {f["code"] for f in body["findings"]}
+    assert "expired_no_refresh" in codes
+
+
+def test_adopt_all_route_picks_up_env_var(client, monkeypatch):
+    c, store, _ = client
+    from openprogram.providers.env_api_keys import PROVIDER_ENV_VARS
+    # Wipe every var discover() touches so the dev machine's real keys
+    # don't pollute the test.
+    for v in set(PROVIDER_ENV_VARS.values()):
+        monkeypatch.delenv(v, raising=False)
+    for v in ["GH_TOKEN", "GITHUB_TOKEN", "COPILOT_GITHUB_TOKEN",
+              "ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN"]:
+        monkeypatch.delenv(v, raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-route-adopt-all-9999")
+
+    body = c.post("/api/providers/adopt_all").json()
+    assert body["adopted"] >= 1
+    assert store.find_pool("openai", "default") is not None
+
+
+def test_aliases_route_returns_table(client):
+    c, _, _ = client
+    resp = c.get("/api/providers/aliases")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body.get("codex") == "openai-codex"
+    assert body.get("claude") == "anthropic"

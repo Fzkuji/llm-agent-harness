@@ -17,6 +17,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { api } from "@/lib/api";
+import type { AdoptAllReport, DoctorReport } from "@/lib/api";
 import { subscribeProviderAuthEvents } from "@/lib/provider-auth-events";
 import type {
   AuthProfile,
@@ -42,6 +43,9 @@ export default function AuthSettingsPage() {
   const [activeProfile, setActiveProfile] = useState<string>("default");
   const [pools, setPools] = useState<PoolView[]>([]);
   const [discovered, setDiscovered] = useState<DiscoveredCredential[] | null>(null);
+  const [doctorReport, setDoctorReport] = useState<DoctorReport | null>(null);
+  const [adoptReport, setAdoptReport] = useState<AdoptAllReport | null>(null);
+  const [busy, setBusy] = useState<null | "discover" | "doctor" | "adopt">(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [addForm, setAddForm] = useState<{
@@ -87,11 +91,39 @@ export default function AuthSettingsPage() {
   }, [activeProfile, reload]);
 
   const onDiscover = async () => {
+    setBusy("discover");
     try {
       const r = await api.discoverProviderCredentials();
       setDiscovered(r.discovered);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const onDoctor = async () => {
+    setBusy("doctor");
+    try {
+      const r = await api.runProvidersDoctor();
+      setDoctorReport(r);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const onAdoptAll = async () => {
+    setBusy("adopt");
+    try {
+      const r = await api.adoptAllProviderCredentials(activeProfile);
+      setAdoptReport(r);
+      reload(activeProfile);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
     }
   };
 
@@ -171,12 +203,31 @@ export default function AuthSettingsPage() {
       <section className="space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-medium">Credential pools</h2>
-          <button
-            className="rounded border px-3 py-1 text-sm hover:bg-muted"
-            onClick={onDiscover}
-          >
-            Discover
-          </button>
+          <div className="flex gap-2">
+            <button
+              className="rounded border px-3 py-1 text-sm hover:bg-muted disabled:opacity-50"
+              onClick={onDiscover}
+              disabled={busy !== null}
+            >
+              {busy === "discover" ? "Scanning…" : "Discover"}
+            </button>
+            <button
+              className="rounded border px-3 py-1 text-sm hover:bg-muted disabled:opacity-50"
+              onClick={onAdoptAll}
+              disabled={busy !== null}
+              title="Import every credential discover() finds into this profile"
+            >
+              {busy === "adopt" ? "Importing…" : "Import all"}
+            </button>
+            <button
+              className="rounded border px-3 py-1 text-sm hover:bg-muted disabled:opacity-50"
+              onClick={onDoctor}
+              disabled={busy !== null}
+              title="Diagnose every pool (expiry, refresh, cooldown, ...)"
+            >
+              {busy === "doctor" ? "Checking…" : "Run diagnostic"}
+            </button>
+          </div>
         </div>
         {pools.length === 0 ? (
           <p className="text-sm text-muted-foreground">
@@ -215,6 +266,81 @@ export default function AuthSettingsPage() {
               </li>
             ))}
           </ul>
+        </section>
+      )}
+
+      {adoptReport && (
+        <section className="space-y-2">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-medium">Import all — result</h2>
+            <button
+              className="text-xs text-muted-foreground hover:underline"
+              onClick={() => setAdoptReport(null)}
+            >
+              Dismiss
+            </button>
+          </div>
+          <p className="text-sm">
+            Adopted {adoptReport.adopted} · skipped {adoptReport.skipped} ·
+            errored {adoptReport.errored}
+          </p>
+          {adoptReport.events.length > 0 && (
+            <ul className="space-y-1 text-sm">
+              {adoptReport.events.map((ev, i) => (
+                <li
+                  key={i}
+                  className={
+                    ev.level === "error"
+                      ? "text-destructive"
+                      : "text-muted-foreground"
+                  }
+                >
+                  {ev.level === "adopted"
+                    ? `+ ${ev.provider_id} — ${ev.preview}`
+                    : `! ${ev.source_id ?? ev.provider_id}: ${ev.error}`}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
+
+      {doctorReport && (
+        <section className="space-y-2">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-medium">Diagnostic — result</h2>
+            <button
+              className="text-xs text-muted-foreground hover:underline"
+              onClick={() => setDoctorReport(null)}
+            >
+              Dismiss
+            </button>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            Checked {doctorReport.pools_checked} pool(s) across{" "}
+            {doctorReport.profiles_checked} profile(s).
+          </p>
+          {doctorReport.findings.length === 0 ? (
+            <p className="text-sm text-emerald-600">All checks passed.</p>
+          ) : (
+            <ul className="space-y-1 text-sm">
+              {doctorReport.findings.map((f, i) => (
+                <li
+                  key={i}
+                  className={
+                    f.level === "ERROR"
+                      ? "text-destructive"
+                      : f.level === "WARN"
+                      ? "text-amber-600"
+                      : "text-muted-foreground"
+                  }
+                >
+                  <span className="font-mono text-xs">[{f.code}]</span>{" "}
+                  {f.message}
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
       )}
 

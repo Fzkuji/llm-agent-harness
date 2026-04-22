@@ -133,6 +133,51 @@ def test_adopt_env_var(isolated, monkeypatch):
     assert pool.credentials[0].payload.api_key == "sk-adopt-me-please-123"
 
 
+def _clear_provider_env(monkeypatch):
+    """Wipe every env var discover() looks at so the dev machine's real
+    keys don't leak into the test. Keeps only what the test sets."""
+    from openprogram.providers.env_api_keys import PROVIDER_ENV_VARS
+    for v in set(PROVIDER_ENV_VARS.values()):
+        monkeypatch.delenv(v, raising=False)
+    for v in [
+        "GH_TOKEN", "GITHUB_TOKEN", "COPILOT_GITHUB_TOKEN",
+        "ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN",
+        "GOOGLE_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY",
+    ]:
+        monkeypatch.delenv(v, raising=False)
+
+
+def test_adopt_all_batches_everything(isolated, monkeypatch):
+    store, _, _, cap = isolated
+    _clear_provider_env(monkeypatch)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-batch-one-11112222")
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-batch-two-33334444")
+    rc = dispatch(_parse(["adopt", "--all"]))
+    assert rc == 0, cap.readouterr()
+    assert store.find_pool("openai", "default") is not None
+    assert store.find_pool("groq", "default") is not None
+
+
+def test_adopt_all_is_idempotent(isolated, monkeypatch):
+    store, _, _, cap = isolated
+    _clear_provider_env(monkeypatch)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-idempotent-test-55")
+    dispatch(_parse(["adopt", "--all"]))
+    cap.readouterr()
+    # Run again — should silently skip.
+    rc = dispatch(_parse(["adopt", "--all"]))
+    assert rc == 0
+    out = cap.readouterr().out
+    assert "Adopted 0" in out  # zero new, others skipped
+
+
+def test_adopt_bare_without_args_errors(isolated):
+    _, _, _, cap = isolated
+    rc = dispatch(_parse(["adopt"]))
+    assert rc == 2
+    assert "--all" in cap.readouterr().err
+
+
 def test_adopt_unknown_source(isolated):
     _, _, _, cap = isolated
     rc = dispatch(_parse(["adopt", "made_up_source"]))

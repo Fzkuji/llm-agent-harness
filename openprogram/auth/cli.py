@@ -112,10 +112,14 @@ def build_parser(sub: "argparse._SubParsersAction") -> None:
     # adopt
     p_adopt = auth_sub.add_parser("adopt",
         help="Adopt a discovered credential into the store")
-    p_adopt.add_argument("source_id",
-        help="Source id from `discover` output (e.g. codex_cli, env:OPENAI_API_KEY)")
+    p_adopt.add_argument("source_id", nargs="?", default=None,
+        help="Source id from `discover` output (e.g. codex_cli, "
+             "env:OPENAI_API_KEY). Omit when using --all.")
     p_adopt.add_argument("--profile", default=DEFAULT_PROFILE_NAME,
                          help=f"Target profile (default: {DEFAULT_PROFILE_NAME})")
+    p_adopt.add_argument("--all", dest="adopt_all", action="store_true",
+                         help="Adopt every credential discover() finds. "
+                              "Skips pools that already contain the same credential_id.")
 
     # logout
     p_logout = auth_sub.add_parser("logout", help="Remove credentials for a provider")
@@ -175,6 +179,12 @@ def dispatch(args: argparse.Namespace) -> int:
     if cmd == "discover":
         return _cmd_discover(args.json)
     if cmd == "adopt":
+        if getattr(args, "adopt_all", False):
+            return _cmd_adopt_all(args.profile)
+        if args.source_id is None:
+            print("Usage: openprogram providers adopt <source_id> | --all",
+                  file=sys.stderr)
+            return 2
         return _cmd_adopt(args.source_id, args.profile)
     if cmd == "logout":
         return _cmd_logout(
@@ -543,6 +553,109 @@ def _cmd_adopt(source_id: str, profile: str) -> int:
     return 0
 
 
+def _cmd_adopt_all(profile: str) -> int:
+    """Batch-adopt every credential the discovery layer finds (CLI wrapper).
+
+    Delegates to :func:`run_adopt_all` for the actual work; this function
+    only formats output. Exit 0 on success (even zero adopted), 1 if
+    any source errored.
+    """
+    result = run_adopt_all(profile)
+    for item in result["events"]:
+        level = item["level"]
+        if level == "adopted":
+            print(f"  + {item['provider_id']}/{profile}: {item['preview']}")
+        elif level == "error":
+            print(f"  ! {item['source_id']}: {item['error']}", file=sys.stderr)
+    print(f"\nAdopted {result['adopted']} · "
+          f"skipped {result['skipped']} · errored {result['errored']}")
+    return 1 if result["errored"] else 0
+
+
+def run_adopt_all(profile: str) -> dict[str, Any]:
+    """Pure batch-adopt — no stdout, returns a structured report.
+
+    Used by the CLI ``adopt --all`` verb and the
+    ``POST /api/providers/adopt_all`` REST route.
+
+    Idempotent: a second run skips credentials whose source label
+    already appears in the destination pool, so the event-var path
+    doesn't accumulate duplicates.
+    """
+    from openprogram.auth.sources import (
+        ClaudeCodeSource,
+        CodexCliSource,
+        EnvApiKeySource,
+        GhCliSource,
+        QwenCliSource,
+    )
+    from openprogram.providers.env_api_keys import PROVIDER_ENV_VARS
+
+    store = get_store()
+    pm = get_profile_manager()
+    profile_obj = pm.get_profile(profile)
+
+    sources: list[Any] = [
+        CodexCliSource(profile_id=profile),
+        ClaudeCodeSource(profile_id=profile),
+        QwenCliSource(profile_id=profile),
+        GhCliSource(),
+    ]
+    for provider, env_var in PROVIDER_ENV_VARS.items():
+        sources.append(
+            EnvApiKeySource(provider_id=provider, env_var=env_var, profile_id=profile),
+        )
+
+    events: list[dict[str, Any]] = []
+    adopted = 0
+    skipped = 0
+    errored = 0
+    for src in sources:
+        try:
+            creds = src.try_import(profile_obj.root)
+        except Exception as e:
+            events.append({
+                "level": "error",
+                "source_id": src.source_id,
+                "error": str(e),
+            })
+            errored += 1
+            continue
+        for cred in creds:
+            cred.profile_id = profile
+            existing = store.find_pool(cred.provider_id, cred.profile_id)
+            if existing is not None and any(
+                c.source == cred.source for c in existing.credentials
+            ):
+                skipped += 1
+                continue
+            try:
+                store.add_credential(cred)
+                adopted += 1
+                events.append({
+                    "level": "adopted",
+                    "provider_id": cred.provider_id,
+                    "preview": _payload_summary(cred),
+                    "source_id": src.source_id,
+                })
+            except Exception as e:
+                errored += 1
+                events.append({
+                    "level": "error",
+                    "source_id": src.source_id,
+                    "error": str(e),
+                    "provider_id": cred.provider_id,
+                })
+
+    return {
+        "adopted": adopted,
+        "skipped": skipped,
+        "errored": errored,
+        "events": events,
+        "profile": profile,
+    }
+
+
 def _source_by_id(source_id: str, profile: str):
     from openprogram.auth.sources import (
         ClaudeCodeSource,
@@ -717,21 +830,37 @@ def _cmd_aliases(as_json: bool) -> int:
 def _cmd_doctor(as_json: bool) -> int:
     """Run the full credential health report.
 
-    The checks are a superset of OpenClaw's ``doctor-auth`` list, adapted
-    for our store layout:
+    Thin wrapper over :func:`run_doctor` — the shared analysis is in that
+    function so the REST route can reuse it without re-implementing the
+    check matrix.
+    """
+    report = run_doctor()
+    findings = report["findings"]
 
-      * every pool's credentials are enumerated
-      * OAuth payloads flagged if expired beyond the provider's skew
-      * refresh configuration surfaced (registered vs. absent)
-      * cooldown state — who's cooling down and for how long
-      * pool exhaustion — no usable credential in the pool
-      * orphaned profiles — profiles with no pools at all
-      * conflicting credentials — same provider/profile with duplicate
-        credential_ids (shouldn't happen; we flag to be loud if it does)
+    if as_json:
+        print(json.dumps(report, indent=2))
+    else:
+        _print_doctor_report(
+            report["pools_checked"],
+            report["profiles_checked"],
+            findings,
+        )
 
-    Exit code 0 = all green. Exit 1 = at least one ERROR. WARN-only
-    reports still exit 0 because the common case is "oauth expired, will
-    refresh on next call" which is informational, not actionable.
+    has_error = any(f["level"] == "ERROR" for f in findings)
+    return 1 if has_error else 0
+
+
+def run_doctor() -> dict[str, Any]:
+    """Pure analysis — no printing, no process exit. Returns a dict with
+    ``pools_checked``, ``profiles_checked``, ``findings``.
+
+    Checks (a superset of OpenClaw's ``doctor-auth`` list adapted for
+    our store layout): expired OAuth, refresh availability, cooldown
+    state, pool exhaustion, orphaned profile references, empty profiles,
+    duplicate credential ids, imported creds whose source file is gone.
+
+    Used by the CLI ``doctor`` verb and the ``POST /api/providers/doctor``
+    REST route. Extracting this makes both share one source of truth.
     """
     from .manager import get_provider_config
 
@@ -863,21 +992,15 @@ def _cmd_doctor(as_json: bool) -> int:
                 f"{len(pool.credentials)} credential(s) but none are usable.",
                 provider=pool.provider_id, profile=pool.profile_id)
 
-    if as_json:
-        print(json.dumps({
-            "pools_checked": len(pools),
-            "profiles_checked": len(profiles),
-            "findings": findings,
-        }, indent=2))
-    else:
-        _print_doctor_report(pools, profiles, findings)
-
-    has_error = any(f["level"] == "ERROR" for f in findings)
-    return 1 if has_error else 0
+    return {
+        "pools_checked": len(pools),
+        "profiles_checked": len(profiles),
+        "findings": findings,
+    }
 
 
-def _print_doctor_report(pools, profiles, findings) -> None:
-    print(f"Checked {len(pools)} pool(s) across {len(profiles)} profile(s).\n")
+def _print_doctor_report(pools_count: int, profiles_count: int, findings) -> None:
+    print(f"Checked {pools_count} pool(s) across {profiles_count} profile(s).\n")
     if not findings:
         print("✓ All checks passed.")
         return

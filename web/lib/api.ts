@@ -208,4 +208,48 @@ export const api = {
     jsonFetch<{ discovered: DiscoveredCredential[] }>("/api/providers/discover", {
       method: "POST",
     }),
+
+  runProvidersDoctor: () =>
+    jsonFetch<DoctorReport>("/api/providers/doctor", { method: "POST" }),
+
+  adoptAllProviderCredentials: (profile?: string) => {
+    const qs = profile ? `?profile=${encodeURIComponent(profile)}` : "";
+    return jsonFetch<AdoptAllReport>(`/api/providers/adopt_all${qs}`, {
+      method: "POST",
+    });
+  },
+
+  listProviderAliases: () =>
+    jsonFetch<Record<string, string>>("/api/providers/aliases"),
 };
+
+export interface DoctorFinding {
+  level: "ERROR" | "WARN" | "INFO";
+  code: string;
+  message: string;
+  provider?: string;
+  profile?: string;
+  credential_id?: string;
+}
+
+export interface DoctorReport {
+  pools_checked: number;
+  profiles_checked: number;
+  findings: DoctorFinding[];
+}
+
+export interface AdoptEvent {
+  level: "adopted" | "error";
+  source_id?: string;
+  provider_id?: string;
+  preview?: string;
+  error?: string;
+}
+
+export interface AdoptAllReport {
+  adopted: number;
+  skipped: number;
+  errored: number;
+  events: AdoptEvent[];
+  profile: string;
+}
