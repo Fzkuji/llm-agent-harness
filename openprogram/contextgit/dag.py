@@ -158,6 +158,24 @@ def normalize_parent_pointers(msgs: list[MessageLike]) -> None:
         prev_id = m.get("id") or prev_id
 
 
+def advance_head(conv: dict, msg: dict) -> None:
+    """Append ``msg`` to ``conv['messages']`` and move HEAD to it.
+
+    If ``msg`` already carries a ``parent_id``, we trust it (callers
+    that fork — retry / edit — compute the correct parent themselves).
+    Otherwise we parent to the current HEAD, which is the normal
+    "extend the tip" path for a linear conversation.
+
+    After the append HEAD == ``msg['id']``. Callers persist via
+    ``_save_conversation`` separately — we don't do I/O here.
+    """
+    if "parent_id" not in msg or msg.get("parent_id") is None:
+        msg["parent_id"] = conv.get("head_id")
+    conv.setdefault("messages", []).append(msg)
+    if msg.get("id"):
+        conv["head_id"] = msg["id"]
+
+
 def head_or_tip(conv: dict, msgs: list[MessageLike]) -> Optional[str]:
     """Return ``conv['head_id']`` if set; otherwise the last message's id.
 

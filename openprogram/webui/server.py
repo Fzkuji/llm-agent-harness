@@ -493,20 +493,10 @@ def _is_run_active(conv_id: str) -> bool:
         return conv_id in _running_tasks
 
 
-def _append_msg(conv: dict, msg: dict) -> None:
-    """Append ``msg`` to ``conv['messages']`` with ContextGit bookkeeping.
-
-    If ``msg['parent_id']`` is already set (retry / edit / checkout paths
-    that know their own parent), we trust it. Otherwise the append is
-    extending HEAD, so parent_id = current head_id.
-
-    Either way, after the append HEAD moves to the new message id.
-    """
-    if "parent_id" not in msg or msg.get("parent_id") is None:
-        msg["parent_id"] = conv.get("head_id")
-    conv["messages"].append(msg)
-    if msg.get("id"):
-        conv["head_id"] = msg["id"]
+# _append_msg moved to openprogram.contextgit.dag.advance_head so the
+# DAG logic lives with the rest of ContextGit. Retained as a thin alias
+# for readability in existing call sites.
+from openprogram.contextgit import advance_head as _append_msg  # noqa: E402
 
 
 # Provider-specific thinking effort configurations
@@ -1985,170 +1975,12 @@ def create_app():
 
         return JSONResponse(content={"conv_id": conv_id, "msg_id": msg_id})
 
-    def _fork_user_turn_and_run(
-        conv_id: str, pivot_id: str, new_content: str | None,
-    ) -> dict:
-        """Shared engine for /api/chat/retry and /api/chat/edit.
+    # Retry / Edit / Checkout routes live in _chat_routes.py — see
+    # docs/design/contextgit.md. Keeping them out of this module keeps
+    # it under control.
+    from ._chat_routes import router as _chat_router
+    app.include_router(_chat_router)
 
-        Creates a sibling user message at the same point in the DAG as
-        ``pivot_id``'s nearest user-message ancestor. ``new_content =
-        None`` means retry (reuse the old content); a string means edit.
-
-        Non-destructive: the old user message and its whole assistant
-        subtree stay in ``messages``. HEAD moves to the new user message
-        so the UI shows the fresh run; old branch is accessible via the
-        ``< N / M >`` navigator.
-
-        Returns the dict we'll JSON-encode to the caller.
-        """
-        # ContextGit: forking while a run is active would orphan the
-        # in-flight assistant reply (it's parented to a commit that's
-        # about to become "old"). Reject with a clear message; UI will
-        # keep buttons greyed during active runs so this is a
-        # belt-and-suspenders check.
-        if _is_run_active(conv_id):
-            return {"__error__": (
-                "a run is currently active — wait for it to finish or stop it first",
-                409,
-            )}
-        with _conversations_lock:
-            conv = _conversations.get(conv_id)
-            if conv is None:
-                return {"__error__": ("unknown conv", 404)}
-            msgs = conv["messages"]
-            pivot = next((m for m in msgs if m.get("id") == pivot_id), None)
-            if pivot is None:
-                return {"__error__": ("unknown msg", 404)}
-
-            # Walk up to the nearest user message. For retry clicked on
-            # an assistant reply, this is the user turn above it.
-            cur = pivot
-            by_id = {m.get("id"): m for m in msgs}
-            while cur is not None and cur.get("role") != "user":
-                cur = by_id.get(cur.get("parent_id"))
-            if cur is None:
-                return {"__error__": ("no user message to fork from", 400)}
-            src_user = cur
-            src_parent_id = src_user.get("parent_id")
-
-            new_msg_id = str(uuid.uuid4())[:8]
-            new_user = {
-                "role": "user",
-                "id": new_msg_id,
-                "content": new_content if new_content is not None
-                           else src_user.get("content", ""),
-                "timestamp": time.time(),
-                "parent_id": src_parent_id,
-            }
-            # Carry over display-mode flag (runtime vs query) — the new
-            # run should behave the same way the original did.
-            if src_user.get("display"):
-                new_user["display"] = src_user["display"]
-            # Lineage breadcrumb for debugging / later UI.
-            new_user["forked_from"] = src_user.get("id")
-            if new_content is not None:
-                new_user["edit_of"] = src_user.get("id")
-
-            _append_msg(conv, new_user)  # advances HEAD to new_msg_id
-
-        _save_conversation(conv_id)
-
-        # Kick off the run against the new user message. Same dispatch
-        # logic as POST /api/chat.
-        parsed = _parse_chat_input(new_user["content"] or "")
-        if parsed["action"] == "run":
-            threading.Thread(
-                target=_execute_in_context,
-                args=(conv_id, new_msg_id, "run"),
-                kwargs={"func_name": parsed["function"], "kwargs": parsed["kwargs"]},
-                daemon=True,
-            ).start()
-        else:
-            threading.Thread(
-                target=_execute_in_context,
-                args=(conv_id, new_msg_id, "query"),
-                kwargs={"query": parsed["raw"]},
-                daemon=True,
-            ).start()
-
-        return {
-            "conv_id": conv_id,
-            "msg_id": new_msg_id,
-            "forked_from": src_user.get("id"),
-        }
-
-    @app.post("/api/chat/retry")
-    async def post_chat_retry(body: dict = None):
-        """Retry the user turn at or above ``msg_id``.
-
-        Non-destructive: forks a sibling user message with the SAME
-        content, runs it, sets HEAD to the new turn. The old turn and
-        its assistant subtree stay in the DAG, reachable via
-        ``< N / M >``. See docs/design/contextgit.md.
-        """
-        if body is None:
-            return JSONResponse(content={"error": "no body"}, status_code=400)
-        conv_id = body.get("conv_id")
-        pivot_id = body.get("msg_id")
-        if not conv_id or not pivot_id:
-            return JSONResponse(
-                content={"error": "conv_id and msg_id required"}, status_code=400,
-            )
-        result = _fork_user_turn_and_run(conv_id, pivot_id, new_content=None)
-        if "__error__" in result:
-            msg, code = result["__error__"]
-            return JSONResponse(content={"error": msg}, status_code=code)
-        return JSONResponse(content=result)
-
-    @app.post("/api/chat/edit")
-    async def post_chat_edit(body: dict = None):
-        """Edit a user message: fork with NEW content and re-run.
-
-        Same non-destructive behavior as retry — the old turn stays
-        accessible as a sibling. The only difference is the forked
-        message's content is what the user typed into the edit box.
-        """
-        if body is None:
-            return JSONResponse(content={"error": "no body"}, status_code=400)
-        conv_id = body.get("conv_id")
-        pivot_id = body.get("msg_id")
-        new_content = body.get("content")
-        if not conv_id or not pivot_id or new_content is None:
-            return JSONResponse(
-                content={"error": "conv_id, msg_id, content required"},
-                status_code=400,
-            )
-        result = _fork_user_turn_and_run(conv_id, pivot_id, new_content=str(new_content))
-        if "__error__" in result:
-            msg, code = result["__error__"]
-            return JSONResponse(content={"error": msg}, status_code=code)
-        return JSONResponse(content=result)
-
-    @app.post("/api/chat/checkout")
-    async def post_chat_checkout(body: dict = None):
-        """Move the conversation HEAD to a specific commit.
-
-        Pure display op — nothing re-executes. The UI re-renders the
-        linear history from the new HEAD back to root. Used by
-        ``< N / M >`` navigation to switch between sibling versions.
-        """
-        if body is None:
-            return JSONResponse(content={"error": "no body"}, status_code=400)
-        conv_id = body.get("conv_id")
-        target_id = body.get("msg_id")
-        if not conv_id or not target_id:
-            return JSONResponse(
-                content={"error": "conv_id and msg_id required"}, status_code=400,
-            )
-        with _conversations_lock:
-            conv = _conversations.get(conv_id)
-            if conv is None:
-                return JSONResponse(content={"error": "unknown conv"}, status_code=404)
-            if not any(m.get("id") == target_id for m in conv["messages"]):
-                return JSONResponse(content={"error": "unknown msg"}, status_code=404)
-            conv["head_id"] = target_id
-        _save_conversation(conv_id)
-        return JSONResponse(content={"conv_id": conv_id, "head_id": target_id})
 
     @app.post("/api/chat/branch")
     async def post_chat_branch(body: dict = None):

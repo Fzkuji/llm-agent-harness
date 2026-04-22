@@ -24,6 +24,7 @@ CLI tooling can share one implementation. No I/O lives here.
 """
 from .dag import (
     MessageLike,
+    advance_head,
     children,
     head_or_tip,
     is_ancestor,
@@ -35,6 +36,7 @@ from .dag import (
 
 __all__ = [
     "MessageLike",
+    "advance_head",
     "children",
     "head_or_tip",
     "is_ancestor",
