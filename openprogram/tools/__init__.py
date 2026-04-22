@@ -41,6 +41,7 @@ from .image_generate import TOOL as IMAGE_GENERATE
 from .list import TOOL as LIST
 from .process import TOOL as PROCESS
 from .read import TOOL as READ
+from .spawn_program import TOOL as SPAWN_PROGRAM
 from .todo import READ_TOOL as TODO_READ, WRITE_TOOL as TODO_WRITE
 from .web_fetch import TOOL as WEB_FETCH
 from .web_search import TOOL as WEB_SEARCH
@@ -62,6 +63,7 @@ ALL_TOOLS: dict[str, dict[str, Any]] = {
     "web_fetch": WEB_FETCH,
     "web_search": WEB_SEARCH,
     "image_generate": IMAGE_GENERATE,
+    "spawn_program": SPAWN_PROGRAM,
 }
 
 # Default tool set (à la Claude Code): dedicated file ops for safe common
@@ -89,7 +91,9 @@ DEFAULT_TOOLS: list[str] = [
 # "full"    — every registered tool. Mostly for debugging / listing.
 TOOLSETS: dict[str, list[str]] = {
     "default": DEFAULT_TOOLS,
-    "research": _builtin_list(DEFAULT_TOOLS) + ["web_fetch", "web_search", "image_generate"],  # + pdf/memory as later steps land
+    "research": _builtin_list(DEFAULT_TOOLS) + [
+        "web_fetch", "web_search", "image_generate", "spawn_program",
+    ],  # + pdf/memory as later steps land
     "full": _builtin_list(ALL_TOOLS.keys()),
 }
 
@@ -170,6 +174,7 @@ __all__ = [
     "WEB_FETCH",
     "WEB_SEARCH",
     "IMAGE_GENERATE",
+    "SPAWN_PROGRAM",
     "get",
     "get_many",
     "list_available",
