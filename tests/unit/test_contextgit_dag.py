@@ -8,6 +8,7 @@ from __future__ import annotations
 from openprogram.contextgit import (
     advance_head,
     children,
+    deepest_leaf,
     head_or_tip,
     is_ancestor,
     linear_history,
@@ -223,3 +224,35 @@ def test_advance_head_explicit_parent_is_preserved():
     ]}
     advance_head(conv, {"id": "u2", "role": "user", "parent_id": "u1"})
     assert conv["messages"][-1]["parent_id"] == "u1"
+
+
+# ---- deepest_leaf -------------------------------------------------------
+
+def test_deepest_leaf_single_chain():
+    msgs = [_msg("u1", None), _msg("a1", "u1"), _msg("u2", "a1"), _msg("a2", "u2")]
+    assert deepest_leaf(msgs, "u1") == "a2"
+
+
+def test_deepest_leaf_on_leaf_is_itself():
+    msgs = [_msg("u1", None), _msg("a1", "u1")]
+    assert deepest_leaf(msgs, "a1") == "a1"
+
+
+def test_deepest_leaf_picks_latest_when_multiple_children():
+    # u1 has two assistant replies (a retry). deepest_leaf should walk
+    # down the most recent branch.
+    msgs = [
+        _msg("u1", None),
+        _msg("a_old", "u1", ts=1),
+        _msg("a_new", "u1", ts=2),
+        _msg("u_old", "a_old", ts=3),
+        _msg("u_new", "a_new", ts=4),
+    ]
+    assert deepest_leaf(msgs, "u1") == "u_new"
+
+
+def test_deepest_leaf_handles_cycles():
+    msgs = [{"id": "a", "parent_id": "b"}, {"id": "b", "parent_id": "a"}]
+    # Malformed — function must terminate rather than loop.
+    leaf = deepest_leaf(msgs, "a")
+    assert leaf in {"a", "b"}

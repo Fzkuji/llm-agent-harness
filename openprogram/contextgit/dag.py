@@ -181,6 +181,30 @@ def advance_head(conv: dict, msg: dict) -> None:
         conv["head_id"] = msg["id"]
 
 
+def deepest_leaf(msgs: list[MessageLike], msg_id: str) -> str:
+    """Walk down children from ``msg_id`` to the deepest leaf.
+
+    When there are multiple children, pick the most recent one
+    (highest ``created_at``, insertion-order tiebreaker). Used by the
+    sibling navigator to answer "if I switch to this other branch,
+    where should HEAD land?" — always the tip of that branch, not
+    the fork point itself. Otherwise users would see an empty branch
+    after clicking <.
+    """
+    by_id = _index_by_id(msgs)
+    cur_id: Optional[str] = msg_id
+    seen: set[str] = set()
+    while cur_id and cur_id in by_id and cur_id not in seen:
+        seen.add(cur_id)
+        kids = children(msgs, cur_id)
+        if not kids:
+            return cur_id
+        # Latest by timestamp; ties fall back to insertion order
+        # inside children() so behavior is deterministic.
+        cur_id = kids[-1].get("id")
+    return msg_id
+
+
 def head_or_tip(conv: dict, msgs: list[MessageLike]) -> Optional[str]:
     """Return ``conv['head_id']`` if set; otherwise the last message's id.
 

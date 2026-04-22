@@ -1591,6 +1591,7 @@ async def _handle_ws_command(ws, cmd: dict):
             # stay on disk but are only pulled in on-demand when the
             # user clicks <N/M>.
             from openprogram.contextgit import (
+                deepest_leaf,
                 head_or_tip,
                 linear_history,
                 sibling_index,
@@ -1613,10 +1614,14 @@ async def _handle_ws_command(ws, cmd: dict):
                     sibs = _siblings(all_msgs, mid)
                     ids = [s.get("id") for s in sibs]
                     i = ids.index(mid) if mid in ids else -1
+                    # Point at the deepest leaf of the neighbouring
+                    # branch, not the sibling itself. Otherwise
+                    # checkout lands at the fork point and the UI
+                    # shows an empty branch (no replies / later turns).
                     if i > 0:
-                        prev_id = ids[i - 1]
+                        prev_id = deepest_leaf(all_msgs, ids[i - 1])
                     if 0 <= i < len(ids) - 1:
-                        next_id = ids[i + 1]
+                        next_id = deepest_leaf(all_msgs, ids[i + 1])
                 shown.append({
                     **m,
                     "sibling_index": idx,
