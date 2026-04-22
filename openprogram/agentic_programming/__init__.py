@@ -28,6 +28,9 @@ from openprogram.agentic_programming.function import (
 )
 from openprogram.agentic_programming.runtime import Runtime
 from openprogram.agentic_programming.session import Session
+from openprogram.agentic_programming.skills import (
+    Skill, load_skills, format_skills_for_prompt, default_skill_dirs,
+)
 
 __all__ = [
     "agentic_function",
@@ -39,4 +42,8 @@ __all__ = [
     "Session",
     "on_event",
     "off_event",
+    "Skill",
+    "load_skills",
+    "format_skills_for_prompt",
+    "default_skill_dirs",
 ]
