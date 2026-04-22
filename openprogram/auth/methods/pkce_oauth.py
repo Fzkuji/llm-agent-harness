@@ -73,16 +73,19 @@ class PkceConfig:
     extra_authorize_params: dict[str, str] = field(default_factory=dict)
     extra_token_params: dict[str, str] = field(default_factory=dict)
     state_length_bytes: int = 16
-    # Callback server binds to loopback only — don't ever advertise on
-    # 0.0.0.0, that would let a process on the network intercept codes.
-    # Bind IPv4 loopback explicitly. The OAuth app registers the
-    # redirect_uri as http://localhost:1455/... — browsers typically
-    # resolve `localhost` to 127.0.0.1 first, so we must listen there.
-    # If we used `localhost` directly, aiohttp might resolve to IPv6 ::1
-    # and the browser's IPv4 request would hit whoever else is on
-    # 127.0.0.1:1455 (a stale codex-cli / pi-ai server, for example),
-    # producing a confusing "state mismatch" error from that process.
-    callback_host: str = "127.0.0.1"
+    # The hostname that appears in the OAuth redirect_uri we send to the
+    # authorization server. OAuth 2.0 matches this as a LITERAL STRING
+    # against the redirect registered on the OAuth app side — changing
+    # it to "127.0.0.1" would make OpenAI reject the authorize request
+    # with unknown_error. Keep this as whatever the OAuth app owner
+    # registered (almost always "localhost").
+    callback_host: str = "localhost"
+    # The IP the callback server actually listens on. We pin IPv4
+    # loopback because browsers resolve `localhost` → 127.0.0.1 first
+    # on most systems; binding the string "localhost" may resolve to
+    # ::1 (IPv6) and miss the IPv4 request. Kept separate from
+    # callback_host so the advertised redirect_uri stays literal.
+    callback_bind_ip: str = "127.0.0.1"
     # Maximum time we wait for the browser to come back with a code.
     # Longer than you'd think — the user might get distracted, log in,
     # complete MFA, etc.
@@ -283,7 +286,7 @@ async def _run_callback_server(cfg: PkceConfig, expected_state: str) -> str:
     app.router.add_get(cfg.callback_path, handle)
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, cfg.callback_host, cfg.callback_port)
+    site = web.TCPSite(runner, cfg.callback_bind_ip, cfg.callback_port)
     try:
         await site.start()
     except OSError as e:
@@ -294,7 +297,7 @@ async def _run_callback_server(cfg: PkceConfig, expected_state: str) -> str:
         # why the callback won't fire.
         await runner.cleanup()
         raise RuntimeError(
-            f"Can't bind {cfg.callback_host}:{cfg.callback_port} for the OAuth "
+            f"Can't bind {cfg.callback_bind_ip}:{cfg.callback_port} for the OAuth "
             f"callback ({e.__class__.__name__}: {e}). Another process is "
             f"already listening there — likely a stale `codex login` or "
             f"`pi` process. Find it with "
