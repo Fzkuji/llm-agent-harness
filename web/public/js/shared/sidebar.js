@@ -5,7 +5,17 @@ function toggleSidebar() {
   sidebarOpen = !sidebarOpen;
   sb.style.removeProperty('width');
   sb.classList.toggle('collapsed', !sidebarOpen);
+  try { localStorage.setItem('sidebarOpen', sidebarOpen ? '1' : '0'); } catch (e) {}
 }
+
+// Apply the persisted collapsed state right after AppShell injects the
+// sidebar HTML, so a refresh never flips the layout.
+function restoreSidebarState() {
+  var sb = document.getElementById('sidebar');
+  if (!sb) return;
+  sb.classList.toggle('collapsed', !sidebarOpen);
+}
+window.restoreSidebarState = restoreSidebarState;
 
 // ===== Conversations =====
 

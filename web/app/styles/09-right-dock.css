@@ -80,11 +80,13 @@
 
 .history-node { cursor: pointer; }
 .history-node circle,
-.history-node polygon {
+.history-node polygon,
+.history-node rect {
   transition: filter 0.1s ease-out;
 }
 .history-node:hover circle,
-.history-node:hover polygon {
+.history-node:hover polygon,
+.history-node:hover rect {
   filter: brightness(1.2);
 }
 .history-node.is-head { filter: drop-shadow(0 0 4px rgba(255,255,255,0.35)); }

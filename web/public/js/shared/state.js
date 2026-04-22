@@ -14,7 +14,11 @@ var currentConvId = (function() {
 var conversations = {};
 var availableFunctions = [];
 var pendingResponses = {};  // msg_id -> element
-var sidebarOpen = true;
+// Sidebar collapse state is persisted so a refresh leaves the layout
+// exactly where the user had it. Missing key → default open (first visit).
+var sidebarOpen = (function () {
+  try { return localStorage.getItem('sidebarOpen') !== '0'; } catch (e) { return true; }
+})();
 var _nodeCache = {};  // path -> node data
 var _liveTreeCollapsed = false;
 var _lastRunCommand = null;

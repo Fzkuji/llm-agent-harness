@@ -172,7 +172,7 @@
   function _shapeFor(node) {
     var role = node.role;
     var display = node.display;
-    if (display === 'runtime') return 'diamond';
+    if (display === 'runtime') return 'square';
     if (role === 'assistant') return 'triangle';
     if (role === 'user') return 'circle';
     return 'circle';
@@ -193,10 +193,11 @@
       var t = r + 1.2;
       var pts = '0,' + (-t) + ' ' + t + ',' + (t * 0.85) + ' ' + (-t) + ',' + (t * 0.85);
       parent.appendChild(_svg('polygon', Object.assign({ points: pts }, common)));
-    } else if (shape === 'diamond') {
-      var d = r + 0.8;
-      var dpts = '0,' + (-d) + ' ' + d + ',0 0,' + d + ' ' + (-d) + ',0';
-      parent.appendChild(_svg('polygon', Object.assign({ points: dpts }, common)));
+    } else if (shape === 'square') {
+      var s = r - 0.2;
+      parent.appendChild(_svg('rect', Object.assign({
+        x: -s, y: -s, width: s * 2, height: s * 2, rx: 0.8, ry: 0.8,
+      }, common)));
     }
   }
 

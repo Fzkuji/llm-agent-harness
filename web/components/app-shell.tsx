@@ -177,19 +177,32 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         const sidebarHtml = await sidebarP;
         if (sidebarRef.current) sidebarRef.current.innerHTML = sidebarHtml;
+        // Reapply persisted collapsed state immediately after inject so
+        // a refresh doesn't momentarily flash the default layout.
+        const wr = window as unknown as {
+          restoreSidebarState?: () => void;
+          rightDock?: { restore?: () => void };
+        };
+        if (wr.restoreSidebarState) wr.restoreSidebarState();
         // Right sidebar fetched + injected alongside the left. Kept on
         // AppShell so chat routes see one persistent instance across
         // conversation switches.
         const rightHtml = await fetch("/html/_right-sidebar.html").then((r) => r.text());
         if (rightSidebarRef.current) rightSidebarRef.current.innerHTML = rightHtml;
+        if (wr.rightDock?.restore) wr.rightDock.restore();
         await externalsP;
       })();
     } else {
+      const wr = window as unknown as {
+        restoreSidebarState?: () => void;
+        rightDock?: { restore?: () => void };
+      };
       if (sidebarRef.current && !sidebarRef.current.innerHTML) {
         fetch("/html/_sidebar.html")
           .then((r) => r.text())
           .then((html) => {
             if (sidebarRef.current) sidebarRef.current.innerHTML = html;
+            if (wr.restoreSidebarState) wr.restoreSidebarState();
           });
       }
       if (rightSidebarRef.current && !rightSidebarRef.current.innerHTML) {
@@ -197,6 +210,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           .then((r) => r.text())
           .then((html) => {
             if (rightSidebarRef.current) rightSidebarRef.current.innerHTML = html;
+            if (wr.rightDock?.restore) wr.rightDock.restore();
           });
       }
     }
