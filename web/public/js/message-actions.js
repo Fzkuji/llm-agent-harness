@@ -161,24 +161,14 @@
       return;
     }
     btn.disabled = true;
-    // Optimistic removal: drop this bubble + every sibling after it.
-    // Server will re-broadcast the fresh reply.
-    var parent = messageEl.parentNode;
-    var stale = [];
-    var cur = messageEl;
-    while (cur) {
-      stale.push(cur);
-      cur = cur.nextSibling;
-    }
-    // Exception: if we're retrying a USER message, keep it — the
-    // server will use its content to drive the re-run and the user
-    // expects to still see the prompt they sent. Only drop what
-    // comes after.
-    if (messageEl.classList.contains('user')) {
-      stale = stale.slice(1);
-    }
-    stale.forEach(function (el) { if (el && el.parentNode === parent) parent.removeChild(el); });
 
+    // Non-destructive retry (ContextGit): server forks a sibling user
+    // turn and runs it. We do NOT drop the DOM optimistically any
+    // more — the old branch is still part of the DAG and has to stay
+    // accessible via <N/M>. Instead we wait for the POST to succeed
+    // then ask the server for the linearized view under the new HEAD.
+    // load_conversation also carries sibling_index/_total so the
+    // navigator shows up correctly.
     fetch('/api/chat/retry', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -186,10 +176,12 @@
     })
       .then(function (r) { return r.ok ? r.json() : r.json().then(function (e) { throw new Error(e.error || r.statusText); }); })
       .then(function () {
-        // Spinner placeholder for the new reply — will be replaced
-        // when the server streams the new response.
-        if (typeof addAssistantPlaceholder === 'function') {
-          addAssistantPlaceholder('retry_' + Date.now());
+        // Mark the run as active client-side. The REST retry endpoint
+        // doesn't emit a chat_ack, so init.js wouldn't know to set
+        // this otherwise. Terminal chat_response types turn it off.
+        if (typeof window.setRunActive === 'function') window.setRunActive(true);
+        if (window.ws && window.ws.readyState === WebSocket.OPEN) {
+          window.ws.send(JSON.stringify({ action: 'load_conversation', conv_id: convId }));
         }
       })
       .catch(function (err) {

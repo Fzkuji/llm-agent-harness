@@ -108,9 +108,12 @@
       if (!r.ok) return r.json().then(function (e) { throw new Error(e.error || r.statusText); });
       return r.json();
     }).then(function () {
-      // Server will broadcast the new user bubble + reply through
-      // the usual stream. Re-request the conversation state so the
-      // client picks up the new HEAD and sibling counts.
+      // Flip run_active client-side — REST /api/chat/edit doesn't
+      // emit chat_ack, so init.js wouldn't flip it. Terminal
+      // chat_response types turn it back off.
+      if (typeof window.setRunActive === 'function') window.setRunActive(true);
+      // Re-request the conversation state so the client picks up the
+      // new HEAD and sibling counts.
       if (window.ws && window.ws.readyState === WebSocket.OPEN) {
         window.ws.send(JSON.stringify({ action: 'load_conversation', conv_id: convId }));
       }

@@ -16,6 +16,10 @@ function setRunActive(active) {
   var c = document.getElementById('chatMessages');
   if (c) c.setAttribute('data-run-active', active ? 'true' : 'false');
 }
+// Exposed so retry / edit POST handlers can flip it immediately —
+// those paths don't get a chat_ack, so init.js's WS handler can't
+// see them start.
+window.setRunActive = setRunActive;
 
 function connect() {
   var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
