@@ -43,6 +43,7 @@ from .image_analyze import TOOL as IMAGE_ANALYZE
 from .image_generate import TOOL as IMAGE_GENERATE
 from .list import TOOL as LIST
 from .memory import TOOL as MEMORY
+from .mixture_of_agents import TOOL as MIXTURE_OF_AGENTS
 from .pdf import TOOL as PDF
 from .process import TOOL as PROCESS
 from .read import TOOL as READ
@@ -74,6 +75,7 @@ ALL_TOOLS: dict[str, dict[str, Any]] = {
     "memory": MEMORY,
     "clarify": CLARIFY,
     "execute_code": EXECUTE_CODE,
+    "mixture_of_agents": MIXTURE_OF_AGENTS,
 }
 
 # Default tool set (à la Claude Code): dedicated file ops for safe common
@@ -104,6 +106,7 @@ TOOLSETS: dict[str, list[str]] = {
     "research": _builtin_list(DEFAULT_TOOLS) + [
         "web_fetch", "web_search", "image_generate", "image_analyze",
         "pdf", "spawn_program", "memory", "clarify", "execute_code",
+        "mixture_of_agents",
     ],
     "full": _builtin_list(ALL_TOOLS.keys()),
 }
@@ -191,6 +194,7 @@ __all__ = [
     "MEMORY",
     "CLARIFY",
     "EXECUTE_CODE",
+    "MIXTURE_OF_AGENTS",
     "get",
     "get_many",
     "list_available",
