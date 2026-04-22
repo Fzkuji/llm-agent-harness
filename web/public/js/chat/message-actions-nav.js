@@ -112,9 +112,14 @@
 
   document.addEventListener('click', function (e) {
     var btn = e.target.closest ? e.target.closest('.message-nav-btn') : null;
-    if (!btn || btn.disabled) return;
+    if (!btn) return;
+    console.log('[nav] click', { dir: btn.getAttribute('data-nav'), disabled: btn.disabled });
+    if (btn.disabled) return;
     var messageEl = btn.closest('.message');
-    if (!messageEl) return;
+    if (!messageEl) {
+      console.warn('[nav] no .message ancestor');
+      return;
+    }
     // When the user clicks "next" on an ASSISTANT message, they
     // really want to switch versions of the user turn above (the
     // assistant reply is a child of the user turn; siblings of the
@@ -125,6 +130,7 @@
     // granularity already.
     var dir = btn.getAttribute('data-nav');
     var targetId = resolveSiblingId(messageEl, dir);
+    console.log('[nav] resolveSiblingId →', targetId, 'msgId=', messageEl.getAttribute('data-msg-id'));
     if (!targetId) return;
     btn.disabled = true;
     checkout(targetId).catch(function (err) {
