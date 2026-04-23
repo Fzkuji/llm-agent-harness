@@ -2330,7 +2330,7 @@ def create_app():
             from openprogram.providers import get_providers as _get_providers
             known = set(_get_providers())
             known.update({"claude-code", "openai-codex", "gemini-cli",
-                          "anthropic", "openai", "gemini", "openclaw"})
+                          "anthropic", "openai", "gemini"})
             if head in known:
                 inferred_provider = head
                 bare_model = tail

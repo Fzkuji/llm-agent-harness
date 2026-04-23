@@ -97,7 +97,7 @@ __all__ = [
     "register_api_provider", "get_api_provider", "get_api_providers", "unregister_api_providers", "clear_api_providers",
     # Legacy runtime compatibility
     "PROVIDERS", "detect_provider", "create_runtime", "check_providers",
-    "AnthropicRuntime", "OpenAIRuntime", "GeminiRuntime", "ClaudeCodeRuntime", "OpenAICodexRuntime", "GeminiCLIRuntime", "OpenClawRuntime",
+    "AnthropicRuntime", "OpenAIRuntime", "GeminiRuntime", "ClaudeCodeRuntime", "OpenAICodexRuntime", "GeminiCLIRuntime",
     # Keys
     "get_env_api_key",
     # Streaming
@@ -118,7 +118,6 @@ _DEFERRABLE_LEGACY_EXPORTS = {
     "ClaudeCodeRuntime",
     "OpenAICodexRuntime",
     "GeminiCLIRuntime",
-    "OpenClawRuntime",
 }
 
 

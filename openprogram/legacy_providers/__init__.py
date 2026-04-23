@@ -41,7 +41,6 @@ import shutil
 
 # Maps provider name -> (class_name, module_path, default_model)
 PROVIDERS = {
-    "openclaw":     ("OpenClawRuntime",    "openprogram.legacy_providers.openclaw",     "default"),
     "claude-code":  ("ClaudeCodeRuntime",  "openprogram.providers.anthropic.cli_runtime",  "claude-sonnet-4-6"),
     "openai-codex": ("OpenAICodexRuntime", "openprogram.legacy_providers.openai_codex", "gpt-5.4-mini"),
     "gemini-cli":   ("GoogleGeminiCLIRuntime", "openprogram.providers.google_gemini_cli.runtime", "gemini-2.5-flash"),
@@ -126,8 +125,6 @@ def detect_provider() -> tuple[str, str]:
         return result
 
     # 4. CLI providers (no API key needed)
-    if shutil.which("openclaw"):
-        return "openclaw", "default"
     if shutil.which("claude"):
         return "claude-code", "sonnet"
     if shutil.which("codex"):
@@ -175,7 +172,6 @@ def check_providers() -> dict:
     """
     results = {}
     cli_checks = {
-        "openclaw": "openclaw",
         "claude-code": "claude",
         "openai-codex": "codex",
         "gemini-cli": "gemini",
@@ -221,8 +217,8 @@ def create_runtime(provider: str = None, model: str = None, **kwargs):
 
     Args:
         provider:  Provider name (e.g. "anthropic", "claude-code", "openai",
-                   "openclaw"). Pass "auto" or None to auto-detect the best
-                   available provider via detect_provider().
+                   "gemini-cli"). Pass "auto" or None to auto-detect the
+                   best available provider via detect_provider().
         model:     Model name override.
         **kwargs:  Forwarded to the provider Runtime constructor.
 
@@ -276,9 +272,6 @@ def __getattr__(name):
             GoogleGeminiCLIRuntime,
         )
         return GoogleGeminiCLIRuntime
-    if name == "OpenClawRuntime":
-        from openprogram.legacy_providers.openclaw import OpenClawRuntime
-        return OpenClawRuntime
     raise AttributeError(f"module 'openprogram.legacy_providers' has no attribute {name!r}")
 
 
@@ -292,5 +285,4 @@ __all__ = [
     "ClaudeCodeRuntime",
     "OpenAICodexRuntime",
     "GeminiCLIRuntime",
-    "OpenClawRuntime",
 ]
