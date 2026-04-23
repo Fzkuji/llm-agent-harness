@@ -283,6 +283,75 @@ def test_watchdog_does_not_fire_when_output_flows(tmp_path: Path) -> None:
     assert any(isinstance(e, Done) for e in events)
 
 
+def _write_live_echo_cli(tmp_path: Path) -> Path:
+    """Fake live-session CLI.
+
+    Reads one JSON line from stdin per turn, emits an ``assistant`` text
+    block echoing the user's prompt, then a ``result`` message to mark
+    turn end, then waits for the next line. Exits cleanly on EOF.
+    """
+    script = tmp_path / "live_cli"
+    script.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, sys\n"
+        "for line in sys.stdin:\n"
+        "    try:\n"
+        "        msg = json.loads(line)\n"
+        "    except Exception:\n"
+        "        continue\n"
+        "    text = msg.get('message', {}).get('content', [{}])[0].get('text', '')\n"
+        "    print(json.dumps({'type':'assistant','message':{'content':[{'type':'text','text':'echo:'+text}]}}), flush=True)\n"
+        "    print(json.dumps({'type':'result','result':'ok','usage':{'input_tokens':1,'output_tokens':1}}), flush=True)\n"
+    )
+    script.chmod(0o755)
+    return script
+
+
+def test_live_session_reuses_process_across_turns(tmp_path: Path) -> None:
+    cli = _write_live_echo_cli(tmp_path)
+    plugin = _make_plugin(str(cli), live_session="claude-stdio", input="stdin")
+    runner = CliRunner(plugin=plugin, workspace_dir=str(tmp_path))
+
+    async def scenario():
+        ev1 = await _collect(runner, "hello")
+        proc_id_after_turn1 = id(runner._live_proc)
+        ev2 = await _collect(runner, "world")
+        proc_id_after_turn2 = id(runner._live_proc)
+        await runner.close()
+        return ev1, ev2, proc_id_after_turn1, proc_id_after_turn2
+
+    ev1, ev2, p1, p2 = asyncio.run(scenario())
+
+    texts1 = [e.text for e in ev1 if isinstance(e, TextDelta)]
+    texts2 = [e.text for e in ev2 if isinstance(e, TextDelta)]
+    assert texts1 == ["echo:hello"]
+    assert texts2 == ["echo:world"]
+    # Same process object across turns — not respawned.
+    assert p1 == p2
+    # Each turn ends with Done (synthesized at ``result`` boundary).
+    assert any(isinstance(e, Done) for e in ev1)
+    assert any(isinstance(e, Done) for e in ev2)
+    assert runner._live_proc is None
+
+
+def test_live_session_close_tears_down(tmp_path: Path) -> None:
+    cli = _write_live_echo_cli(tmp_path)
+    plugin = _make_plugin(str(cli), live_session="claude-stdio", input="stdin")
+    runner = CliRunner(plugin=plugin, workspace_dir=str(tmp_path))
+
+    async def scenario():
+        await _collect(runner, "hi")
+        proc = runner._live_proc
+        assert proc is not None and proc.returncode is None
+        await runner.close()
+        return proc
+
+    proc = asyncio.run(scenario())
+    assert runner._live_proc is None
+    # Underlying proc has exited.
+    assert proc.returncode is not None
+
+
 def test_stdin_mode_feeds_prompt(tmp_path: Path) -> None:
     # Fake CLI that reads stdin and echoes it wrapped in a text block.
     script = tmp_path / "echo_stdin"

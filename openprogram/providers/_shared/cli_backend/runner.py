@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import AsyncIterator, Iterable, Optional
 
 from .config import CliBackendConfig
-from .events import CliEvent, Done, Error, SessionInfo
+from .events import CliEvent, Done, Error, SessionInfo, Usage
 from .parsers import LineParser, parser_for
 from .plugin import (
     CliBackendPlugin,
@@ -61,6 +61,7 @@ class CliRunner:
         self.overall_timeout_ms = overall_timeout_ms
         self._config: CliBackendConfig = plugin.config
         self._live_proc: Optional[asyncio.subprocess.Process] = None
+        self._live_prepared: Optional[PreparedExecution] = None
         self._auth_epoch: int = 0
         # Session id persisted across ``run()`` calls. Stored on disk so
         # restarts resume into the CLI's own session instead of orphaning it.
@@ -84,41 +85,62 @@ class CliRunner:
     ) -> AsyncIterator[CliEvent]:
         """Run one turn against the CLI and yield events.
 
-        ``resume=True`` is accepted but ignored in 1b — session resume
-        lands in 1c. Pass it anyway; the signature is stable.
+        Two modes, chosen by ``cfg.live_session``:
+
+        - ``None`` (default) — one-shot: spawn fresh, pipe prompt in,
+          parse stdout until exit, yield Done/Error from exit code.
+        - ``"claude-stdio"`` — persistent: spawn once, keep alive across
+          turns. Each call writes a stream-json ``user`` message to
+          stdin and reads events until the ``result`` terminator arrives.
         """
         cfg = self._config
-        call_start = time.monotonic()
-
-        # Let the plugin stage any pre-run env / cleanup (async or sync).
-        prepared: Optional[PreparedExecution] = None
-        if self.plugin.prepare_execution is not None:
-            ctx = PrepareExecutionContext(
-                workspace_dir=self.workspace_dir,
-                provider=self.plugin.id,
+        if cfg.live_session is not None:
+            async for ev in self._run_live(
+                prompt=prompt,
                 model_id=model_id,
+                system_prompt=system_prompt,
+                image_paths=tuple(image_paths),
+                resume=resume,
                 auth_profile_id=auth_profile_id,
-            )
-            maybe = self.plugin.prepare_execution(ctx)
-            if inspect.isawaitable(maybe):
-                prepared = await maybe
-            else:
-                prepared = maybe  # type: ignore[assignment]
+            ):
+                yield ev
+            return
 
-        argv = self._build_argv(
+        async for ev in self._run_oneshot(
             prompt=prompt,
             model_id=model_id,
             system_prompt=system_prompt,
             image_paths=tuple(image_paths),
             resume=resume,
+            auth_profile_id=auth_profile_id,
+        ):
+            yield ev
+
+    async def _run_oneshot(
+        self,
+        *,
+        prompt: str,
+        model_id: str,
+        system_prompt: Optional[str],
+        image_paths: tuple[str, ...],
+        resume: bool,
+        auth_profile_id: Optional[str],
+    ) -> AsyncIterator[CliEvent]:
+        cfg = self._config
+        call_start = time.monotonic()
+
+        prepared = await self._call_prepare_execution(model_id, auth_profile_id)
+
+        argv = self._build_argv(
+            prompt=prompt,
+            model_id=model_id,
+            system_prompt=system_prompt,
+            image_paths=image_paths,
+            resume=resume,
         )
         env = self._build_env(prepared)
 
-        parser: LineParser = parser_for(cfg)
-
-        # Spawn.
         try:
-            # stdin for ``input="stdin"``; discard for ``input="arg"``.
             stdin_mode: int | None = (
                 asyncio.subprocess.PIPE if cfg.input == "stdin" else asyncio.subprocess.DEVNULL
             )
@@ -129,12 +151,9 @@ class CliRunner:
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self.workspace_dir,
                 env=env,
-                # New session so watchdog can reap descendants as a group.
-                # Shell wrappers (``sh -c "..."``) fork child processes the
-                # parent kill() doesn't reach — group-kill terminates them.
                 start_new_session=True,
             )
-        except FileNotFoundError as e:
+        except FileNotFoundError:
             yield Error(
                 message=f"CLI not found: {argv[0]}",
                 recoverable=False,
@@ -147,7 +166,6 @@ class CliRunner:
             await self._run_cleanup(prepared)
             return
 
-        # Feed stdin if needed.
         if cfg.input == "stdin" and proc.stdin is not None:
             try:
                 proc.stdin.write(prompt.encode("utf-8"))
@@ -156,42 +174,18 @@ class CliRunner:
             except (BrokenPipeError, ConnectionResetError):
                 pass
 
-        # Compute watchdog budget for this call.
-        watchdog_ms = self._compute_watchdog_ms(resume=resume)
-
-        # Read stdout.
-        assert proc.stdout is not None
         stalled = False
         try:
-            if cfg.output == "json":
-                # Whole-blob mode: apply watchdog to the single read.
-                try:
-                    blob_bytes = await asyncio.wait_for(
-                        proc.stdout.read(), timeout=watchdog_ms / 1000
-                    )
-                except asyncio.TimeoutError:
+            async for ev, reason in self._stream_events(
+                proc, call_start=call_start, resume=resume,
+                turn_terminator=None,
+            ):
+                if reason == "stall":
                     stalled = True
-                else:
-                    blob = blob_bytes.decode("utf-8", errors="replace")
-                    for ev in parser(blob, call_start):
-                        self._capture_session(ev)
-                        yield ev
-            else:
-                # jsonl / text / unknown — line-oriented with per-line watchdog.
-                while True:
-                    try:
-                        line_bytes = await asyncio.wait_for(
-                            proc.stdout.readline(), timeout=watchdog_ms / 1000
-                        )
-                    except asyncio.TimeoutError:
-                        stalled = True
-                        break
-                    if not line_bytes:
-                        break
-                    line = line_bytes.decode("utf-8", errors="replace")
-                    for ev in parser(line, call_start):
-                        self._capture_session(ev)
-                        yield ev
+                    break
+                if reason == "eof":
+                    break
+                yield ev
         except asyncio.CancelledError:
             self._kill_tree(proc)
             await proc.wait()
@@ -202,24 +196,22 @@ class CliRunner:
             self._kill_tree(proc)
             await proc.wait()
             yield Error(
-                message=f"CLI produced no output for {watchdog_ms}ms",
+                message=f"CLI produced no output for {self._compute_watchdog_ms(resume=resume)}ms",
                 recoverable=True,
                 kind="WatchdogStall",
             )
             await self._run_cleanup(prepared)
             return
 
-        # Wait for exit + collect stderr.
         returncode = await proc.wait()
         stderr_bytes = b""
         if proc.stderr is not None:
             try:
                 stderr_bytes = await proc.stderr.read()
-            except Exception:  # noqa: BLE001 — tail read is best-effort
+            except Exception:  # noqa: BLE001
                 pass
 
         duration_ms = int((time.monotonic() - call_start) * 1000)
-
         if returncode != 0:
             stderr_text = stderr_bytes.decode("utf-8", errors="replace").strip()
             yield Error(
@@ -232,22 +224,257 @@ class CliRunner:
 
         await self._run_cleanup(prepared)
 
-    async def close(self) -> None:
-        """Tear down any long-running live-session process.
+    async def _run_live(
+        self,
+        *,
+        prompt: str,
+        model_id: str,
+        system_prompt: Optional[str],
+        image_paths: tuple[str, ...],
+        resume: bool,
+        auth_profile_id: Optional[str],
+    ) -> AsyncIterator[CliEvent]:
+        """Persistent-process mode. Reuses ``self._live_proc`` across calls.
 
-        1b: no-op (no live sessions yet). 1e fills this in.
+        The CLI stays resident; each call writes one stream-json ``user``
+        message on stdin and reads events until a ``result`` message is
+        seen. ``Done`` is synthesized at that boundary — the process
+        stays alive waiting for the next prompt.
         """
-        return None
+        cfg = self._config
+        call_start = time.monotonic()
+
+        # Spawn on first use (or after close / auth bump).
+        if self._live_proc is None or self._live_proc.returncode is not None:
+            prepared = await self._call_prepare_execution(model_id, auth_profile_id)
+            # For live mode, session/resume args are baked into the spawn;
+            # later turns reuse the same process regardless of ``resume``.
+            argv = self._build_argv(
+                prompt="",  # prompt arrives via stdin per-turn
+                model_id=model_id,
+                system_prompt=system_prompt,
+                image_paths=image_paths,
+                resume=resume,
+            )
+            env = self._build_env(prepared)
+            try:
+                self._live_proc = await asyncio.create_subprocess_exec(
+                    *argv,
+                    stdin=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=self.workspace_dir,
+                    env=env,
+                    start_new_session=True,
+                )
+            except FileNotFoundError:
+                yield Error(
+                    message=f"CLI not found: {argv[0]}",
+                    recoverable=False,
+                    kind="FileNotFoundError",
+                )
+                await self._run_cleanup(prepared)
+                return
+            except OSError as e:
+                yield Error(message=str(e), recoverable=False, kind=type(e).__name__)
+                await self._run_cleanup(prepared)
+                return
+            self._live_prepared = prepared
+
+        proc = self._live_proc
+
+        # Write the turn's prompt as a stream-json ``user`` envelope.
+        if proc.stdin is not None:
+            envelope = self._build_live_prompt_envelope(prompt)
+            try:
+                proc.stdin.write(envelope.encode("utf-8"))
+                await proc.stdin.drain()
+            except (BrokenPipeError, ConnectionResetError):
+                # Process died under us — surface as recoverable so caller
+                # can retry with a fresh spawn.
+                await self._teardown_live()
+                yield Error(
+                    message="Live CLI process exited unexpectedly",
+                    recoverable=True,
+                    kind="LiveProcessGone",
+                )
+                return
+
+        # Read events until the turn terminator (``result`` message).
+        stalled = False
+        try:
+            async for ev, reason in self._stream_events(
+                proc, call_start=call_start, resume=resume,
+                turn_terminator="result",
+            ):
+                if reason == "stall":
+                    stalled = True
+                    break
+                if reason == "eof":
+                    # Live CLI closed stdout mid-turn — treat as recoverable.
+                    await self._teardown_live()
+                    yield Error(
+                        message="Live CLI closed stdout unexpectedly",
+                        recoverable=True,
+                        kind="LiveProcessGone",
+                    )
+                    return
+                yield ev
+                if reason == "terminator":
+                    break
+        except asyncio.CancelledError:
+            await self._teardown_live()
+            raise
+
+        if stalled:
+            await self._teardown_live()
+            yield Error(
+                message=f"CLI produced no output for {self._compute_watchdog_ms(resume=resume)}ms",
+                recoverable=True,
+                kind="WatchdogStall",
+            )
+            return
+
+        duration_ms = int((time.monotonic() - call_start) * 1000)
+        yield Done(duration_ms=duration_ms, num_turns=1)
+
+    @staticmethod
+    def _build_live_prompt_envelope(prompt: str) -> str:
+        """stream-json envelope for a user prompt in live-session mode.
+
+        Matches Claude Code's ``--input-format stream-json`` expectation —
+        one JSON line per turn. Only plain text for now; image support
+        lands with 1f when ClaudeCodeRuntime migrates.
+        """
+        return json.dumps({
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [{"type": "text", "text": prompt}],
+            },
+        }) + "\n"
+
+    async def _stream_events(
+        self,
+        proc: asyncio.subprocess.Process,
+        *,
+        call_start: float,
+        resume: bool,
+        turn_terminator: Optional[str],
+    ) -> AsyncIterator[tuple[Optional[CliEvent], str]]:
+        """Read parser events from ``proc.stdout``.
+
+        Yields ``(event, reason)`` pairs. ``reason`` is one of:
+
+        - ``"event"`` — normal event from the parser
+        - ``"stall"`` — watchdog fired; event is None, caller handles
+        - ``"terminator"`` — last event of the turn; emitted with the
+          event itself so caller can forward it before stopping
+        - ``"eof"`` — stdout closed; event is None
+
+        ``turn_terminator`` is the parser-level event kind whose arrival
+        ends the turn (used only in live-session mode — one-shot mode
+        passes ``None`` and stops on EOF).
+        """
+        cfg = self._config
+        parser: LineParser = parser_for(cfg)
+        watchdog_ms = self._compute_watchdog_ms(resume=resume)
+        assert proc.stdout is not None
+
+        if cfg.output == "json":
+            try:
+                blob_bytes = await asyncio.wait_for(
+                    proc.stdout.read(), timeout=watchdog_ms / 1000
+                )
+            except asyncio.TimeoutError:
+                yield None, "stall"
+                return
+            blob = blob_bytes.decode("utf-8", errors="replace")
+            for ev in parser(blob, call_start):
+                self._capture_session(ev)
+                yield ev, "event"
+            yield None, "eof"
+            return
+
+        while True:
+            try:
+                line_bytes = await asyncio.wait_for(
+                    proc.stdout.readline(), timeout=watchdog_ms / 1000
+                )
+            except asyncio.TimeoutError:
+                yield None, "stall"
+                return
+            if not line_bytes:
+                yield None, "eof"
+                return
+            line = line_bytes.decode("utf-8", errors="replace")
+            for ev in parser(line, call_start):
+                self._capture_session(ev)
+                # Detect turn boundary. ``Usage`` is what claude-stream-json
+                # emits for the ``result`` message — see parsers.py.
+                is_terminator = (
+                    turn_terminator == "result" and isinstance(ev, Usage)
+                )
+                yield ev, ("terminator" if is_terminator else "event")
+                if is_terminator:
+                    return
+
+    async def _call_prepare_execution(
+        self, model_id: str, auth_profile_id: Optional[str]
+    ) -> Optional[PreparedExecution]:
+        if self.plugin.prepare_execution is None:
+            return None
+        ctx = PrepareExecutionContext(
+            workspace_dir=self.workspace_dir,
+            provider=self.plugin.id,
+            model_id=model_id,
+            auth_profile_id=auth_profile_id,
+        )
+        maybe = self.plugin.prepare_execution(ctx)
+        if inspect.isawaitable(maybe):
+            return await maybe
+        return maybe  # type: ignore[return-value]
+
+    async def _teardown_live(self) -> None:
+        proc = self._live_proc
+        if proc is not None and proc.returncode is None:
+            if proc.stdin is not None:
+                try:
+                    proc.stdin.close()
+                except Exception:  # noqa: BLE001
+                    pass
+            self._kill_tree(proc)
+            try:
+                await proc.wait()
+            except Exception:  # noqa: BLE001
+                pass
+        self._live_proc = None
+        prepared = getattr(self, "_live_prepared", None)
+        self._live_prepared = None
+        if prepared is not None:
+            await self._run_cleanup(prepared)
+
+    async def close(self) -> None:
+        """Tear down any long-running live-session process."""
+        await self._teardown_live()
 
     def bump_auth_epoch(self) -> None:
         """Invalidate current live process + persisted session id.
 
         Auth changed — the CLI's existing session keyed off the old
         credentials is useless, so we drop it rather than resume into it.
+        The live process (if any) is marked stale by clearing the
+        reference; the next ``run()`` respawns. Actual teardown is fire-
+        and-forget so this stays sync.
         """
         self._auth_epoch += 1
         self._session_id = None
         self._save_session_id(None)
+        proc = self._live_proc
+        if proc is not None and proc.returncode is None:
+            self._kill_tree(proc)
+        self._live_proc = None
+        self._live_prepared = None
 
     # --- session persistence -----------------------------------------
 
