@@ -34,6 +34,7 @@ _builtin_list = list
 
 from .apply_patch import TOOL as APPLY_PATCH
 from .bash import TOOL as BASH
+from .browser import TOOL as BROWSER
 from .canvas import TOOL as CANVAS
 from .clarify import TOOL as CLARIFY
 from .cron import TOOL as CRON
@@ -80,6 +81,7 @@ ALL_TOOLS: dict[str, dict[str, Any]] = {
     "mixture_of_agents": MIXTURE_OF_AGENTS,
     "canvas": CANVAS,
     "cron": CRON,
+    "browser": BROWSER,
 }
 
 # Default tool set (à la Claude Code): dedicated file ops for safe common
