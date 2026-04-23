@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { useShallow } from "zustand/react/shallow";
 
 export type MessageStatus = "pending" | "streaming" | "done" | "error" | "cancelled";
 
@@ -41,13 +42,30 @@ export interface TreeNode {
   [k: string]: unknown;
 }
 
+/**
+ * Normalized shape.
+ *
+ * ``messagesById`` holds every message ever observed, keyed by its id.
+ * ``messageOrder[convId]`` holds the ordered id list for one
+ * conversation. Split this way so a streaming delta only touches one
+ * entry in ``messagesById`` and leaves ``messageOrder`` untouched —
+ * components that subscribe to the id list (e.g. the scroll container)
+ * don't re-render per token, only bubbles subscribed to *their own*
+ * id do. Matches the pattern Claude.ai / ChatGPT webapps use.
+ *
+ * Cross-conversation cleanup: removing a conversation drops its ids
+ * from the order map AND removes the referenced messages from
+ * ``messagesById`` (no dangling entries).
+ */
 interface ConvState {
   /** WS status for UI. */
   wsStatus: "connecting" | "open" | "closed";
   /** Summary for sidebar Recents list. */
   conversations: Record<string, ConvSummary>;
-  /** Full messages per conversation, loaded on demand. */
-  messages: Record<string, ChatMsg[]>;
+  /** Every message ever loaded, keyed by id. */
+  messagesById: Record<string, ChatMsg>;
+  /** Ordered id list per conversation. */
+  messageOrder: Record<string, string[]>;
   /** Currently active conversation id. */
   currentConvId: string | null;
   /** Currently running task (show Stop button). */
@@ -80,7 +98,8 @@ interface ConvState {
 export const useConvStore = create<ConvState>((set) => ({
   wsStatus: "connecting",
   conversations: {},
-  messages: {},
+  messagesById: {},
+  messageOrder: {},
   currentConvId: null,
   runningTask: null,
   paused: false,
@@ -103,45 +122,102 @@ export const useConvStore = create<ConvState>((set) => ({
     set((s) => {
       const rest = { ...s.conversations };
       delete rest[id];
-      const msgs = { ...s.messages };
-      delete msgs[id];
+      const order = { ...s.messageOrder };
+      const doomed = order[id] ?? [];
+      delete order[id];
+      const byId = { ...s.messagesById };
+      for (const mid of doomed) delete byId[mid];
       return {
         conversations: rest,
-        messages: msgs,
+        messageOrder: order,
+        messagesById: byId,
         currentConvId: s.currentConvId === id ? null : s.currentConvId,
       };
     }),
 
-  clearConversations: () => set({ conversations: {}, messages: {}, currentConvId: null }),
+  clearConversations: () =>
+    set({
+      conversations: {},
+      messagesById: {},
+      messageOrder: {},
+      currentConvId: null,
+    }),
 
   setCurrentConv: (id) => set({ currentConvId: id }),
 
   setMessages: (convId, msgs) =>
-    set((s) => ({ messages: { ...s.messages, [convId]: msgs } })),
+    set((s) => {
+      // Drop any old ids for this conv so stale entries don't leak.
+      const byId = { ...s.messagesById };
+      for (const oldId of s.messageOrder[convId] ?? []) delete byId[oldId];
+      for (const m of msgs) byId[m.id] = m;
+      return {
+        messagesById: byId,
+        messageOrder: { ...s.messageOrder, [convId]: msgs.map((m) => m.id) },
+      };
+    }),
 
   appendMessage: (convId, msg) =>
     set((s) => ({
-      messages: { ...s.messages, [convId]: [...(s.messages[convId] ?? []), msg] },
+      messagesById: { ...s.messagesById, [msg.id]: msg },
+      messageOrder: {
+        ...s.messageOrder,
+        [convId]: [...(s.messageOrder[convId] ?? []), msg.id],
+      },
     })),
 
-  updateMessage: (convId, msgId, patch) =>
+  updateMessage: (_convId, msgId, patch) =>
     set((s) => {
-      const list = s.messages[convId];
-      if (!list) return {};
-      const next = list.map((m) => (m.id === msgId ? { ...m, ...patch } : m));
-      return { messages: { ...s.messages, [convId]: next } };
+      const cur = s.messagesById[msgId];
+      if (!cur) return {};
+      return {
+        messagesById: { ...s.messagesById, [msgId]: { ...cur, ...patch } },
+      };
     }),
 
   truncateFrom: (convId, msgId) =>
     set((s) => {
-      const list = s.messages[convId];
-      if (!list) return {};
-      const idx = list.findIndex((m) => m.id === msgId);
+      const order = s.messageOrder[convId];
+      if (!order) return {};
+      const idx = order.indexOf(msgId);
       if (idx < 0) return {};
-      return { messages: { ...s.messages, [convId]: list.slice(0, idx) } };
+      const dropped = order.slice(idx);
+      const nextOrder = order.slice(0, idx);
+      const byId = { ...s.messagesById };
+      for (const d of dropped) delete byId[d];
+      return {
+        messagesById: byId,
+        messageOrder: { ...s.messageOrder, [convId]: nextOrder },
+      };
     }),
 
   setRunningTask: (t) => set({ runningTask: t }),
   setPaused: (p) => set({ paused: p }),
   setProviderInfo: (p) => set({ providerInfo: p }),
 }));
+
+
+/**
+ * Subscribe to the id list for a conversation. Returns a stable array
+ * reference as long as the id sequence hasn't changed — a streaming
+ * content update on an existing message will NOT re-render consumers
+ * of this hook.
+ */
+export function useMessageIds(convId: string | null): string[] {
+  return useConvStore(
+    useShallow((s) =>
+      convId ? s.messageOrder[convId] ?? EMPTY_IDS : EMPTY_IDS
+    )
+  );
+}
+
+/**
+ * Subscribe to one message. Re-renders only when that specific
+ * message's entry changes — other messages streaming, ids being
+ * added/removed etc. don't affect this hook's consumer.
+ */
+export function useMessageById(msgId: string): ChatMsg | undefined {
+  return useConvStore((s) => s.messagesById[msgId]);
+}
+
+const EMPTY_IDS: string[] = [];

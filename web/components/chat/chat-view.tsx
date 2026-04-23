@@ -8,7 +8,12 @@ import {
   Send, Square, Pause, Play, Loader2, Zap, ChevronDown, Activity,
   Copy, RefreshCw, GitBranch, Check,
 } from "lucide-react";
-import { useConvStore, type ChatMsg } from "@/lib/conv-store";
+import {
+  useConvStore,
+  useMessageById,
+  useMessageIds,
+  type ChatMsg,
+} from "@/lib/conv-store";
 import { useWS } from "@/lib/ws";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -22,14 +27,10 @@ interface ChatViewProps {
 const THINKING_OPTIONS = ["low", "medium", "high", "xhigh"] as const;
 type Effort = (typeof THINKING_OPTIONS)[number];
 
-const EMPTY_MSGS: ChatMsg[] = [];
-
 export function ChatView({ convId }: ChatViewProps) {
   const { send } = useWS();
   const wsStatus = useConvStore((s) => s.wsStatus);
-  const messages = useConvStore((s) =>
-    convId ? s.messages[convId] ?? EMPTY_MSGS : EMPTY_MSGS
-  );
+  const messageIds = useMessageIds(convId);
   const runningTask = useConvStore((s) => s.runningTask);
   const paused = useConvStore((s) => s.paused);
   const providerInfo = useConvStore((s) => s.providerInfo);
@@ -66,9 +67,14 @@ export function ChatView({ convId }: ChatViewProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [convId, wsStatus]);
 
+  // Scroll on id-list change (new message) and, separately, also on
+  // streaming content change of the last bubble — handled by the
+  // bubble itself emitting a custom event. For now, id list changes
+  // are the primary trigger; the auto-sizer fallback below covers the
+  // initial load / stream-start case.
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [messages]);
+  }, [messageIds]);
 
   // Auto-size textarea
   useEffect(() => {
@@ -143,7 +149,7 @@ export function ChatView({ convId }: ChatViewProps) {
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-3xl space-y-4 p-6">
-          {messages.length === 0 && (
+          {messageIds.length === 0 && (
             <div
               className="flex h-[60vh] items-center justify-center text-center text-[13px]"
               style={{ color: "var(--text-muted)" }}
@@ -161,8 +167,8 @@ export function ChatView({ convId }: ChatViewProps) {
               </div>
             </div>
           )}
-          {messages.map((m) => (
-            <MessageBubble key={m.id} msg={m} convId={currentConvId} />
+          {messageIds.map((id) => (
+            <MessageBubble key={id} msgId={id} convId={currentConvId} />
           ))}
         </div>
       </div>
@@ -413,7 +419,13 @@ function StatusDot({ status }: { status: "connecting" | "open" | "closed" }) {
   );
 }
 
-function MessageBubble({ msg, convId }: { msg: ChatMsg; convId: string | null }) {
+function MessageBubble({ msgId, convId }: { msgId: string; convId: string | null }) {
+  // Subscribe to this one message entry. When a streaming delta lands
+  // on a *different* msgId, React.memo + this selector keep us from
+  // re-rendering. Only the bubble owning the updated id re-renders.
+  const msg = useMessageById(msgId);
+  if (!msg) return null;
+
   const isUser = msg.role === "user";
   const isSystem = msg.role === "system";
   const isRuntime = msg.display === "runtime";
