@@ -122,14 +122,29 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     if (close) close();
 
     // New chat route (/chat, no conv_id): clear the persisted History
-    // graph so the user doesn't see a stale DAG from whatever
-    // conversation they were just on. /c/:id loads its own graph via
-    // `load_conversation` → conversations.js → renderHistoryGraph.
+    // graph + Execution Detail panel so the user doesn't see stale
+    // content from whatever conversation they were just on. /c/:id
+    // reloads both via `load_conversation` → conversations.js →
+    // renderHistoryGraph + subsequent node click → showDetail.
     if (pathname === "/chat") {
       const render = (window as unknown as {
         renderHistoryGraph?: (g: unknown[], h: string | null) => void;
       }).renderHistoryGraph;
       if (render) render([], null);
+
+      // Execution Detail panel lives in the right sidebar. Reset it to
+      // the empty-state placeholder the HTML template ships with. If
+      // the DOM hasn't mounted yet (first render), the template
+      // already has the empty state, so skipping is harmless.
+      const detailBody = document.getElementById("detailBody");
+      if (detailBody) {
+        detailBody.innerHTML =
+          '<div class="detail-empty">No execution selected.<br/>' +
+          "<span>Click a node in the conversation tree to inspect " +
+          "its context and output.</span></div>";
+      }
+      const detailTitle = document.getElementById("detailTitle");
+      if (detailTitle) detailTitle.textContent = "";
     }
   }, [pathname]);
 

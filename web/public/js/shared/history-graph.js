@@ -106,23 +106,30 @@
   }
 
   // Lane assignment — PyCharm-style.
-  //   1. Order leaves so the HEAD's branch leaf is first (lane 0).
+  //   1. Order leaves by a STABLE key (creation time, ascending) so a
+  //      branch keeps its lane regardless of which branch is currently
+  //      HEAD. Without this, clicking a different branch re-assigns
+  //      every branch to a new lane and the user loses their spatial
+  //      bearings — "I was just looking at the left branch, where did
+  //      it go?".
   //   2. For each leaf, walk parent chain and claim every un-claimed
-  //      ancestor into the leaf's lane. This gives the HEAD branch the
-  //      full spine from head-tip to root, and each fork inherits its
-  //      own lane from branch-point downward.
+  //      ancestor into the leaf's lane. Each fork inherits its own
+  //      lane from branch-point downward.
+  //
+  //   HEAD is identified at render time (thicker stroke on the node,
+  //   thicker edges along the HEAD spine), not by reserving lane 0.
   function _assignLanes(byId, roots, headId) {
     var leaves = [];
     Object.keys(byId).forEach(function (id) {
       if (!byId[id].children.length) leaves.push(byId[id]);
     });
 
-    // Sort leaves: HEAD's branch leaf first, then by recency (newest next).
-    var headLeafId = headId ? _tipFrom(byId, headId) : null;
+    // Stable sort: earliest leaf first → lane 0. Ties on created_at
+    // break on id so the ordering is deterministic across sessions.
     leaves.sort(function (a, b) {
-      if (a.id === headLeafId && b.id !== headLeafId) return -1;
-      if (b.id === headLeafId && a.id !== headLeafId) return 1;
-      return (b.created_at || 0) - (a.created_at || 0);
+      var dt = (a.created_at || 0) - (b.created_at || 0);
+      if (dt !== 0) return dt;
+      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
     });
 
     // Claim ancestors.
@@ -179,11 +186,15 @@
   }
 
   function _appendShape(parent, shape, color, isHead) {
-    var r = NODE_R;
+    // HEAD is marked purely by a thicker stroke + bright outline.
+    // An earlier version drew a separate halo circle behind the node,
+    // but when HEAD was a square or triangle the circular halo read
+    // as a second overlapping shape instead of "this one's active".
+    var r = isHead ? NODE_R + 0.6 : NODE_R;
     var common = {
       fill: color,
       stroke: isHead ? 'var(--text-bright, #fff)' : 'rgba(0,0,0,0.35)',
-      'stroke-width': isHead ? 1.6 : 1,
+      'stroke-width': isHead ? 2.6 : 1,
     };
     if (shape === 'circle') {
       parent.appendChild(_svg('circle', Object.assign({ r: r }, common)));
@@ -314,16 +325,9 @@
         transform: 'translate(' + p.x + ',' + p.y + ')',
         'data-msg-id': id,
       });
-      if (isHead) {
-        g.appendChild(_svg('circle', {
-          r: HEAD_HALO,
-          fill: 'none',
-          stroke: color,
-          'stroke-width': 1,
-          opacity: 0.5,
-          class: 'history-head-halo',
-        }));
-      }
+      // No halo ring — HEAD is marked by the thicker stroke applied
+      // inside _appendShape. A separate halo circle caused the "square
+      // inside a circle" overlap in the bottom-most HEAD node.
       _appendShape(g, _shapeFor(node), color, isHead);
       g._nodeData = node;
       nodeG.appendChild(g);
