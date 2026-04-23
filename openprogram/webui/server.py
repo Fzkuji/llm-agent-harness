@@ -1778,6 +1778,23 @@ def create_app():
         _loop = asyncio.get_running_loop()
 
     @app.on_event("startup")
+    async def _rehydrate_message_store():
+        """Pick up v2 messages.jsonl from disk on startup.
+
+        ``_restore_sessions`` already handles the v1 ``messages.json``
+        layout via persistence.py. This callback does the v2 side —
+        MessageStore scans its persist dir for per-conv ``messages.jsonl``
+        files and loads them back into memory so reconnecting clients
+        get the right state even if the server just restarted.
+        """
+        try:
+            loaded = _get_message_store().load_all()
+            if loaded:
+                _log(f"[v2-restore] rehydrated {len(loaded)} conversation(s) from JSONL")
+        except Exception as e:
+            _log(f"[v2-restore] failed: {e}")
+
+    @app.on_event("startup")
     async def _refresh_claude_registry_if_stale():
         """Background-refresh openprogram/providers/claude_models.json when it's
         more than 24h old. Non-blocking; failures are logged and swallowed so
