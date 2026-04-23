@@ -123,6 +123,19 @@ class CliBackendConfig:
     image_path_scope: ImagePathScope = "temp"
     """Whether staged image files live in temp or inside the workspace."""
 
+    # --- live-session policy ---
+
+    max_turns_per_process: Optional[int] = None
+    """In ``live_session`` mode, respawn the CLI after this many completed
+    turns. Clears accumulated CLI-side context and recovers from leaks.
+    ``None`` (default) keeps the same process forever."""
+
+    compact_command: Optional[str] = None
+    """Slash-command written to stdin in live mode to trigger the CLI's
+    own context compaction (``/compact`` for Claude Code). Read by
+    ``CliRunner.compact()``. ``None`` disables the call — the runner's
+    ``compact()`` becomes a no-op."""
+
     # --- reliability ---
 
     reliability: Optional[ReliabilityConfig] = None

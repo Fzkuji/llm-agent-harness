@@ -352,6 +352,161 @@ def test_live_session_close_tears_down(tmp_path: Path) -> None:
     assert proc.returncode is not None
 
 
+def test_live_session_respawns_after_turn_limit(tmp_path: Path) -> None:
+    cli = _write_live_echo_cli(tmp_path)
+    plugin = _make_plugin(
+        str(cli), live_session="claude-stdio", input="stdin",
+        max_turns_per_process=2,
+    )
+    runner = CliRunner(plugin=plugin, workspace_dir=str(tmp_path))
+
+    async def scenario():
+        await _collect(runner, "t1")
+        proc_a = runner._live_proc
+        await _collect(runner, "t2")
+        # After turn 2 the counter has tripped; next run should respawn.
+        await _collect(runner, "t3")
+        proc_b = runner._live_proc
+        await runner.close()
+        return proc_a, proc_b
+
+    proc_a, proc_b = asyncio.run(scenario())
+    assert proc_a is not None and proc_b is not None
+    assert proc_a is not proc_b  # respawned
+    assert runner._live_turn_count == 0
+
+
+def test_compact_writes_command_and_returns_false_when_disabled(tmp_path: Path) -> None:
+    # CLI that swallows stdin forever and echoes compact acknowledgement.
+    script = tmp_path / "compact_cli"
+    script.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, sys\n"
+        "for line in sys.stdin:\n"
+        "    if line.strip() == '/compact':\n"
+        "        print(json.dumps({'type':'compact_boundary','compact_metadata':{'post_tokens':42}}), flush=True)\n"
+        "        continue\n"
+        "    try:\n"
+        "        msg = json.loads(line)\n"
+        "    except Exception:\n"
+        "        continue\n"
+        "    text = msg.get('message', {}).get('content', [{}])[0].get('text', '')\n"
+        "    print(json.dumps({'type':'assistant','message':{'content':[{'type':'text','text':'echo:'+text}]}}), flush=True)\n"
+        "    print(json.dumps({'type':'result','result':'ok','usage':{'input_tokens':1,'output_tokens':1}}), flush=True)\n"
+    )
+    script.chmod(0o755)
+
+    # Case 1: compact_command set → write succeeds.
+    plugin_on = _make_plugin(
+        str(script), live_session="claude-stdio", input="stdin",
+        compact_command="/compact",
+    )
+    runner_on = CliRunner(plugin=plugin_on, workspace_dir=str(tmp_path))
+
+    async def with_compact():
+        await _collect(runner_on, "hello")
+        sent = await runner_on.compact()
+        # Next turn should see the compact_boundary event we emitted.
+        events = await _collect(runner_on, "after")
+        await runner_on.close()
+        return sent, events
+
+    sent, ev_after = asyncio.run(with_compact())
+    assert sent is True
+    # CompactBoundary with post_tokens=42 delivered before the next turn's text.
+    from openprogram.providers._shared.cli_backend import CompactBoundary
+    boundaries = [e for e in ev_after if isinstance(e, CompactBoundary)]
+    assert len(boundaries) == 1 and boundaries[0].post_tokens == 42
+
+    # Case 2: compact_command not set → no-op, returns False without error.
+    plugin_off = _make_plugin(
+        str(script), live_session="claude-stdio", input="stdin",
+    )
+    runner_off = CliRunner(plugin=plugin_off, workspace_dir=str(tmp_path))
+
+    async def without_compact():
+        await _collect(runner_off, "hi")
+        sent = await runner_off.compact()
+        await runner_off.close()
+        return sent
+
+    assert asyncio.run(without_compact()) is False
+
+
+def test_plugin_build_turn_envelope_hook_is_used(tmp_path: Path) -> None:
+    """When the plugin supplies ``build_turn_envelope``, runner uses it
+    verbatim instead of the default text envelope."""
+    script = tmp_path / "echo_raw"
+    # CLI that echoes each received stdin line back as an assistant text block.
+    script.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, sys\n"
+        "for line in sys.stdin:\n"
+        "    s = line.rstrip('\\n')\n"
+        "    print(json.dumps({'type':'assistant','message':{'content':[{'type':'text','text':s}]}}), flush=True)\n"
+        "    print(json.dumps({'type':'result','result':'ok','usage':{'input_tokens':1,'output_tokens':1}}), flush=True)\n"
+    )
+    script.chmod(0o755)
+
+    from openprogram.providers._shared.cli_backend import CliBackendConfig, CliBackendPlugin
+
+    def build_envelope(prompt: str, image_paths: tuple[str, ...]) -> str:
+        return json.dumps({"custom": prompt, "imgs": list(image_paths)}) + "\n"
+
+    plugin = CliBackendPlugin(
+        id="custom-env",
+        config=CliBackendConfig(
+            command=str(script), output="jsonl",
+            jsonl_dialect="claude-stream-json",
+            live_session="claude-stdio", input="stdin",
+        ),
+        build_turn_envelope=build_envelope,
+    )
+    runner = CliRunner(plugin=plugin, workspace_dir=str(tmp_path))
+
+    async def scenario():
+        events = await _collect(runner, "hi", image_paths=["a.png", "b.png"])
+        await runner.close()
+        return events
+
+    events = asyncio.run(scenario())
+    texts = [e.text for e in events if isinstance(e, TextDelta)]
+    assert texts == ['{"custom": "hi", "imgs": ["a.png", "b.png"]}']
+
+
+def test_plugin_build_thinking_args_hook_extends_argv(tmp_path: Path) -> None:
+    cli = _write_fake_cli(tmp_path, lines=[])
+    from openprogram.providers._shared.cli_backend import CliBackendConfig, CliBackendPlugin
+
+    def build_thinking(level: str) -> tuple[str, ...]:
+        return ("--effort", level.upper())
+
+    plugin = CliBackendPlugin(
+        id="thinker",
+        config=CliBackendConfig(str(cli), output="jsonl",
+                                jsonl_dialect="claude-stream-json"),
+        build_thinking_args=build_thinking,
+    )
+    runner = CliRunner(plugin=plugin, workspace_dir=str(tmp_path))
+
+    argv_off = runner._build_argv(prompt="x", model_id="m",
+                                  system_prompt=None, image_paths=(),
+                                  resume=False, thinking_level="off")
+    argv_high = runner._build_argv(prompt="x", model_id="m",
+                                   system_prompt=None, image_paths=(),
+                                   resume=False, thinking_level="high")
+    argv_none = runner._build_argv(prompt="x", model_id="m",
+                                   system_prompt=None, image_paths=(),
+                                   resume=False)
+
+    # "off" → hook not consulted; no flag.
+    assert "--effort" not in argv_off
+    # None → hook not consulted; no flag.
+    assert "--effort" not in argv_none
+    # "high" → hook produces ("--effort", "HIGH").
+    assert "--effort" in argv_high and "HIGH" in argv_high
+
+
 def test_stdin_mode_feeds_prompt(tmp_path: Path) -> None:
     # Fake CLI that reads stdin and echoes it wrapped in a text block.
     script = tmp_path / "echo_stdin"

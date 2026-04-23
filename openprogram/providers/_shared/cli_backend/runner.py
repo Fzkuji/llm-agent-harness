@@ -6,12 +6,14 @@ Progress:
 - 1b: minimal one-shot subprocess path, argv/env builder, parser dispatch
 - 1c: session-id capture + disk persistence + resume
 - 1d: watchdog (no-output stall → kill + recoverable Error)
+- 1e: live-session mode (``live_session="claude-stdio"``)
+- 1f-α: live-session policy (turn-count respawn, ``compact()``), plugin
+  hooks for envelope + thinking-level argv
 
 Still TODO:
 
-- Live-session (``live_session="claude-stdio"``) long-running mode (1e)
-- ``text_transforms`` input/output rewrites (part of 1f)
-- ``ClaudeCodeRuntime`` migration (1f)
+- ``text_transforms`` input/output rewrites
+- Provider-side ``CliBackendPlugin`` for Anthropic (1f-β)
 """
 
 from __future__ import annotations
@@ -62,6 +64,7 @@ class CliRunner:
         self._config: CliBackendConfig = plugin.config
         self._live_proc: Optional[asyncio.subprocess.Process] = None
         self._live_prepared: Optional[PreparedExecution] = None
+        self._live_turn_count: int = 0
         self._auth_epoch: int = 0
         # Session id persisted across ``run()`` calls. Stored on disk so
         # restarts resume into the CLI's own session instead of orphaning it.
@@ -82,6 +85,7 @@ class CliRunner:
         image_paths: Iterable[str] = (),
         resume: bool = False,
         auth_profile_id: Optional[str] = None,
+        thinking_level: Optional[str] = None,
     ) -> AsyncIterator[CliEvent]:
         """Run one turn against the CLI and yield events.
 
@@ -102,6 +106,7 @@ class CliRunner:
                 image_paths=tuple(image_paths),
                 resume=resume,
                 auth_profile_id=auth_profile_id,
+                thinking_level=thinking_level,
             ):
                 yield ev
             return
@@ -113,6 +118,7 @@ class CliRunner:
             image_paths=tuple(image_paths),
             resume=resume,
             auth_profile_id=auth_profile_id,
+            thinking_level=thinking_level,
         ):
             yield ev
 
@@ -125,6 +131,7 @@ class CliRunner:
         image_paths: tuple[str, ...],
         resume: bool,
         auth_profile_id: Optional[str],
+        thinking_level: Optional[str],
     ) -> AsyncIterator[CliEvent]:
         cfg = self._config
         call_start = time.monotonic()
@@ -137,6 +144,7 @@ class CliRunner:
             system_prompt=system_prompt,
             image_paths=image_paths,
             resume=resume,
+            thinking_level=thinking_level,
         )
         env = self._build_env(prepared)
 
@@ -233,6 +241,7 @@ class CliRunner:
         image_paths: tuple[str, ...],
         resume: bool,
         auth_profile_id: Optional[str],
+        thinking_level: Optional[str],
     ) -> AsyncIterator[CliEvent]:
         """Persistent-process mode. Reuses ``self._live_proc`` across calls.
 
@@ -240,9 +249,19 @@ class CliRunner:
         message on stdin and reads events until a ``result`` message is
         seen. ``Done`` is synthesized at that boundary — the process
         stays alive waiting for the next prompt.
+
+        Respawns when ``cfg.max_turns_per_process`` is reached, so
+        long-running sessions can't accumulate unbounded CLI-side state.
         """
         cfg = self._config
         call_start = time.monotonic()
+
+        # Respawn when turn limit hit (before reading ``_live_proc`` below).
+        if (
+            cfg.max_turns_per_process is not None
+            and self._live_turn_count >= cfg.max_turns_per_process
+        ):
+            await self._teardown_live()
 
         # Spawn on first use (or after close / auth bump).
         if self._live_proc is None or self._live_proc.returncode is not None:
@@ -255,6 +274,7 @@ class CliRunner:
                 system_prompt=system_prompt,
                 image_paths=image_paths,
                 resume=resume,
+                thinking_level=thinking_level,
             )
             env = self._build_env(prepared)
             try:
@@ -280,12 +300,13 @@ class CliRunner:
                 await self._run_cleanup(prepared)
                 return
             self._live_prepared = prepared
+            self._live_turn_count = 0
 
         proc = self._live_proc
 
         # Write the turn's prompt as a stream-json ``user`` envelope.
         if proc.stdin is not None:
-            envelope = self._build_live_prompt_envelope(prompt)
+            envelope = self._build_live_prompt_envelope(prompt, image_paths)
             try:
                 proc.stdin.write(envelope.encode("utf-8"))
                 await proc.stdin.drain()
@@ -335,17 +356,27 @@ class CliRunner:
             )
             return
 
+        # Turn completed cleanly — count it and yield Done.
+        self._live_turn_count += 1
         duration_ms = int((time.monotonic() - call_start) * 1000)
         yield Done(duration_ms=duration_ms, num_turns=1)
 
-    @staticmethod
-    def _build_live_prompt_envelope(prompt: str) -> str:
+    def _build_live_prompt_envelope(
+        self, prompt: str, image_paths: tuple[str, ...]
+    ) -> str:
         """stream-json envelope for a user prompt in live-session mode.
 
-        Matches Claude Code's ``--input-format stream-json`` expectation —
-        one JSON line per turn. Only plain text for now; image support
-        lands with 1f when ClaudeCodeRuntime migrates.
+        Plugin owns the shape because content-block layouts differ across
+        CLIs (Claude inlines base64 images, Gemini CLI doesn't support
+        images via stdin at all). Falls back to a text-only envelope when
+        the plugin provides no builder.
+
+        Returned string is written verbatim to stdin, so the builder is
+        responsible for the trailing newline.
         """
+        hook = self.plugin.build_turn_envelope
+        if hook is not None:
+            return hook(prompt, image_paths)
         return json.dumps({
             "type": "user",
             "message": {
@@ -449,6 +480,7 @@ class CliRunner:
             except Exception:  # noqa: BLE001
                 pass
         self._live_proc = None
+        self._live_turn_count = 0
         prepared = getattr(self, "_live_prepared", None)
         self._live_prepared = None
         if prepared is not None:
@@ -457,6 +489,37 @@ class CliRunner:
     async def close(self) -> None:
         """Tear down any long-running live-session process."""
         await self._teardown_live()
+
+    async def compact(self) -> bool:
+        """Ask the live-session CLI to compact its own context.
+
+        Writes ``cfg.compact_command`` (e.g. ``"/compact"``) as a
+        plain-text line to the live process's stdin. Returns True if
+        sent, False if disabled or no live process is running.
+
+        Compaction itself happens inside the CLI — the runner just
+        delivers the trigger. The next ``run()`` turn should see a
+        ``CompactBoundary`` event in the stream.
+        """
+        cfg = self._config
+        proc = self._live_proc
+        if (
+            cfg.compact_command is None
+            or proc is None
+            or proc.returncode is not None
+            or proc.stdin is None
+        ):
+            return False
+        line = cfg.compact_command
+        if not line.endswith("\n"):
+            line += "\n"
+        try:
+            proc.stdin.write(line.encode("utf-8"))
+            await proc.stdin.drain()
+        except (BrokenPipeError, ConnectionResetError):
+            await self._teardown_live()
+            return False
+        return True
 
     def bump_auth_epoch(self) -> None:
         """Invalidate current live process + persisted session id.
@@ -475,6 +538,7 @@ class CliRunner:
             self._kill_tree(proc)
         self._live_proc = None
         self._live_prepared = None
+        self._live_turn_count = 0
 
     # --- session persistence -----------------------------------------
 
@@ -593,6 +657,7 @@ class CliRunner:
         system_prompt: Optional[str],
         image_paths: tuple[str, ...],
         resume: bool,
+        thinking_level: Optional[str] = None,
     ) -> list[str]:
         cfg = self._config
         argv: list[str] = [cfg.command]
@@ -629,6 +694,18 @@ class CliRunner:
                 self._session_id = sid
                 self._save_session_id(sid)
             argv.extend([cfg.session_arg, sid])
+
+        # Thinking level. Plugin decides how to encode it (flag name, value
+        # format, or a JSON blob like Claude's ``--settings``). Hook is
+        # consulted only when a non-"off" level was explicitly requested.
+        if (
+            thinking_level
+            and thinking_level != "off"
+            and self.plugin.build_thinking_args is not None
+        ):
+            thinking_args = self.plugin.build_thinking_args(thinking_level)
+            if thinking_args:
+                argv.extend(thinking_args)
 
         # System prompt (free-form text flag — ``system_prompt_arg``).
         if system_prompt and cfg.system_prompt_arg:

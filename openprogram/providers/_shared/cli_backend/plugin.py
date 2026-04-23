@@ -109,6 +109,23 @@ TransformSystemPromptHook = Callable[[TransformSystemPromptContext], Optional[st
 NormalizeConfigHook = Callable[[CliBackendConfig], CliBackendConfig]
 
 
+BuildTurnEnvelopeHook = Callable[[str, tuple[str, ...]], str]
+"""Live-session mode: build the JSON-per-line written to the CLI's stdin.
+
+Signature: ``(prompt, image_paths) -> str``. Returned string must end
+with ``\\n``. Provider-specific because each dialect wraps content
+blocks differently (Claude inlines base64 images; Gemini-CLI doesn't
+accept images via stdin at all). If the plugin returns ``None`` or
+leaves this hook unset, the runner falls back to a text-only envelope."""
+
+
+BuildThinkingArgsHook = Callable[[str], tuple[str, ...]]
+"""Map a reasoning level (``"off" | "low" | "medium" | "high" | "xhigh"``)
+to argv flags. Each provider composes flags differently (Claude wraps
+it into a ``--settings`` JSON blob; Gemini uses ``--thinking-budget``).
+Return ``()`` to emit no flags."""
+
+
 @dataclass(frozen=True)
 class CliBackendPlugin:
     """Plugin-owned defaults for one CLI backend.
@@ -151,8 +168,16 @@ class CliBackendPlugin:
     prepare_execution: Optional[PrepareExecutionHook] = None
     """Async/sync hook to stage a per-run auth/config bridge, if needed."""
 
+    build_turn_envelope: Optional[BuildTurnEnvelopeHook] = None
+    """Live-session envelope builder. See ``BuildTurnEnvelopeHook``."""
+
+    build_thinking_args: Optional[BuildThinkingArgsHook] = None
+    """Reasoning-level → argv flags. See ``BuildThinkingArgsHook``."""
+
 
 __all__ = [
+    "BuildTurnEnvelopeHook",
+    "BuildThinkingArgsHook",
     "CliBackendAuthEpochMode",
     "CliBackendPlugin",
     "CliBundleMcpMode",
