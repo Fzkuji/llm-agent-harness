@@ -1,14 +1,28 @@
 """
-agentic CLI — command-line interface for Agentic Programming.
+OpenProgram CLI.
 
-Usage:
-    openprogram create "description" --name my_func
-    openprogram edit my_func --instruction "change X to Y"
-    openprogram run my_func --arg key=value
-    openprogram list
-    openprogram create-skill my_func
-    agentic providers                     # show available providers
-    openprogram create "desc" --provider anthropic --model claude-sonnet-4-6
+Run `openprogram` with no arguments to get an interactive mode chooser
+(CLI chat or Web UI). Subcommands manage programs, skills, sessions,
+providers, and config.
+
+Examples:
+    openprogram                           # interactive chooser
+    openprogram --web                     # launch web UI
+    openprogram --cli                     # launch terminal chat
+    openprogram -p "prompt"               # one-shot prompt
+
+    openprogram programs list
+    openprogram programs new my_func "what it does"
+    openprogram programs run my_func --arg key=value
+
+    openprogram skills list
+    openprogram skills install --target claude
+
+    openprogram sessions list
+    openprogram sessions resume <id> "answer"
+
+    openprogram providers list
+    openprogram providers login anthropic
 """
 
 import argparse
@@ -34,161 +48,174 @@ def _add_provider_args(parser):
 def main():
     parser = argparse.ArgumentParser(
         prog="openprogram",
-        description="Agentic Programming CLI — create, edit, and run LLM-powered functions.",
+        description="OpenProgram — build, run, and chat with agentic programs.",
     )
-    sub = parser.add_subparsers(dest="command", help="Command to run")
+    # Top-level mode flags for a bare `openprogram` launch. If any of
+    # these are set, we skip the interactive chooser and go straight in.
+    parser.add_argument("--web", action="store_true",
+        help="Launch the Web UI (browser)")
+    parser.add_argument("--cli", action="store_true",
+        help="Launch the terminal chat")
+    parser.add_argument("--print", dest="print_prompt", metavar="PROMPT",
+        help="One-shot prompt; send, print reply, exit")
+    parser.add_argument("--port", type=int, default=8765,
+        help="Port for --web / `web` (default: 8765)")
+    parser.add_argument("--no-browser", action="store_true",
+        help="Don't auto-open browser with --web")
 
-    # create
-    p_create = sub.add_parser("create", help="Create a new function from description")
-    p_create.add_argument("description", help="What the function should do")
-    p_create.add_argument("--name", "-n", required=True, help="Function name")
-    p_create.add_argument("--as-skill", action="store_true", help="Also create a SKILL.md")
-    _add_provider_args(p_create)
+    sub = parser.add_subparsers(dest="command", help="Subcommand")
 
-    # edit
-    p_edit = sub.add_parser("edit", help="Edit an existing function")
-    p_edit.add_argument("name", help="Function name to edit")
-    p_edit.add_argument("--instruction", "-i", default=None, help="What to change")
-    _add_provider_args(p_edit)
-
-    # run
-    p_run = sub.add_parser("run", help="Run an existing function")
-    p_run.add_argument("name", help="Function name to run")
-    p_run.add_argument("--arg", "-a", action="append", default=[], help="Arguments as key=value")
-    _add_provider_args(p_run)
-
-    # list
-    sub.add_parser("list", help="List all saved functions")
-
-    # create-app
-    p_app = sub.add_parser("create-app", help="Create a complete runnable app (runtime + functions + main)")
-    p_app.add_argument("description", help="What the app should do")
-    p_app.add_argument("--name", "-n", default="app", help="App name (default: app)")
-    _add_provider_args(p_app)
-
-    # create-skill
-    p_skill = sub.add_parser("create-skill", help="Create a SKILL.md for a function")
-    p_skill.add_argument("name", help="Function name")
-    _add_provider_args(p_skill)
-
-    # deep-work
-    p_deep = sub.add_parser("deep-work", help="Run autonomous agent on a complex task with quality evaluation")
-    p_deep.add_argument("task", help="The task to accomplish")
-    p_deep.add_argument("--level", "-l", default="bachelor",
-                        choices=["high_school", "bachelor", "master", "phd", "professor"],
-                        help="Quality level (default: bachelor)")
-    p_deep.add_argument("--max-steps", type=int, default=100, help="Max total steps (default: 100)")
-    p_deep.add_argument("--max-revisions", type=int, default=5, help="Max evaluation cycles (default: 5)")
-    p_deep.add_argument("--no-interactive", action="store_true",
-                        help="Skip clarification questions, start immediately")
-    _add_provider_args(p_deep)
-
-    # resume
-    p_resume = sub.add_parser("resume", help="Resume a waiting follow-up session with an answer")
-    p_resume.add_argument("session_id", help="Session ID from a previous follow-up")
-    p_resume.add_argument("answer", help="Answer to the follow-up question")
-
-    # sessions
-    sub.add_parser("sessions", help="List active follow-up sessions")
-
-    # install-skills
-    p_skills = sub.add_parser("install-skills", help="Install skills for Claude Code / Gemini CLI")
-    p_skills.add_argument("--target", "-t", default=None,
-                          choices=["claude", "gemini"],
-                          help="Target CLI tool (default: auto-detect)")
-
-    # skills — introspect the skill registry the runtime will load
-    p_skills_ns = sub.add_parser(
-        "skills",
-        help="Inspect discovered SKILL.md entries (list, doctor)",
+    # ---- programs ---------------------------------------------------------
+    p_programs = sub.add_parser(
+        "programs",
+        help="Manage agentic programs (new, edit, run, list, app)",
     )
-    skills_sub = p_skills_ns.add_subparsers(dest="skills_verb", metavar="verb")
-    p_skills_list = skills_sub.add_parser("list", help="List discovered skills with their descriptions")
-    p_skills_list.add_argument("--dir", "-d", action="append", default=None,
-                               help="Override search dir (repeatable). Default: ~/.openprogram/skills + repo skills/")
-    p_skills_list.add_argument("--json", action="store_true", help="Emit JSON for scripting")
-    p_skills_doctor = skills_sub.add_parser("doctor", help="Scan skill dirs and report problems")
-    p_skills_doctor.add_argument("--dir", "-d", action="append", default=None,
-                                 help="Override search dir (repeatable)")
+    programs_sub = p_programs.add_subparsers(dest="programs_verb", metavar="verb")
+    p_p_new = programs_sub.add_parser("new", help="Create a new program from description")
+    p_p_new.add_argument("name", help="Program name")
+    p_p_new.add_argument("description", help="What the program should do")
+    p_p_new.add_argument("--as-skill", action="store_true",
+        help="Also create a SKILL.md for the program")
+    _add_provider_args(p_p_new)
+    p_p_edit = programs_sub.add_parser("edit", help="Edit an existing program")
+    p_p_edit.add_argument("name", help="Program name to edit")
+    p_p_edit.add_argument("--instruction", "-i", default=None, help="What to change")
+    _add_provider_args(p_p_edit)
+    p_p_run = programs_sub.add_parser("run", help="Run a program")
+    p_p_run.add_argument("name", help="Program name to run")
+    p_p_run.add_argument("--arg", "-a", action="append", default=[],
+        help="Program arg as key=value (repeatable)")
+    _add_provider_args(p_p_run)
+    programs_sub.add_parser("list", help="List all saved programs")
+    p_p_app = programs_sub.add_parser("app",
+        help="Export a complete runnable app (runtime + functions + main)")
+    p_p_app.add_argument("description", help="What the app should do")
+    p_p_app.add_argument("--name", "-n", default="app", help="App name (default: app)")
+    _add_provider_args(p_p_app)
 
-    # cron-worker
-    p_cron = sub.add_parser(
-        "cron-worker",
-        help="Foreground loop that fires scheduled entries from the `cron` tool",
-    )
-    p_cron.add_argument("--once", action="store_true",
-        help="Evaluate one tick and exit (for testing / external schedulers)")
-    p_cron.add_argument("--list", action="store_true",
-        help="Show each entry and whether it matches the current minute")
+    # ---- skills -----------------------------------------------------------
+    p_skills = sub.add_parser("skills", help="Manage SKILL.md registry")
+    skills_sub = p_skills.add_subparsers(dest="skills_verb", metavar="verb")
+    p_sk_list = skills_sub.add_parser("list", help="List discovered skills")
+    p_sk_list.add_argument("--dir", "-d", action="append", default=None,
+        help="Override search dir (repeatable). Default: ~/.openprogram/skills + repo skills/")
+    p_sk_list.add_argument("--json", action="store_true", help="Emit JSON")
+    p_sk_doc = skills_sub.add_parser("doctor", help="Scan skill dirs for problems")
+    p_sk_doc.add_argument("--dir", "-d", action="append", default=None)
+    p_sk_inst = skills_sub.add_parser("install",
+        help="Install skills into Claude Code / Gemini CLI")
+    p_sk_inst.add_argument("--target", "-t", default=None,
+        choices=["claude", "gemini"],
+        help="Target CLI (default: auto-detect)")
+    p_sk_new = skills_sub.add_parser("new",
+        help="Create a SKILL.md for an existing program")
+    p_sk_new.add_argument("name", help="Program name")
+    _add_provider_args(p_sk_new)
 
-    # web UI
-    p_web = sub.add_parser("web", help="Start the web UI")
+    # ---- sessions ---------------------------------------------------------
+    p_sessions = sub.add_parser("sessions", help="Manage ask-user follow-up sessions")
+    sessions_sub = p_sessions.add_subparsers(dest="sessions_verb", metavar="verb")
+    sessions_sub.add_parser("list", help="List active sessions")
+    p_ss_res = sessions_sub.add_parser("resume", help="Answer a waiting session")
+    p_ss_res.add_argument("session_id")
+    p_ss_res.add_argument("answer")
+
+    # ---- web --------------------------------------------------------------
+    p_web = sub.add_parser("web", help="Start the Web UI")
     p_web.add_argument("--port", type=int, default=8765, help="Port (default: 8765)")
     p_web.add_argument("--no-browser", action="store_true", help="Don't open browser")
-    # Back-compat alias: accept old `agentic visualize` but point to same handler
-    p_viz = sub.add_parser("visualize", help="(alias of 'web')")
-    p_viz.add_argument("--port", type=int, default=8765, help="Port (default: 8765)")
-    p_viz.add_argument("--no-browser", action="store_true", help="Don't open browser")
 
-    # providers — single plural noun namespace for every LLM-provider
-    # management verb. Per docs/design/cli-naming.md the shape is
-    # `openprogram providers <verb>` or `openprogram providers profiles
-    # <verb>` (exactly one verb per command; nested `auth` layer is
-    # intentionally absent).
-    p_providers = sub.add_parser(
-        "providers",
-        help="Manage LLM providers (login, list, status, ...)",
-    )
+    # ---- cron-worker ------------------------------------------------------
+    p_cron = sub.add_parser("cron-worker",
+        help="Foreground loop that fires scheduled entries from the `cron` tool")
+    p_cron.add_argument("--once", action="store_true",
+        help="Evaluate one tick and exit")
+    p_cron.add_argument("--list", action="store_true",
+        help="Show each entry with match status")
+
+    # ---- providers --------------------------------------------------------
+    p_providers = sub.add_parser("providers",
+        help="Manage LLM providers (login, list, status, ...)")
     providers_sub = p_providers.add_subparsers(dest="providers_cmd", metavar="verb")
     from openprogram.auth.cli import build_parser as _build_provider_verbs
     _build_provider_verbs(providers_sub)
 
-    # config — namespaced configuration commands (provider, ...)
-    p_config = sub.add_parser("config", help="Configure OpenProgram (providers, models, ...)")
+    # ---- config -----------------------------------------------------------
+    p_config = sub.add_parser("config",
+        help="Configure OpenProgram (providers, models, ...)")
     p_config_sub = p_config.add_subparsers(dest="config_target", metavar="target")
     p_cfg_provider = p_config_sub.add_parser("provider",
-        help="Interactive wizard to set up a provider (CLI login, API key, model)")
+        help="Interactive wizard to set up a provider")
     p_cfg_provider.add_argument("name", nargs="?", default=None,
-        help="Provider id (e.g. openai-codex). If omitted, you pick from a menu.")
+        help="Provider id. If omitted, pick from a menu.")
 
     args = parser.parse_args()
 
+    # -------- No subcommand: mode flags or interactive chooser --------
     if args.command is None:
-        parser.print_help()
+        if args.print_prompt:
+            _cmd_cli_chat(oneshot=args.print_prompt)
+            return
+        if args.web:
+            _cmd_web(args.port, not args.no_browser)
+            return
+        if args.cli:
+            _cmd_cli_chat(oneshot=None)
+            return
+        _launch_mode_chooser(args.port, not args.no_browser)
         return
 
-    # Lazy imports — only load when needed
-    if args.command == "resume":
-        _cmd_resume(args.session_id, args.answer)
-        return
-    elif args.command == "sessions":
-        _cmd_sessions()
-        return
-    elif args.command == "install-skills":
-        _cmd_install_skills(args.target)
-        return
-    elif args.command == "skills":
-        verb = getattr(args, "skills_verb", None) or "list"
-        dirs = getattr(args, "dir", None)
+    # -------- Subcommand dispatch --------
+    if args.command == "programs":
+        verb = getattr(args, "programs_verb", None)
         if verb == "list":
-            sys.exit(_cmd_skills_list(dirs, getattr(args, "json", False)))
-        elif verb == "doctor":
-            sys.exit(_cmd_skills_doctor(dirs))
+            _cmd_list()
+        elif verb == "new":
+            _cmd_create(args.description, args.name, args.as_skill,
+                        args.provider, args.model)
+        elif verb == "edit":
+            _cmd_edit(args.name, args.instruction, args.provider, args.model)
+        elif verb == "run":
+            _cmd_run(args.name, args.arg, args.provider, args.model)
+        elif verb == "app":
+            _cmd_create_app(args.description, args.name, args.provider, args.model)
         else:
-            p_skills_ns.print_help()
-            return
-    elif args.command in ("web", "visualize"):
+            p_programs.print_help()
+        return
+
+    if args.command == "skills":
+        verb = getattr(args, "skills_verb", None)
+        if verb == "list":
+            sys.exit(_cmd_skills_list(args.dir, args.json))
+        elif verb == "doctor":
+            sys.exit(_cmd_skills_doctor(args.dir))
+        elif verb == "install":
+            _cmd_install_skills(args.target)
+        elif verb == "new":
+            _cmd_create_skill(args.name, args.provider, args.model)
+        else:
+            p_skills.print_help()
+        return
+
+    if args.command == "sessions":
+        verb = getattr(args, "sessions_verb", None)
+        if verb == "list":
+            _cmd_sessions()
+        elif verb == "resume":
+            _cmd_resume(args.session_id, args.answer)
+        else:
+            p_sessions.print_help()
+        return
+
+    if args.command == "web":
         _cmd_web(args.port, not args.no_browser)
         return
-    elif args.command == "cron-worker":
+
+    if args.command == "cron-worker":
         _cmd_cron_worker(args.once, args.list)
         return
-    elif args.command == "list":
-        _cmd_list()
-    elif args.command == "providers":
-        # Bare `providers` is equivalent to `providers list` with an
-        # extra footer pointing at the other verbs — `doctor`, `setup`,
-        # `aliases`, `profiles`. Any explicit verb just dispatches.
+
+    if args.command == "providers":
         from openprogram.auth.cli import dispatch as _providers_dispatch
         if getattr(args, "providers_cmd", None) is None:
             args.providers_cmd = "list"
@@ -204,28 +231,59 @@ def main():
             )
             sys.exit(rc)
         sys.exit(_providers_dispatch(args))
-    elif args.command == "config":
+
+    if args.command == "config":
         if args.config_target == "provider":
             _cmd_configure(args.name)
         else:
             p_config.print_help()
-    elif args.command == "create":
-        _cmd_create(args.description, args.name, args.as_skill, args.provider, args.model)
-    elif args.command == "create-app":
-        _cmd_create_app(args.description, args.name, args.provider, args.model)
-    elif args.command == "edit":
-        _cmd_edit(args.name, args.instruction, args.provider, args.model)
-    elif args.command == "run":
-        _cmd_run(args.name, args.arg, args.provider, args.model)
-    elif args.command == "create-skill":
-        _cmd_create_skill(args.name, args.provider, args.model)
-    elif args.command == "deep-work":
-        _cmd_deep_work(
-            args.task, args.level,
-            args.provider, args.model,
-            args.max_steps, args.max_revisions,
-            not args.no_interactive,
-        )
+        return
+
+
+def _launch_mode_chooser(port: int, open_browser: bool) -> None:
+    """Interactive mode picker when bare ``openprogram`` is invoked.
+
+    Two options for now: the terminal chat (stub, TBD) and the web UI.
+    Kept deliberately minimal — no ncurses / prompt_toolkit dependency,
+    just plain stdin so the entry point stays dep-free.
+    """
+    print()
+    print("Welcome to OpenProgram")
+    print("-" * 30)
+    print("  1) CLI chat   in-terminal conversation")
+    print(f"  2) Web UI     browser at http://localhost:{port}")
+    print("  q) Quit")
+    print()
+    try:
+        choice = input("> ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return
+    if choice in ("1", "c", "cli"):
+        _cmd_cli_chat(oneshot=None)
+    elif choice in ("2", "w", "web"):
+        _cmd_web(port, open_browser)
+    elif choice in ("", "q", "quit", "exit"):
+        return
+    else:
+        print(f"Unknown choice: {choice!r}")
+        sys.exit(1)
+
+
+def _cmd_cli_chat(oneshot: str | None = None) -> None:
+    """Terminal chat entry point.
+
+    Stub pending the TUI implementation. For now we tell the user to
+    use the web UI. The argparse shape + chooser wiring is in place so
+    the TUI can land as a single drop-in later.
+    """
+    if oneshot:
+        print("CLI one-shot mode not yet implemented.")
+        print(f"Would have sent: {oneshot!r}")
+        print("Workaround: `openprogram --web` or `openprogram web`.")
+        return
+    print("CLI chat mode not yet implemented.")
+    print("Workaround: `openprogram --web` or `openprogram web`.")
 
 
 def _cmd_resume(session_id, answer):
