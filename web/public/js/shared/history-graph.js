@@ -187,30 +187,52 @@
     return 'circle';
   }
 
-  function _appendShape(parent, shape, color, isCurrent) {
-    // The "current view" node (where the chat is scrolled to) gets a
-    // thick outline + visible size bump. Pure white on light lane
-    // colours (amber, lime, cyan) was hard to pick out; a thicker
-    // stroke and a clearly larger shape reads much more obviously.
+  // Compute shape size attrs for a given "isCurrent" state. Kept as a
+  // separate function so _setCurrentView can swap sizes in-place
+  // without touching fill/stroke.
+  function _applyShapeSize(shape, isCurrent) {
     var r = isCurrent ? NODE_R + 1.8 : NODE_R;
-    var common = {
-      fill: color,
-      stroke: isCurrent ? '#ffffff' : 'rgba(0,0,0,0.35)',
-      'stroke-width': isCurrent ? 3.2 : 1,
-    };
-    if (shape === 'circle') {
-      parent.appendChild(_svg('circle', Object.assign({ r: r }, common)));
-    } else if (shape === 'triangle') {
-      // Equilateral-ish triangle pointing up. Use slightly larger bbox
-      // so visual weight matches the circle.
+    if (shape.tagName === 'circle') {
+      shape.setAttribute('r', String(r));
+    } else if (shape.tagName === 'polygon') {
       var t = r + 1.2;
-      var pts = '0,' + (-t) + ' ' + t + ',' + (t * 0.85) + ' ' + (-t) + ',' + (t * 0.85);
-      parent.appendChild(_svg('polygon', Object.assign({ points: pts }, common)));
-    } else if (shape === 'square') {
+      shape.setAttribute(
+        'points',
+        '0,' + (-t) + ' ' + t + ',' + (t * 0.85) + ' ' + (-t) + ',' + (t * 0.85)
+      );
+    } else if (shape.tagName === 'rect') {
       var s = r - 0.2;
-      parent.appendChild(_svg('rect', Object.assign({
-        x: -s, y: -s, width: s * 2, height: s * 2, rx: 0.8, ry: 0.8,
-      }, common)));
+      shape.setAttribute('x', String(-s));
+      shape.setAttribute('y', String(-s));
+      shape.setAttribute('width', String(s * 2));
+      shape.setAttribute('height', String(s * 2));
+    }
+  }
+
+  function _appendShape(parent, shape, color, isCurrent) {
+    // Solid coloured shapes — no outline. The "current view" marker
+    // is a separate white dot (appended after all nodes) that slides
+    // between nodes via a CSS transform transition. Current node is
+    // slightly bigger so the white dot sits inside it, reading as a
+    // hollow centre on top of the coloured ring.
+    var common = { fill: color };
+    var el;
+    if (shape === 'circle') {
+      el = _svg('circle', Object.assign({ r: NODE_R }, common));
+    } else if (shape === 'triangle') {
+      var t0 = NODE_R + 1.2;
+      el = _svg('polygon', Object.assign({
+        points: '0,' + (-t0) + ' ' + t0 + ',' + (t0 * 0.85) + ' ' + (-t0) + ',' + (t0 * 0.85),
+      }, common));
+    } else if (shape === 'square') {
+      var s0 = NODE_R - 0.2;
+      el = _svg('rect', Object.assign({
+        x: -s0, y: -s0, width: s0 * 2, height: s0 * 2, rx: 0.8, ry: 0.8,
+      }, common));
+    }
+    if (el) {
+      if (isCurrent) _applyShapeSize(el, true);
+      parent.appendChild(el);
     }
   }
 
@@ -340,6 +362,25 @@
       nodeG.appendChild(g);
     });
 
+    // Floating white cursor — a single small circle that rides on top
+    // of the current node. On _setCurrentView it updates its transform
+    // and the CSS transition slides it to the new position. Painted
+    // last so it stacks above the coloured shapes.
+    if (_currentViewId && tree.byId[_currentViewId]) {
+      var cp = pos(tree.byId[_currentViewId]);
+      var cursor = _svg('circle', {
+        class: 'history-cursor',
+        r: String(NODE_R * 0.55),
+        fill: '#ffffff',
+        cx: '0',
+        cy: '0',
+        transform: 'translate(' + cp.x + ',' + cp.y + ')',
+        style: 'transition: transform 220ms cubic-bezier(0.4,0,0.2,1); '
+          + 'pointer-events: none;',
+      });
+      nodeG.appendChild(cursor);
+    }
+
     body.replaceChildren(svg);
     _tooltip = null;
 
@@ -361,27 +402,39 @@
     }
   }
 
-  // Update the white-outline cursor without re-rendering the whole SVG.
-  // Cheap DOM tweak so this can run on every chat-scroll event.
+  // Slide the floating white cursor to the new node + swap sizes on
+  // the old / new shapes. Runs on chat-scroll ticks + click.
   function _setCurrentView(msgId) {
     if (!msgId || msgId === _currentViewId) return;
-    _currentViewId = msgId;
     var panel = document.getElementById('historyPanel');
     if (!panel) return;
     var body = panel.querySelector('.history-body');
     if (!body) return;
+    var oldId = _currentViewId;
+    _currentViewId = msgId;
+
+    function _shapeOf(id) {
+      if (!id) return null;
+      var esc = window.CSS && CSS.escape ? CSS.escape(id) : id;
+      var g = body.querySelector('.history-node[data-msg-id="' + esc + '"]');
+      return g ? g.querySelector('circle, polygon, rect') : null;
+    }
+
+    var oldShape = _shapeOf(oldId);
+    if (oldShape) _applyShapeSize(oldShape, false);
+    var newShape = _shapeOf(msgId);
+    if (newShape) _applyShapeSize(newShape, true);
+
     body.querySelectorAll('.history-node').forEach(function (g) {
-      var id = g.getAttribute('data-msg-id');
-      var active = id === msgId;
-      g.classList.toggle('is-current', active);
-      var shape = g.querySelector('circle, polygon, rect');
-      if (!shape) return;
-      shape.setAttribute('stroke', active ? '#ffffff' : 'rgba(0,0,0,0.35)');
-      shape.setAttribute('stroke-width', active ? '3.2' : '1');
-      if (shape.tagName === 'circle') {
-        shape.setAttribute('r', String(active ? NODE_R + 1.8 : NODE_R));
-      }
+      g.classList.toggle('is-current', g.getAttribute('data-msg-id') === msgId);
     });
+
+    var esc = window.CSS && CSS.escape ? CSS.escape(msgId) : msgId;
+    var target = body.querySelector('.history-node[data-msg-id="' + esc + '"]');
+    var cursor = body.querySelector('.history-cursor');
+    if (target && cursor) {
+      cursor.setAttribute('transform', target.getAttribute('transform'));
+    }
   }
 
   function _chatBubbleFor(msgId) {
