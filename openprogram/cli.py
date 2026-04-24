@@ -130,6 +130,13 @@ def main():
         help="Port (default: stored UI pref, then 8765)")
     p_web.add_argument("--no-browser", action="store_true", help="Don't open browser")
 
+    # ---- channels ---------------------------------------------------------
+    p_channels = sub.add_parser("channels",
+        help="Run / inspect chat-channel bots (Telegram, Discord, Slack)")
+    channels_sub = p_channels.add_subparsers(dest="channels_verb", metavar="verb")
+    channels_sub.add_parser("list", help="Show per-platform enable + config status")
+    channels_sub.add_parser("start", help="Start every enabled channel (foreground)")
+
     # ---- cron-worker ------------------------------------------------------
     p_cron = sub.add_parser("cron-worker",
         help="Foreground loop that fires scheduled entries from the `cron` tool")
@@ -244,6 +251,28 @@ def main():
 
     if args.command == "web":
         _cmd_web(args.port, False if args.no_browser else None)
+        return
+
+    if args.command == "channels":
+        verb = getattr(args, "channels_verb", None)
+        if verb == "list":
+            from openprogram.channels import list_channels_status
+            rows = list_channels_status()
+            if not rows:
+                print("No channels configured. Run "
+                      "`openprogram config channels`.")
+                return
+            print(f"{'platform':10} {'enabled':8} {'configured':12} {'impl':6}")
+            for r in rows:
+                print(f"{r['platform']:10} "
+                      f"{str(r['enabled']):8} "
+                      f"{str(r['configured']):12} "
+                      f"{str(r['implemented']):6}")
+            return
+        if verb == "start":
+            from openprogram.channels.runner import run_all
+            sys.exit(run_all())
+        p_channels.print_help()
         return
 
     if args.command == "cron-worker":
