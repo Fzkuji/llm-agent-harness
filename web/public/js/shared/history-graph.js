@@ -43,7 +43,7 @@
   ];
 
   var _currentHead = null;
-  var _currentViewId = null;          // msgId whose node gets the white outline
+  var _visibleIds = Object.create(null); // set of msgIds currently in viewport
   var _headAncestorSet = Object.create(null); // set of ids on the HEAD branch
   var _tooltip = null;
   var _lastSignature = null;
@@ -244,16 +244,13 @@
     return null;
   }
 
-  function _appendShape(parent, shape, color, isCurrent) {
-    // Solid coloured shapes — no outline. The "current view" marker
-    // is a separate shape-matched white fill appended after all
-    // nodes that slides between nodes via a CSS transform
-    // transition. Current node is slightly bigger so the white
-    // shape sits inside it, reading as a hollow centre.
+  function _appendShape(parent, shape, color) {
+    // Solid coloured shape, no outline. "Visible in viewport" state
+    // is applied later by _applyVisibility: bumps the outer shape up
+    // a size and stacks a shape-matched white inner shape on top to
+    // produce the hollow-centre look.
     var el = _buildShapeEl(shape, color, NODE_R);
-    if (!el) return;
-    if (isCurrent) _applyShapeSize(el, true);
-    parent.appendChild(el);
+    if (el) parent.appendChild(el);
   }
 
   // Radius used for the white cursor shape — ~55% of the node radius
@@ -329,10 +326,6 @@
     _headAncestors(tree.byId, headId).forEach(function (id) { headAncestors[id] = true; });
     _headAncestorSet = headAncestors;
 
-    // Default the "current view" marker to HEAD when no prior selection
-    // exists, or when the prior selection is no longer in the graph.
-    if (!_currentViewId || !tree.byId[_currentViewId]) _currentViewId = headId;
-
     var width = PAD_X * 2 + COL_W * Math.max(lanes.laneCount - 1, 0);
     var height = PAD_Y * 2 + ROW_H * maxDepth;
 
@@ -373,51 +366,36 @@
       }));
     });
 
-    // Nodes.
+    // Nodes — all built at default (non-visible) size and no inner.
+    // _recomputeVisibility() below stamps the highlight state based
+    // on what's actually on-screen.
     Object.keys(tree.byId).forEach(function (id) {
       var node = tree.byId[id];
       var p = pos(node);
       var isHead = id === headId;
-      var isCurrent = id === _currentViewId;
       var color = _laneColor(node._lane);
       var g = _svg('g', {
-        class: 'history-node'
-          + (isHead ? ' is-head' : '')
-          + (isCurrent ? ' is-current' : ''),
+        class: 'history-node' + (isHead ? ' is-head' : ''),
         transform: 'translate(' + p.x + ',' + p.y + ')',
         'data-msg-id': id,
       });
-      _appendShape(g, _shapeFor(node), color, isCurrent);
+      _appendShape(g, _shapeFor(node), color);
       g._nodeData = node;
       nodeG.appendChild(g);
     });
 
-    // Floating white cursor — shape-matched to whichever node is
-    // current (circle/triangle/square). A single <g> whose transform
-    // animates on setCurrentView, so the white shape slides from
-    // node to node. Painted last so it stacks above the coloured
-    // shapes.
-    if (_currentViewId && tree.byId[_currentViewId]) {
-      var curNode = tree.byId[_currentViewId];
-      var cp = pos(curNode);
-      var curShape = _shapeFor(curNode);
-      var cursor = _svg('g', {
-        class: 'history-cursor',
-        'data-shape': curShape,
-        transform: 'translate(' + cp.x + ',' + cp.y + ')',
-        style: 'transition: transform 220ms cubic-bezier(0.4,0,0.2,1); '
-          + 'pointer-events: none;',
-      });
-      cursor.appendChild(_buildShapeEl(curShape, '#ffffff', CURSOR_R));
-      nodeG.appendChild(cursor);
-    }
-
     body.replaceChildren(svg);
     _tooltip = null;
 
+    // The new SVG has no inner-white shapes; reset the tracked set
+    // so the upcoming recompute treats every on-screen bubble as
+    // "newly visible" and creates the inner shapes.
+    _visibleIds = Object.create(null);
+
     // First render after #chatArea mounts is a good moment to hook
-    // chat scroll → cursor sync. Idempotent.
+    // chat scroll → visibility sync. Idempotent.
     _wireChatScrollSync();
+    _recomputeVisibility();
 
     if (!body._historyHoverWired) {
       body._historyHoverWired = true;
@@ -433,51 +411,74 @@
     }
   }
 
-  // Slide the floating white cursor to the new node + swap sizes on
-  // the old / new shapes. Runs on chat-scroll ticks + click.
-  function _setCurrentView(msgId) {
-    if (!msgId || msgId === _currentViewId) return;
+  // Apply visibility state to a single node group: bumps size on the
+  // outer coloured shape + adds/removes a shape-matched white inner
+  // shape that fades in/out.
+  function _applyVisibility(nodeEl, visible) {
+    var shape = nodeEl.querySelector('circle, polygon, rect');
+    if (shape) _applyShapeSize(shape, visible);
+    var inner = nodeEl.querySelector('.n-inner');
+    if (visible) {
+      if (!inner && shape) {
+        var shapeType = _shapeTypeFromTag(shape.tagName);
+        inner = _buildShapeEl(shapeType, '#ffffff', CURSOR_R);
+        if (inner) {
+          inner.setAttribute('class', 'n-inner');
+          inner.setAttribute(
+            'style',
+            'opacity: 0; transition: opacity 180ms ease; pointer-events: none;'
+          );
+          nodeEl.appendChild(inner);
+          // Fade in on next frame so the transition actually runs.
+          var el = inner;
+          requestAnimationFrame(function () {
+            el.setAttribute(
+              'style',
+              'opacity: 1; transition: opacity 180ms ease; pointer-events: none;'
+            );
+          });
+        }
+      }
+    } else if (inner) {
+      // Remove immediately — fade-out is less important than keeping
+      // the DOM clean when many bubbles exit the viewport at once.
+      inner.parentNode.removeChild(inner);
+    }
+  }
+
+  // Diff-update the highlight state across all nodes.
+  function _setVisibleSet(newSet) {
     var panel = document.getElementById('historyPanel');
     if (!panel) return;
     var body = panel.querySelector('.history-body');
     if (!body) return;
-    var oldId = _currentViewId;
-    _currentViewId = msgId;
-
-    function _shapeOf(id) {
-      if (!id) return null;
-      var esc = window.CSS && CSS.escape ? CSS.escape(id) : id;
-      var g = body.querySelector('.history-node[data-msg-id="' + esc + '"]');
-      return g ? g.querySelector('circle, polygon, rect') : null;
-    }
-
-    var oldShape = _shapeOf(oldId);
-    if (oldShape) _applyShapeSize(oldShape, false);
-    var newShape = _shapeOf(msgId);
-    if (newShape) _applyShapeSize(newShape, true);
-
     body.querySelectorAll('.history-node').forEach(function (g) {
-      g.classList.toggle('is-current', g.getAttribute('data-msg-id') === msgId);
+      var id = g.getAttribute('data-msg-id');
+      var nowVisible = !!newSet[id];
+      var wasVisible = !!_visibleIds[id];
+      if (nowVisible !== wasVisible) _applyVisibility(g, nowVisible);
     });
+    _visibleIds = newSet;
+  }
 
-    var esc = window.CSS && CSS.escape ? CSS.escape(msgId) : msgId;
-    var target = body.querySelector('.history-node[data-msg-id="' + esc + '"]');
-    var cursor = body.querySelector('.history-cursor');
-    if (target && cursor) {
-      cursor.setAttribute('transform', target.getAttribute('transform'));
-      // If the target node has a different shape type, swap the
-      // white inner element so the cursor matches (circle/square/
-      // triangle). Position transition still animates via the <g>
-      // transform; the shape swap itself is instantaneous.
-      var targetShapeEl = target.querySelector('circle, polygon, rect');
-      var targetShape = targetShapeEl
-        ? _shapeTypeFromTag(targetShapeEl.tagName)
-        : 'circle';
-      if (cursor.getAttribute('data-shape') !== targetShape) {
-        cursor.replaceChildren(_buildShapeEl(targetShape, '#ffffff', CURSOR_R));
-        cursor.setAttribute('data-shape', targetShape);
+  // Compute which chat bubbles intersect #chatArea's viewport and
+  // push that set to the graph.
+  function _recomputeVisibility() {
+    var area = document.getElementById('chatArea');
+    if (!area) return;
+    var container = document.getElementById('chatMessages');
+    if (!container) return;
+    var rect = area.getBoundingClientRect();
+    var bubbles = container.querySelectorAll(':scope > [data-msg-id]');
+    var newSet = Object.create(null);
+    for (var i = 0; i < bubbles.length; i++) {
+      var br = bubbles[i].getBoundingClientRect();
+      if (br.bottom > rect.top && br.top < rect.bottom) {
+        var id = bubbles[i].getAttribute('data-msg-id');
+        if (id) newSet[id] = true;
       }
     }
+    _setVisibleSet(newSet);
   }
 
   function _chatBubbleFor(msgId) {
@@ -503,7 +504,6 @@
     bubble.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
-  // Track the top-most visible chat bubble and sync the cursor to it.
   // Attached to #chatArea on first run; survives conversation switches
   // because the element persists across /chat ↔ /c/:id navigations.
   var _chatScrollWired = false;
@@ -517,44 +517,7 @@
       if (raf) return;
       raf = requestAnimationFrame(function () {
         raf = 0;
-        var container = document.getElementById('chatMessages');
-        if (!container) return;
-        var bubbles = container.querySelectorAll(':scope > [data-msg-id]');
-        if (!bubbles.length) return;
-
-        // If the scroll is already at (or within a hair of) the
-        // bottom, the user physically can't scroll the last bubble
-        // past the anchor. Short trailing bubbles (e.g. a collapsed
-        // runtime card that's last in the conversation) would
-        // otherwise never be selectable. Honour them by jumping
-        // straight to the last bubble in that case.
-        var atBottom = area.scrollTop + area.clientHeight >= area.scrollHeight - 2;
-        if (atBottom) {
-          var lastId = bubbles[bubbles.length - 1].getAttribute('data-msg-id');
-          if (lastId) _setCurrentView(lastId);
-          return;
-        }
-
-        var areaTop = area.getBoundingClientRect().top;
-        var target = areaTop + 40;
-        var chosenId = null;
-        var chosenTop = -Infinity;
-        var firstId = null;
-        var firstTop = Infinity;
-        for (var i = 0; i < bubbles.length; i++) {
-          var r = bubbles[i].getBoundingClientRect();
-          var id = bubbles[i].getAttribute('data-msg-id');
-          if (r.top <= target && r.top > chosenTop) {
-            chosenTop = r.top;
-            chosenId = id;
-          }
-          if (r.top < firstTop) {
-            firstTop = r.top;
-            firstId = id;
-          }
-        }
-        var bestId = chosenId || firstId;
-        if (bestId) _setCurrentView(bestId);
+        _recomputeVisibility();
       });
     }, { passive: true });
   }
@@ -587,10 +550,10 @@
     if (!g) return;
     var id = g.getAttribute('data-msg-id');
     if (!id) return;
-    // On-branch click = navigate to that message (scroll chat + move
-    // the white cursor). Off-branch click = checkout that branch tip.
+    // On-branch click: scroll chat to that message. Visibility sync
+    // on scroll end will light up the right set of graph nodes.
+    // Off-branch click: checkout that branch tip (git-style).
     if (_headAncestorSet[id]) {
-      _setCurrentView(id);
       _scrollChatTo(id);
     } else {
       _checkout(id);
@@ -598,5 +561,5 @@
   });
 
   window.renderHistoryGraph = render;
-  window.setHistoryCurrent = _setCurrentView;
+  window.recomputeHistoryVisibility = _recomputeVisibility;
 })();
