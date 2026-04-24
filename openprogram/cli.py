@@ -834,23 +834,33 @@ def _cmd_web(port, open_browser):
 
     thread = start_web(port=port, open_browser=open_browser)
 
-    # Auto-start chat-channel bots alongside the web UI so Telegram /
-    # Discord / Slack / WeChat messages route through the same
-    # process. Non-blocking; daemon threads shut down with the
-    # process when Ctrl-C exits the join() below.
+    # Try to own chat-channel bots for this process. Only one
+    # openprogram process at a time can poll channels (file lock, see
+    # channels/_lock.py). If another process already owns them we
+    # still run the Web UI — we just don't double-poll.
     channels_stop = None
     channels_threads: list = []
+    channels_lock = None
     try:
+        import os as _os
         from openprogram.channels import list_channels_status
         from openprogram.channels.runner import start_all
+        from openprogram.channels._lock import read_holder_pid
         viable = [r for r in list_channels_status()
                   if r.get("enabled") and r.get("implemented")
                   and r.get("configured")]
         if viable:
-            channels_stop, channels_threads = start_all(quiet=True)
-            if channels_threads:
-                print(f"Chat-channel bots running: "
-                      f"{', '.join(pid for pid, _ in channels_threads)}")
+            existing_pid = read_holder_pid()
+            if existing_pid is not None and existing_pid != _os.getpid():
+                print(f"Chat-channel bots already owned by PID "
+                      f"{existing_pid}; skipping here.")
+            else:
+                channels_stop, channels_threads, channels_lock = start_all(
+                    quiet=True,
+                )
+                if channels_threads:
+                    print(f"Chat-channel bots running (PID {_os.getpid()}): "
+                          f"{', '.join(pid for pid, _ in channels_threads)}")
     except Exception as e:  # noqa: BLE001
         print(f"[channels] auto-start skipped: "
               f"{type(e).__name__}: {e}")
@@ -865,6 +875,8 @@ def _cmd_web(port, open_browser):
             channels_stop.set()
             for _pid, t in channels_threads:
                 t.join(timeout=2)
+        if channels_lock is not None:
+            channels_lock.release()
 
 
 def _cmd_deep_work(task, level, provider, model,

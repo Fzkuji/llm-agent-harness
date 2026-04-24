@@ -12,6 +12,7 @@ left for a follow-up when we plumb conversation history through.
 """
 from __future__ import annotations
 
+import os
 import sys
 from typing import Any
 
@@ -407,11 +408,12 @@ def run_cli_chat(oneshot: str | None = None) -> None:
         print(reply)
         return
 
-    # Auto-start enabled chat-channel bots so messages from
-    # Telegram / Discord / Slack / WeChat land in the same chat session
-    # the CLI is driving. Non-blocking — the bots run in daemon
-    # threads; we stop them on REPL exit.
-    channels_stop, channels_threads = _maybe_start_channels(console)
+    # Try to take ownership of chat channels for this process. Only
+    # one openprogram process at a time can pull from Telegram /
+    # Discord / WeChat / Slack (see channels/_lock.py). If another
+    # session already owns them, we still run the REPL — we just
+    # don't double-poll, and we tell the user which PID owns them.
+    channels_stop, channels_threads, channels_lock = _maybe_start_channels(console)
 
     _print_banner(console, provider, model)
 
@@ -442,25 +444,51 @@ def run_cli_chat(oneshot: str | None = None) -> None:
             channels_stop.set()
             for _pid, t in channels_threads:
                 t.join(timeout=2)
+        if channels_lock is not None:
+            channels_lock.release()
 
 
 def _maybe_start_channels(console):
-    """Start channel bots alongside the CLI chat. Returns
-    (stop_event, threads) or (None, []) if nothing viable."""
+    """Try to start channel bots alongside the CLI chat.
+
+    Returns (stop_event, threads, lock). Three outcomes:
+
+    * We own channels → stop and lock are set, threads populated,
+      prints the platform list.
+    * Another process already owns channels → everything None/empty,
+      prints which PID holds them so the user can switch windows.
+    * No channels configured or import failed → everything None/empty,
+      silent.
+    """
     try:
         from openprogram.channels import list_channels_status
         from openprogram.channels.runner import start_all
+        from openprogram.channels._lock import read_holder_pid
     except Exception:
-        return None, []
+        return None, [], None
     status = list_channels_status()
     viable = [r for r in status
               if r.get("enabled") and r.get("implemented")
               and r.get("configured")]
     if not viable:
-        return None, []
-    stop, threads = start_all(quiet=True)
+        return None, [], None
+
+    # Peek at the lock before we try to take it — if it's already
+    # held, we want a concise "owned by PID N" instead of start_all's
+    # full "[channels] another process ..." line.
+    existing_pid = read_holder_pid()
+    if existing_pid is not None and existing_pid != os.getpid():
+        console.print(
+            f"[dim]↪ channels owned by PID {existing_pid} "
+            f"(that session answers Telegram/WeChat/etc.)[/]"
+        )
+        return None, [], None
+
+    stop, threads, lock = start_all(quiet=True)
     if threads:
         platforms = ", ".join(pid for pid, _ in threads)
-        console.print(f"[dim]↪ channels running in background: {platforms}"
-                      f"  (Ctrl-C here stops everything)[/]")
-    return stop, threads
+        console.print(
+            f"[dim]↪ channels owned by this session (PID {os.getpid()}): "
+            f"{platforms}  (Ctrl-C here stops them)[/]"
+        )
+    return stop, threads, lock

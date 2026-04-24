@@ -8,13 +8,21 @@ Two entry points:
 
     start_all() — non-blocking. Used by `openprogram` (CLI chat) and
                    the Web UI to co-host channels alongside the main
-                   REPL/server. Returns (stop_event, threads). Caller
-                   sets `stop_event` and joins threads on shutdown.
+                   REPL/server. Returns (stop_event, threads, lock).
+                   Caller sets stop_event, joins threads, releases lock.
+
+A process-wide exclusive fcntl lock (``ChannelsLock``) gates both: at
+most one process pulls channel updates at a time. Multiple
+``openprogram`` windows is a normal workflow (different conversations
+in different terminals) — without the lock they'd race to
+``getupdates`` and answer the same user message N times from N
+unpredictable sessions.
 """
 from __future__ import annotations
 
 import threading
 import time
+from typing import TYPE_CHECKING, Optional
 
 from openprogram.channels import (
     build_channel,
@@ -22,19 +30,40 @@ from openprogram.channels import (
     list_enabled_platforms,
 )
 
+if TYPE_CHECKING:
+    from openprogram.channels._lock import ChannelsLock
 
-def start_all(*, quiet: bool = False) -> tuple[threading.Event,
-                                                list[tuple[str, threading.Thread]]]:
+
+def start_all(*, quiet: bool = False) -> tuple[Optional[threading.Event],
+                                                list[tuple[str, threading.Thread]],
+                                                Optional["ChannelsLock"]]:
     """Kick off every enabled+configured channel in a daemon thread.
 
-    Non-blocking — returns immediately with the stop event and thread
-    list. Caller is responsible for driving shutdown (``stop.set()``
-    then join the threads).
+    Returns ``(stop_event, threads, lock)``:
+      * ``stop_event`` — set this to stop the threads. None iff we
+        couldn't acquire the channels lock (another process already
+        owns it).
+      * ``threads`` — [(platform_id, Thread), ...]. Empty if we didn't
+        start anything.
+      * ``lock`` — the ``ChannelsLock`` we hold. Call ``lock.release()``
+        after joining threads. None iff we didn't acquire it.
+
+    Only one process at a time can own channels (fcntl flock on
+    ``<state>/channels.lock``). This stops multiple `openprogram`
+    windows from racing to pull the same Telegram / WeChat updates.
 
     ``quiet=True`` suppresses the "[pid] enabled but token missing"
-    warnings so the CLI chat doesn't dump noise about half-configured
-    channels on every launch.
+    warnings so the CLI chat doesn't dump noise on every launch.
     """
+    from openprogram.channels._lock import ChannelsLock
+
+    lock = ChannelsLock()
+    if not lock.try_acquire():
+        if not quiet:
+            print(f"[channels] another process (PID {lock.holder_pid}) "
+                  f"already owns channels; skipping here.")
+        return None, [], None
+
     status = list_channels_status()
     stop = threading.Event()
     threads: list[tuple[str, threading.Thread]] = []
@@ -64,7 +93,13 @@ def start_all(*, quiet: bool = False) -> tuple[threading.Event,
         t.start()
         threads.append((pid, t))
 
-    return stop, threads
+    if not threads:
+        # Got the lock but nothing to run — release so another process
+        # configuring a channel can pick up the slack.
+        lock.release()
+        return None, [], None
+
+    return stop, threads, lock
 
 
 def run_all() -> int:
@@ -79,10 +114,11 @@ def run_all() -> int:
               "`openprogram config channels`.")
         return 1
 
-    stop, threads = start_all(quiet=False)
+    stop, threads, lock = start_all(quiet=False)
 
-    if not threads:
-        print("No channel started.")
+    if not threads or stop is None or lock is None:
+        # start_all already printed the "owned by PID N" or
+        # "no channel started" explanation.
         return 1
 
     try:
@@ -95,6 +131,8 @@ def run_all() -> int:
             t.join(timeout=3)
             if t.is_alive():
                 print(f"[{pid}] still running; it'll drop on process exit")
+    finally:
+        lock.release()
     return 0
 
 
