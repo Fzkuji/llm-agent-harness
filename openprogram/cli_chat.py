@@ -700,16 +700,20 @@ def _run_turn_with_history(agent, conv_id: str, message: str) -> str:
 # --- Entry point -----------------------------------------------------------
 
 def run_cli_chat(oneshot: str | None = None,
-                 resume: str | None = None) -> None:
+                 resume: str | None = None,
+                 tui: bool = True) -> None:
     """Launch the terminal chat.
 
     ``oneshot`` runs one turn and exits (still persisted so it shows
     up in the sidebar of a later Web UI session).
 
     ``resume`` picks up a prior session id under the current default
-    agent instead of starting a fresh one. The sidebar shows every
-    past session via the Web UI's ``list_conversations``; ``openprogram
-    sessions list`` is the CLI way to discover ids.
+    agent instead of starting a fresh one.
+
+    ``tui`` defaults True: launches the full-screen Textual UI. Set
+    False (or pass ``--no-tui``) to stay on the Rich REPL — useful
+    for recording asciinema sessions or terminals without alt-screen
+    support. ``oneshot`` always uses the Rich path.
     """
     import uuid as _uuid
     from rich.console import Console
@@ -727,15 +731,31 @@ def run_cli_chat(oneshot: str | None = None,
 
     agent = _A.get_default()
     if agent is None:
-        # setup should have created one; defensive fallback.
         agent = _A.create("main", make_default=True)
 
     if resume:
         conv_id = resume
+    else:
+        conv_id = "local_" + _uuid.uuid4().hex[:10]
+
+    # Full-screen TUI path (default). One-shot stays on the Rich path
+    # because rendering a scroll buffer for a single turn is overkill.
+    if tui and not oneshot:
+        try:
+            from openprogram.cli_tui import run_tui
+            run_tui(agent=agent, conv_id=conv_id, rt=rt)
+            return
+        except Exception as e:  # noqa: BLE001
+            console.print(
+                f"[yellow]TUI failed to start ({type(e).__name__}: {e}); "
+                f"falling back to REPL.[/]"
+            )
+
+    # Rich REPL fallback / oneshot path
+    if resume:
         console.print(f"[dim]Resuming session {conv_id} under "
                       f"agent {agent.id}[/]")
     else:
-        conv_id = "local_" + _uuid.uuid4().hex[:10]
         console.print(f"[dim]New session {conv_id} under "
                       f"agent {agent.id}[/]")
 

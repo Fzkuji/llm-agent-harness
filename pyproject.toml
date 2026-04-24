@@ -33,6 +33,10 @@ dependencies = [
     # so this is officially optional — installing openprogram without
     # extras still works, just with a flatter prompt.
     "questionary>=2.0.0",
+    # TUI for `openprogram` — Textual drives the full-screen chat
+    # interface (sidebar + scrollback + command palette). Falls
+    # through to the Rich-based REPL when TUI is unavailable.
+    "textual>=0.80",
 ]
 
 [project.optional-dependencies]
