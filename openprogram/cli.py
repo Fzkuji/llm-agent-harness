@@ -833,11 +833,38 @@ def _cmd_web(port, open_browser):
         open_browser = True
 
     thread = start_web(port=port, open_browser=open_browser)
+
+    # Auto-start chat-channel bots alongside the web UI so Telegram /
+    # Discord / Slack / WeChat messages route through the same
+    # process. Non-blocking; daemon threads shut down with the
+    # process when Ctrl-C exits the join() below.
+    channels_stop = None
+    channels_threads: list = []
+    try:
+        from openprogram.channels import list_channels_status
+        from openprogram.channels.runner import start_all
+        viable = [r for r in list_channels_status()
+                  if r.get("enabled") and r.get("implemented")
+                  and r.get("configured")]
+        if viable:
+            channels_stop, channels_threads = start_all(quiet=True)
+            if channels_threads:
+                print(f"Chat-channel bots running: "
+                      f"{', '.join(pid for pid, _ in channels_threads)}")
+    except Exception as e:  # noqa: BLE001
+        print(f"[channels] auto-start skipped: "
+              f"{type(e).__name__}: {e}")
+
     print("Press Ctrl+C to stop.")
     try:
         thread.join()
     except KeyboardInterrupt:
         print("\nStopping web UI.")
+    finally:
+        if channels_stop is not None:
+            channels_stop.set()
+            for _pid, t in channels_threads:
+                t.join(timeout=2)
 
 
 def _cmd_deep_work(task, level, provider, model,

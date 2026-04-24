@@ -407,26 +407,60 @@ def run_cli_chat(oneshot: str | None = None) -> None:
         print(reply)
         return
 
+    # Auto-start enabled chat-channel bots so messages from
+    # Telegram / Discord / Slack / WeChat land in the same chat session
+    # the CLI is driving. Non-blocking — the bots run in daemon
+    # threads; we stop them on REPL exit.
+    channels_stop, channels_threads = _maybe_start_channels(console)
+
     _print_banner(console, provider, model)
 
-    while True:
-        try:
-            user_input = console.input("\n[bold bright_blue]❯[/] ").strip()
-        except (EOFError, KeyboardInterrupt):
-            console.print("\n[dim]Goodbye.[/]")
-            return
-        if not user_input:
-            continue
-        if user_input.startswith("/"):
-            if _handle_slash(user_input, console, rt):
+    try:
+        while True:
+            try:
+                user_input = console.input("\n[bold bright_blue]❯[/] ").strip()
+            except (EOFError, KeyboardInterrupt):
+                console.print("\n[dim]Goodbye.[/]")
                 return
-            continue
-        reply = _run_turn(rt, user_input)
-        console.print()
-        console.print(reply)
-        # Fire-and-forget TTS; no-ops unless tts.provider is set.
-        try:
-            from openprogram.tts import speak
-            speak(reply)
-        except Exception:
-            pass
+            if not user_input:
+                continue
+            if user_input.startswith("/"):
+                if _handle_slash(user_input, console, rt):
+                    return
+                continue
+            reply = _run_turn(rt, user_input)
+            console.print()
+            console.print(reply)
+            # Fire-and-forget TTS; no-ops unless tts.provider is set.
+            try:
+                from openprogram.tts import speak
+                speak(reply)
+            except Exception:
+                pass
+    finally:
+        if channels_stop is not None:
+            channels_stop.set()
+            for _pid, t in channels_threads:
+                t.join(timeout=2)
+
+
+def _maybe_start_channels(console):
+    """Start channel bots alongside the CLI chat. Returns
+    (stop_event, threads) or (None, []) if nothing viable."""
+    try:
+        from openprogram.channels import list_channels_status
+        from openprogram.channels.runner import start_all
+    except Exception:
+        return None, []
+    status = list_channels_status()
+    viable = [r for r in status
+              if r.get("enabled") and r.get("implemented")
+              and r.get("configured")]
+    if not viable:
+        return None, []
+    stop, threads = start_all(quiet=True)
+    if threads:
+        platforms = ", ".join(pid for pid, _ in threads)
+        console.print(f"[dim]↪ channels running in background: {platforms}"
+                      f"  (Ctrl-C here stops everything)[/]")
+    return stop, threads

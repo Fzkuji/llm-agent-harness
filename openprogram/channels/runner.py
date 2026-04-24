@@ -1,4 +1,16 @@
-"""Foreground runner that fires up every enabled channel."""
+"""Runner for chat-channel bots.
+
+Two entry points:
+
+    run_all()  —  blocking. Used by `openprogram channels start`.
+                   Starts every enabled+configured channel in a daemon
+                   thread, waits for Ctrl-C, then shuts them down.
+
+    start_all() — non-blocking. Used by `openprogram` (CLI chat) and
+                   the Web UI to co-host channels alongside the main
+                   REPL/server. Returns (stop_event, threads). Caller
+                   sets `stop_event` and joins threads on shutdown.
+"""
 from __future__ import annotations
 
 import threading
@@ -11,26 +23,34 @@ from openprogram.channels import (
 )
 
 
-def run_all() -> int:
-    """Start bot loops for every enabled channel; wait for Ctrl+C."""
-    status = list_channels_status()
-    enabled = [r["platform"] for r in status if r["enabled"]]
-    if not enabled:
-        print("No channels enabled. Configure with "
-              "`openprogram config channels`.")
-        return 1
+def start_all(*, quiet: bool = False) -> tuple[threading.Event,
+                                                list[tuple[str, threading.Thread]]]:
+    """Kick off every enabled+configured channel in a daemon thread.
 
+    Non-blocking — returns immediately with the stop event and thread
+    list. Caller is responsible for driving shutdown (``stop.set()``
+    then join the threads).
+
+    ``quiet=True`` suppresses the "[pid] enabled but token missing"
+    warnings so the CLI chat doesn't dump noise about half-configured
+    channels on every launch.
+    """
+    status = list_channels_status()
     stop = threading.Event()
     threads: list[tuple[str, threading.Thread]] = []
 
-    for pid in enabled:
-        row = next((r for r in status if r["platform"] == pid), {})
+    for row in status:
+        if not row.get("enabled"):
+            continue
+        pid = row["platform"]
         if not row.get("implemented"):
-            print(f"[{pid}] runtime not implemented yet; skipped.")
+            if not quiet:
+                print(f"[{pid}] runtime not implemented yet; skipped.")
             continue
         if not row.get("configured"):
-            print(f"[{pid}] enabled but token missing "
-                  f"(${row.get('env')}); skipped.")
+            if not quiet:
+                print(f"[{pid}] enabled but token missing "
+                      f"(${row.get('env')}); skipped.")
             continue
         try:
             ch = build_channel(pid)
@@ -43,6 +63,23 @@ def run_all() -> int:
                              daemon=True, name=f"channel-{pid}")
         t.start()
         threads.append((pid, t))
+
+    return stop, threads
+
+
+def run_all() -> int:
+    """Blocking — start every enabled channel and wait for Ctrl-C.
+
+    Entry point for ``openprogram channels start``.
+    """
+    status = list_channels_status()
+    enabled = [r["platform"] for r in status if r["enabled"]]
+    if not enabled:
+        print("No channels enabled. Configure with "
+              "`openprogram config channels`.")
+        return 1
+
+    stop, threads = start_all(quiet=False)
 
     if not threads:
         print("No channel started.")
