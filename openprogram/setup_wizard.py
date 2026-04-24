@@ -115,13 +115,38 @@ def _have_questionary() -> bool:
         return False
 
 
-def _confirm(prompt: str, default: bool = True) -> bool:
-    """Arrow-key Yes/No select. No y/n keypress — arrow + Enter only.
+# Consistent look across every prompt in the wizard. Cursor-highlighted
+# item is the obvious one (bright cyan on inverse); non-cursor items
+# stay plain; pointer is an unambiguous `❯`. Applied to every
+# questionary call site via style=_QSTYLE + pointer=_POINTER.
+_POINTER = "❯"
 
-    Uses questionary.select with two options so every prompt in the
-    wizard has the same input shape, matching OpenClaw's clack-style
-    select. Falls back to input() only when questionary isn't installed.
+
+def _qstyle():
+    """Late-bound style object so import-time failures in questionary
+    don't cascade into setup_wizard import.
     """
+    try:
+        from questionary import Style
+    except ImportError:
+        return None
+    return Style([
+        ("qmark",        "fg:ansicyan bold"),
+        ("question",     "bold"),
+        ("answer",       "fg:ansicyan bold"),
+        ("pointer",      "fg:ansicyan bold"),
+        ("highlighted",  "fg:ansicyan bold reverse"),
+        ("selected",     "fg:ansicyan"),
+        ("separator",    "fg:ansibrightblack"),
+        ("instruction",  "fg:ansibrightblack"),
+        ("text",         ""),
+        ("disabled",     "fg:ansibrightblack italic"),
+    ])
+
+
+def _confirm(prompt: str, default: bool = True) -> bool:
+    """Arrow-key Yes/No select. Uses questionary.select for a consistent
+    look with every other prompt — no y/n keypress."""
     if _have_questionary():
         import questionary
         default_label = "Yes" if default else "No"
@@ -131,10 +156,11 @@ def _confirm(prompt: str, default: bool = True) -> bool:
             default=default_label,
             use_shortcuts=False,
             use_arrow_keys=True,
-            instruction="(↑/↓, enter)",
+            instruction="(↑/↓ enter)",
+            pointer=_POINTER,
+            style=_qstyle(),
         ).ask()
         return ans == "Yes"
-    # Fallback: typed yes/no. Only reached when questionary is absent.
     hint = "Y/n" if default else "y/N"
     try:
         s = input(f"{prompt} [{hint}] ").strip().lower()
@@ -151,9 +177,17 @@ def _choose_one(prompt: str, choices: list[str],
         return None
     if _have_questionary():
         import questionary
-        ans = questionary.select(prompt, choices=choices,
-                                 default=default or choices[0]).ask()
-        return ans  # None on Ctrl-C
+        ans = questionary.select(
+            prompt,
+            choices=choices,
+            default=default or choices[0],
+            use_shortcuts=False,
+            use_arrow_keys=True,
+            instruction="(↑/↓ enter)",
+            pointer=_POINTER,
+            style=_qstyle(),
+        ).ask()
+        return ans
     print(prompt)
     for i, c in enumerate(choices, 1):
         marker = "*" if c == default else " "
@@ -175,10 +209,7 @@ def _choose_one(prompt: str, choices: list[str],
 
 
 def _checkbox(prompt: str, items: list[tuple[str, bool]]) -> list[str] | None:
-    """Multi-select. Returns list of selected names, or None if cancelled.
-
-    ``items`` = [(name, initial_checked), ...] preserving caller order.
-    """
+    """Multi-select. space to toggle, enter to commit."""
     if not items:
         return []
     if _have_questionary():
@@ -187,9 +218,14 @@ def _checkbox(prompt: str, items: list[tuple[str, bool]]) -> list[str] | None:
             questionary.Choice(name, value=name, checked=enabled)
             for name, enabled in items
         ]
-        ans = questionary.checkbox(prompt, choices=choices).ask()
-        return ans  # None on Ctrl-C
-    # input() fallback: toggle by number, 'all' / 'none' / blank to commit.
+        ans = questionary.checkbox(
+            prompt,
+            choices=choices,
+            instruction="(space to toggle, enter to confirm, a = all, i = invert)",
+            pointer=_POINTER,
+            style=_qstyle(),
+        ).ask()
+        return ans
     names = [n for n, _ in items]
     selected: set[str] = {n for n, e in items if e}
     while True:
@@ -226,7 +262,12 @@ def _checkbox(prompt: str, items: list[tuple[str, bool]]) -> list[str] | None:
 def _text(prompt: str, default: str = "") -> str | None:
     if _have_questionary():
         import questionary
-        ans = questionary.text(prompt, default=default).ask()
+        ans = questionary.text(
+            prompt,
+            default=default,
+            instruction="(enter to accept)" if default else "",
+            style=_qstyle(),
+        ).ask()
         return ans
     hint = f" [{default}]" if default else ""
     try:
@@ -237,10 +278,12 @@ def _text(prompt: str, default: str = "") -> str | None:
 
 
 def _password(prompt: str) -> str | None:
-    """Secret entry — masks input when questionary is available."""
     if _have_questionary():
         import questionary
-        ans = questionary.password(prompt).ask()
+        ans = questionary.password(
+            prompt,
+            style=_qstyle(),
+        ).ask()
         return ans
     try:
         import getpass
@@ -762,16 +805,16 @@ def _print_intro() -> None:
         console = Console()
         body = Text()
         body.append("Welcome to OpenProgram.\n\n", style="bold bright_blue")
+        body.append("You'll pick:\n", style="dim")
         body.append(
-            "Setup has three parts:\n"
-            "  Required — provider + default model + reasoning effort\n"
-            "  Tailored — tools / skills / UI / TTS / channels / memory\n"
-            "  Advanced — profiles, terminal exec backend\n\n",
+            "  ▸ QuickStart — 3 required sections (provider + model + effort)\n"
+            "  ▸ Advanced   — walk through every section\n\n",
             style="dim",
         )
         body.append(
-            "Each step is rerunnable with `openprogram config <name>`. "
-            "Ctrl+C to exit at any point — partial progress is saved.",
+            "All prompts use arrow keys + Enter. Ctrl+C exits; partial "
+            "progress is saved. Rerun any section alone with "
+            "`openprogram config <name>`.",
             style="dim italic",
         )
         console.print()
@@ -783,10 +826,9 @@ def _print_intro() -> None:
         print("=" * 60)
         print("  OpenProgram setup")
         print("=" * 60)
-        print("Required: provider + default model + reasoning effort.")
-        print("Tailored: tools / skills / UI / TTS / channels / memory.")
-        print("Advanced: profiles, terminal exec backend.")
-        print("Rerun any step with `openprogram config <name>`.")
+        print("You'll pick QuickStart (minimum path) or Advanced.")
+        print("All prompts use arrow keys + Enter.")
+        print("Ctrl+C to exit; partial progress is saved.")
         print()
 
 
@@ -858,16 +900,33 @@ def run_full_setup() -> int:
     """Linear onboarding. QuickStart does the 3 required sections then
     hands off to chat; Advanced walks every section.
 
-    OpenClaw-shaped: intro → mode select → sections → note summary →
-    hatch select (chat / web / later).
+    OpenClaw-shaped: intro → mode select → sections → summary →
+    hatch select (chat / web / later). No extra "Start?" confirm —
+    running `openprogram setup` is the start.
     """
-    _print_intro()
-    if not _confirm("Start?", default=True):
-        return 0
+    try:
+        _print_intro()
+        mode = _mode_select()
+        if mode is None:
+            _print_cancelled()
+            return 0
+        return _run_setup_inner(mode)
+    except KeyboardInterrupt:
+        _print_cancelled()
+        return 130
 
-    mode = _mode_select()
-    if mode is None:
-        return 0
+
+def _print_cancelled() -> None:
+    try:
+        from rich.console import Console
+        Console().print("\n[yellow]Cancelled. Partial progress is saved — "
+                        "run `openprogram setup` again to pick up.[/]")
+    except ImportError:
+        print("\nCancelled. Partial progress is saved — run "
+              "`openprogram setup` again to pick up.")
+
+
+def _run_setup_inner(mode: str) -> int:
 
     sections = _CORE_SECTIONS if mode == "advanced" else [
         s for s in _CORE_SECTIONS if s[0] in _QUICKSTART_SECTIONS
