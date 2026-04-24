@@ -459,6 +459,12 @@ def _maybe_start_channels(console):
       prints which PID holds them so the user can switch windows.
     * No channels configured or import failed → everything None/empty,
       silent.
+
+    Key rule: we always call ``start_all`` first and let fcntl.flock
+    decide who owns the lock. Peeking at the PID file alone is unsafe
+    — a previously-held lock file retains its old PID even after the
+    process dies, so pre-checks falsely report ownership and no
+    channels ever start on the next launch.
     """
     try:
         from openprogram.channels import list_channels_status
@@ -473,18 +479,19 @@ def _maybe_start_channels(console):
     if not viable:
         return None, [], None
 
-    # Peek at the lock before we try to take it — if it's already
-    # held, we want a concise "owned by PID N" instead of start_all's
-    # full "[channels] another process ..." line.
-    existing_pid = read_holder_pid()
-    if existing_pid is not None and existing_pid != os.getpid():
-        console.print(
-            f"[dim]↪ channels owned by PID {existing_pid} "
-            f"(that session answers Telegram/WeChat/etc.)[/]"
-        )
-        return None, [], None
-
     stop, threads, lock = start_all(quiet=True)
+    if lock is None:
+        # flock said someone else has it. Only NOW do we peek to tell
+        # the user which PID — and the live flock guarantees this PID
+        # is real (stale files can't fool us because the lock itself
+        # is what rejected us).
+        holder = read_holder_pid()
+        if holder is not None and holder != os.getpid():
+            console.print(
+                f"[dim]↪ channels owned by PID {holder} "
+                f"(that session answers Telegram/WeChat/etc.)[/]"
+            )
+        return None, [], None
     if threads:
         platforms = ", ".join(pid for pid, _ in threads)
         console.print(

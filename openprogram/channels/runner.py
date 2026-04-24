@@ -140,4 +140,11 @@ def _safe_run(pid: str, channel, stop: threading.Event) -> None:
     try:
         channel.run(stop)
     except Exception as e:  # noqa: BLE001
+        import traceback
+        # Short form first so it's visible above any REPL noise, then
+        # the full traceback so the user (or us, reading their logs)
+        # can actually fix whatever broke. A one-liner alone led to
+        # silent-ish failures where channels never polled and nobody
+        # knew why.
         print(f"[{pid}] crashed: {type(e).__name__}: {e}")
+        print("".join(traceback.format_exception(type(e), e, e.__traceback__)))

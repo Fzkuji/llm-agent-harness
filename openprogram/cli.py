@@ -836,8 +836,10 @@ def _cmd_web(port, open_browser):
 
     # Try to own chat-channel bots for this process. Only one
     # openprogram process at a time can poll channels (file lock, see
-    # channels/_lock.py). If another process already owns them we
-    # still run the Web UI — we just don't double-poll.
+    # channels/_lock.py). We always go through start_all — fcntl.flock
+    # is the source of truth for ownership. Never pre-filter by PID
+    # file content; the PID file outlives dead processes and peeking
+    # it alone would block every subsequent launch after the first.
     channels_stop = None
     channels_threads: list = []
     channels_lock = None
@@ -850,17 +852,17 @@ def _cmd_web(port, open_browser):
                   if r.get("enabled") and r.get("implemented")
                   and r.get("configured")]
         if viable:
-            existing_pid = read_holder_pid()
-            if existing_pid is not None and existing_pid != _os.getpid():
-                print(f"Chat-channel bots already owned by PID "
-                      f"{existing_pid}; skipping here.")
-            else:
-                channels_stop, channels_threads, channels_lock = start_all(
-                    quiet=True,
-                )
-                if channels_threads:
-                    print(f"Chat-channel bots running (PID {_os.getpid()}): "
-                          f"{', '.join(pid for pid, _ in channels_threads)}")
+            channels_stop, channels_threads, channels_lock = start_all(
+                quiet=True,
+            )
+            if channels_lock is None:
+                holder = read_holder_pid()
+                if holder and holder != _os.getpid():
+                    print(f"Chat-channel bots already owned by PID "
+                          f"{holder}; skipping here.")
+            elif channels_threads:
+                print(f"Chat-channel bots running (PID {_os.getpid()}): "
+                      f"{', '.join(pid for pid, _ in channels_threads)}")
     except Exception as e:  # noqa: BLE001
         print(f"[channels] auto-start skipped: "
               f"{type(e).__name__}: {e}")

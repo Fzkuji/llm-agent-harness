@@ -85,9 +85,23 @@ class ChannelsLock:
         return True
 
     def release(self) -> None:
-        """Release the lock if held. Safe to call multiple times."""
+        """Release the lock if held. Safe to call multiple times.
+
+        Truncates the PID file content too — otherwise ``read_holder_pid``
+        on the next launch would see the PID of the now-dead prior
+        process and mistakenly report it as "still holding" the lock.
+        (The actual fcntl lock is already released by flock UN or by
+        process exit, but peek-style callers that read the file
+        without touching flock need the content cleared.)
+        """
         if self._fh is None:
             return
+        try:
+            self._fh.seek(0)
+            self._fh.truncate()
+            self._fh.flush()
+        except OSError:
+            pass
         try:
             fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)
         except OSError:
