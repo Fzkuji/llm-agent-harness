@@ -343,6 +343,10 @@
     body.replaceChildren(svg);
     _tooltip = null;
 
+    // First render after #chatArea mounts is a good moment to hook
+    // chat scroll → cursor sync. Idempotent.
+    _wireChatScrollSync();
+
     if (!body._historyHoverWired) {
       body._historyHoverWired = true;
       body.addEventListener('mousemove', function (e) {
@@ -380,14 +384,64 @@
     });
   }
 
+  function _chatBubbleFor(msgId) {
+    if (!msgId) return null;
+    // The chat renders into #chatMessages (vanilla conversations.js).
+    // Each bubble has data-msg-id — same attribute name the graph
+    // uses on its own nodes, so we MUST scope to #chatMessages or
+    // we'd accidentally match a graph node living inside the right
+    // sidebar.
+    var container = document.getElementById('chatMessages');
+    if (!container) return null;
+    var sel = '[data-msg-id="'
+      + (window.CSS && CSS.escape ? CSS.escape(msgId) : msgId)
+      + '"]';
+    return container.querySelector(sel);
+  }
+
   function _scrollChatTo(msgId) {
-    if (!msgId) return;
-    var el = document.querySelector(
-      '[data-chat-msg-id="' + (window.CSS && CSS.escape ? CSS.escape(msgId) : msgId) + '"]'
-    );
-    if (el && el.scrollIntoView) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
+    var bubble = _chatBubbleFor(msgId);
+    if (!bubble) return;
+    // scrollIntoView walks up to the nearest scrollable ancestor,
+    // which is #chatArea — that's what we want.
+    bubble.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  // Track the top-most visible chat bubble and sync the cursor to it.
+  // Attached to #chatArea on first run; survives conversation switches
+  // because the element persists across /chat ↔ /c/:id navigations.
+  var _chatScrollWired = false;
+  function _wireChatScrollSync() {
+    if (_chatScrollWired) return;
+    var area = document.getElementById('chatArea');
+    if (!area) return;
+    _chatScrollWired = true;
+    var raf = 0;
+    area.addEventListener('scroll', function () {
+      if (raf) return;
+      raf = requestAnimationFrame(function () {
+        raf = 0;
+        var container = document.getElementById('chatMessages');
+        if (!container) return;
+        var areaTop = area.getBoundingClientRect().top;
+        // Anchor ~40px below viewport top so the cursor tracks what
+        // the user is actually reading, not a bubble half-hidden at
+        // the edge.
+        var target = areaTop + 40;
+        var bubbles = container.querySelectorAll('[data-msg-id]');
+        var bestId = null;
+        var bestDist = Infinity;
+        for (var i = 0; i < bubbles.length; i++) {
+          var r = bubbles[i].getBoundingClientRect();
+          var d = Math.abs(r.top - target);
+          if (d < bestDist) {
+            bestDist = d;
+            bestId = bubbles[i].getAttribute('data-msg-id');
+          }
+        }
+        if (bestId) _setCurrentView(bestId);
+      });
+    }, { passive: true });
   }
 
   async function _checkout(msgId) {
