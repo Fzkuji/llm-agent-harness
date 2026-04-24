@@ -25,6 +25,69 @@ def _get_chat_runtime():
     return rm._chat_provider, rm._chat_runtime
 
 
+def _reset_provider_cache() -> None:
+    """Force _init_providers to re-detect the default runtime.
+
+    Used after an inline setup wizard run so the newly-imported
+    credentials get picked up without restarting the process.
+    """
+    from openprogram.webui import _runtime_management as rm
+    rm._providers_initialized = False
+    rm._chat_runtime = None
+    rm._chat_provider = None
+    rm._chat_model = None
+    rm._default_runtime = None
+    rm._default_provider = None
+
+
+def _prompt_first_run_setup(console) -> bool:
+    """No-provider first-run flow: offer the setup wizard inline.
+
+    Returns True if a provider is now configured (wizard succeeded),
+    False if the user declined / wizard failed.
+    """
+    import sys as _sys
+    from openprogram.auth.cli import _cmd_setup
+
+    console.print()
+    console.print(
+        "[yellow]No LLM provider is configured yet.[/] "
+        "OpenProgram can scan this machine for existing logins "
+        "(Claude Code, Codex, Gemini, GitHub CLI, env vars) and "
+        "import them."
+    )
+    console.print()
+
+    if not _sys.stdin.isatty():
+        console.print(
+            "[dim]Non-interactive stdin detected. Run "
+            "`openprogram providers setup` manually, then re-run.[/]"
+        )
+        return False
+
+    try:
+        reply = input("Run setup now? [Y/n] ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        reply = "n"
+    if reply not in ("", "y", "yes"):
+        console.print(
+            "[dim]Skipped. Run `openprogram providers setup` when ready.[/]"
+        )
+        return False
+
+    rc = _cmd_setup()
+    _reset_provider_cache()
+    _, rt = _get_chat_runtime()
+    if rt is None:
+        console.print(
+            f"[red]Setup finished (exit {rc}) but no provider was detected. "
+            "Check `openprogram providers list` for status.[/]"
+        )
+        return False
+    console.print()
+    return True
+
+
 def _tool_inventory() -> tuple[int, list[str]]:
     from openprogram.tools import ALL_TOOLS, list_available
     names = list_available()  # only tools whose check_fn currently passes
@@ -286,11 +349,15 @@ def run_cli_chat(oneshot: str | None = None) -> None:
 
     provider, rt = _get_chat_runtime()
     if rt is None:
-        console.print(
-            "[red]No LLM provider configured.[/]\n"
-            "Run: [cyan]openprogram providers setup[/]"
-        )
-        sys.exit(1)
+        # Hermes-style first-run: offer the setup wizard inline so the
+        # user doesn't have to exit and re-invoke. If they accept and
+        # the wizard imports at least one credential, we continue into
+        # the chat; otherwise we exit cleanly.
+        if not _prompt_first_run_setup(console):
+            sys.exit(1)
+        provider, rt = _get_chat_runtime()
+        if rt is None:
+            sys.exit(1)
     model = getattr(rt, "model", "?")
 
     if oneshot:
