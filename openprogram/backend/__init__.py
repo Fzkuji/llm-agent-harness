@@ -6,8 +6,9 @@ of calling ``subprocess`` directly. That keeps the tool code
 backend-agnostic and lets ``openprogram config backend`` actually
 reroute where commands execute.
 
-Backends shipped:
-    local    — subprocess.run on the host (default, unchanged behaviour)
+Three backends ship out of the box:
+    local    — subprocess.run on the host (default, unchanged behavior)
+    docker   — ``docker run --rm -i <image> sh -c "..."`` per call
     ssh      — ``ssh <target> "..."`` per call
 
 Selection is read lazily from ``~/.agentic/config.json`` (via
@@ -18,12 +19,14 @@ from __future__ import annotations
 
 from openprogram.backend.base import Backend, RunResult
 from openprogram.backend.local import LocalBackend
+from openprogram.backend.docker import DockerBackend
 from openprogram.backend.ssh import SshBackend
 
 
 BACKEND_CLASSES: dict[str, type[Backend]] = {
-    "local": LocalBackend,
-    "ssh":   SshBackend,
+    "local":  LocalBackend,
+    "docker": DockerBackend,
+    "ssh":    SshBackend,
 }
 
 
@@ -38,6 +41,8 @@ def get_active_backend() -> Backend:
     kind = (be.get("terminal") or "local").lower()
     cls = BACKEND_CLASSES.get(kind, LocalBackend)
     try:
+        if cls is DockerBackend:
+            return DockerBackend(image=be.get("docker_image") or "ubuntu:24.04")
         if cls is SshBackend:
             return SshBackend(target=be.get("ssh_target") or "")
         return cls()
@@ -53,6 +58,7 @@ __all__ = [
     "RunResult",
     "BACKEND_CLASSES",
     "LocalBackend",
+    "DockerBackend",
     "SshBackend",
     "get_active_backend",
 ]
