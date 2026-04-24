@@ -26,7 +26,6 @@ const SHARED_JS = [
   // the right sidebar DOM lives on AppShell, above the remount).
   "shared/right-dock.js",
   "shared/history-graph.js",
-  "shared/live2d.js",
 ];
 
 const EXTERNAL_LIBS = [
