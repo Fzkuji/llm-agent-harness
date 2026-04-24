@@ -408,94 +408,37 @@ def run_cli_chat(oneshot: str | None = None) -> None:
         print(reply)
         return
 
-    # Try to take ownership of chat channels for this process. Only
-    # one openprogram process at a time can pull from Telegram /
-    # Discord / WeChat / Slack (see channels/_lock.py). If another
-    # session already owns them, we still run the REPL — we just
-    # don't double-poll, and we tell the user which PID owns them.
-    channels_stop, channels_threads, channels_lock = _maybe_start_channels(console)
+    # Channels live in their own daemon process (see channels/daemon.py)
+    # so closing this terminal doesn't kill the WeChat/Telegram bot.
+    # If channels are configured but no daemon is live, offer to fork
+    # one now — one question, arrow-key Yes/No. The daemon, once up,
+    # survives every front-end coming and going.
+    try:
+        from openprogram.channels.daemon import prompt_spawn_if_configured_but_dead
+        prompt_spawn_if_configured_but_dead(console, verb="chat")
+    except Exception:
+        pass
 
     _print_banner(console, provider, model)
 
-    try:
-        while True:
-            try:
-                user_input = console.input("\n[bold bright_blue]❯[/] ").strip()
-            except (EOFError, KeyboardInterrupt):
-                console.print("\n[dim]Goodbye.[/]")
+    while True:
+        try:
+            user_input = console.input("\n[bold bright_blue]❯[/] ").strip()
+        except (EOFError, KeyboardInterrupt):
+            console.print("\n[dim]Goodbye.[/]")
+            return
+        if not user_input:
+            continue
+        if user_input.startswith("/"):
+            if _handle_slash(user_input, console, rt):
                 return
-            if not user_input:
-                continue
-            if user_input.startswith("/"):
-                if _handle_slash(user_input, console, rt):
-                    return
-                continue
-            reply = _run_turn(rt, user_input)
-            console.print()
-            console.print(reply)
-            # Fire-and-forget TTS; no-ops unless tts.provider is set.
-            try:
-                from openprogram.tts import speak
-                speak(reply)
-            except Exception:
-                pass
-    finally:
-        if channels_stop is not None:
-            channels_stop.set()
-            for _pid, t in channels_threads:
-                t.join(timeout=2)
-        if channels_lock is not None:
-            channels_lock.release()
-
-
-def _maybe_start_channels(console):
-    """Try to start channel bots alongside the CLI chat.
-
-    Returns (stop_event, threads, lock). Three outcomes:
-
-    * We own channels → stop and lock are set, threads populated,
-      prints the platform list.
-    * Another process already owns channels → everything None/empty,
-      prints which PID holds them so the user can switch windows.
-    * No channels configured or import failed → everything None/empty,
-      silent.
-
-    Key rule: we always call ``start_all`` first and let fcntl.flock
-    decide who owns the lock. Peeking at the PID file alone is unsafe
-    — a previously-held lock file retains its old PID even after the
-    process dies, so pre-checks falsely report ownership and no
-    channels ever start on the next launch.
-    """
-    try:
-        from openprogram.channels import list_channels_status
-        from openprogram.channels.runner import start_all
-        from openprogram.channels._lock import read_holder_pid
-    except Exception:
-        return None, [], None
-    status = list_channels_status()
-    viable = [r for r in status
-              if r.get("enabled") and r.get("implemented")
-              and r.get("configured")]
-    if not viable:
-        return None, [], None
-
-    stop, threads, lock = start_all(quiet=True)
-    if lock is None:
-        # flock said someone else has it. Only NOW do we peek to tell
-        # the user which PID — and the live flock guarantees this PID
-        # is real (stale files can't fool us because the lock itself
-        # is what rejected us).
-        holder = read_holder_pid()
-        if holder is not None and holder != os.getpid():
-            console.print(
-                f"[dim]↪ channels owned by PID {holder} "
-                f"(that session answers Telegram/WeChat/etc.)[/]"
-            )
-        return None, [], None
-    if threads:
-        platforms = ", ".join(pid for pid, _ in threads)
-        console.print(
-            f"[dim]↪ channels owned by this session (PID {os.getpid()}): "
-            f"{platforms}  (Ctrl-C here stops them)[/]"
-        )
-    return stop, threads, lock
+            continue
+        reply = _run_turn(rt, user_input)
+        console.print()
+        console.print(reply)
+        # Fire-and-forget TTS; no-ops unless tts.provider is set.
+        try:
+            from openprogram.tts import speak
+            speak(reply)
+        except Exception:
+            pass

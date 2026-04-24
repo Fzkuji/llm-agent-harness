@@ -103,10 +103,17 @@ def start_all(*, quiet: bool = False) -> tuple[Optional[threading.Event],
 
 
 def run_all() -> int:
-    """Blocking — start every enabled channel and wait for Ctrl-C.
+    """Blocking — start every enabled channel and wait for Ctrl-C or
+    SIGTERM.
 
-    Entry point for ``openprogram channels start``.
+    Entry point for ``openprogram channels start`` (both foreground
+    and the detached daemon path, since the detached form simply
+    execs us with stdout piped to a log file). Writes a PID file
+    on startup and clears it on exit so ``openprogram channels
+    status`` / ``stop`` can find us.
     """
+    from openprogram.channels.daemon import write_pid_file, clear_pid_file
+
     status = list_channels_status()
     enabled = [r["platform"] for r in status if r["enabled"]]
     if not enabled:
@@ -121,6 +128,19 @@ def run_all() -> int:
         # "no channel started" explanation.
         return 1
 
+    write_pid_file()
+
+    # SIGTERM → same clean-shutdown path as Ctrl-C so the stop command
+    # from openprogram.channels.daemon.stop_daemon works.
+    import signal as _signal
+    def _on_sigterm(_signum, _frame):
+        raise KeyboardInterrupt
+    try:
+        _signal.signal(_signal.SIGTERM, _on_sigterm)
+    except (ValueError, OSError):
+        # Not main thread or platform doesn't allow — skip silently.
+        pass
+
     try:
         while any(t.is_alive() for _, t in threads):
             time.sleep(0.5)
@@ -133,6 +153,7 @@ def run_all() -> int:
                 print(f"[{pid}] still running; it'll drop on process exit")
     finally:
         lock.release()
+        clear_pid_file()
     return 0
 
 

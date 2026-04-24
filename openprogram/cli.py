@@ -132,10 +132,20 @@ def main():
 
     # ---- channels ---------------------------------------------------------
     p_channels = sub.add_parser("channels",
-        help="Run / inspect chat-channel bots (Telegram, Discord, Slack)")
+        help="Run / inspect chat-channel bots (Telegram, Discord, Slack, WeChat)")
     channels_sub = p_channels.add_subparsers(dest="channels_verb", metavar="verb")
     channels_sub.add_parser("list", help="Show per-platform enable + config status")
-    channels_sub.add_parser("start", help="Start every enabled channel (foreground)")
+    p_chstart = channels_sub.add_parser("start",
+        help="Start every enabled channel. Foreground by default; "
+             "use --detach to fork a background daemon and return.")
+    p_chstart.add_argument("--detach", action="store_true",
+        help="Fork a background daemon and return. Logs to "
+             "<state>/channels.log. Use `openprogram channels stop` to kill.")
+    channels_sub.add_parser("stop",
+        help="Kill the background channels daemon (reads lock file for PID).")
+    channels_sub.add_parser("status",
+        help="Show whether the channels daemon is running, which PID, "
+             "and when it started.")
 
     # ---- cron-worker ------------------------------------------------------
     p_cron = sub.add_parser("cron-worker",
@@ -272,8 +282,17 @@ def main():
                       f"{str(r['implemented']):6}")
             return
         if verb == "start":
+            if getattr(args, "detach", False):
+                from openprogram.channels.daemon import spawn_detached
+                sys.exit(spawn_detached())
             from openprogram.channels.runner import run_all
             sys.exit(run_all())
+        if verb == "stop":
+            from openprogram.channels.daemon import stop_daemon
+            sys.exit(stop_daemon())
+        if verb == "status":
+            from openprogram.channels.daemon import print_status
+            sys.exit(print_status())
         p_channels.print_help()
         return
 
@@ -834,37 +853,18 @@ def _cmd_web(port, open_browser):
 
     thread = start_web(port=port, open_browser=open_browser)
 
-    # Try to own chat-channel bots for this process. Only one
-    # openprogram process at a time can poll channels (file lock, see
-    # channels/_lock.py). We always go through start_all — fcntl.flock
-    # is the source of truth for ownership. Never pre-filter by PID
-    # file content; the PID file outlives dead processes and peeking
-    # it alone would block every subsequent launch after the first.
-    channels_stop = None
-    channels_threads: list = []
-    channels_lock = None
+    # Channels run in their own daemon process (see channels/daemon.py).
+    # Give the user one shot at starting one here if they've configured
+    # channels but no daemon is live — otherwise this server wouldn't
+    # route any inbound WeChat/Telegram/etc. into the Web UI session list.
     try:
-        import os as _os
-        from openprogram.channels import list_channels_status
-        from openprogram.channels.runner import start_all
-        from openprogram.channels._lock import read_holder_pid
-        viable = [r for r in list_channels_status()
-                  if r.get("enabled") and r.get("implemented")
-                  and r.get("configured")]
-        if viable:
-            channels_stop, channels_threads, channels_lock = start_all(
-                quiet=True,
-            )
-            if channels_lock is None:
-                holder = read_holder_pid()
-                if holder and holder != _os.getpid():
-                    print(f"Chat-channel bots already owned by PID "
-                          f"{holder}; skipping here.")
-            elif channels_threads:
-                print(f"Chat-channel bots running (PID {_os.getpid()}): "
-                      f"{', '.join(pid for pid, _ in channels_threads)}")
+        from rich.console import Console as _Console
+        from openprogram.channels.daemon import (
+            prompt_spawn_if_configured_but_dead,
+        )
+        prompt_spawn_if_configured_but_dead(_Console(), verb="browse")
     except Exception as e:  # noqa: BLE001
-        print(f"[channels] auto-start skipped: "
+        print(f"[channels] daemon check skipped: "
               f"{type(e).__name__}: {e}")
 
     print("Press Ctrl+C to stop.")
@@ -872,13 +872,6 @@ def _cmd_web(port, open_browser):
         thread.join()
     except KeyboardInterrupt:
         print("\nStopping web UI.")
-    finally:
-        if channels_stop is not None:
-            channels_stop.set()
-            for _pid, t in channels_threads:
-                t.join(timeout=2)
-        if channels_lock is not None:
-            channels_lock.release()
 
 
 def _cmd_deep_work(task, level, provider, model,
