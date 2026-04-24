@@ -62,6 +62,47 @@
     return parts.join(',') + '|' + (headId || '');
   }
 
+  // Collapse a user-display-runtime node with its sole assistant-
+  // display-runtime child into a single node in the graph. The chat
+  // UI already merges that pair into one "restored runtime" card, so
+  // showing two squares duplicates the same call visually. Keep the
+  // assistant (its id is what the merged card stamps on data-msg-id,
+  // so clicks / scroll-to-msg resolve correctly).
+  //
+  // Returns { graph, headId } — headId is remapped if it pointed at
+  // a removed user-runtime node.
+  function _collapseRuntimePairs(graph, headId) {
+    if (!graph || !graph.length) return { graph: graph, headId: headId };
+    var childrenOf = Object.create(null);
+    graph.forEach(function (m) {
+      if (m.parent_id) (childrenOf[m.parent_id] = childrenOf[m.parent_id] || []).push(m);
+    });
+    var removeIds = Object.create(null);
+    var reparent = Object.create(null);       // asst id  -> new parent_id
+    var userToAsst = Object.create(null);     // user id  -> asst id
+    graph.forEach(function (m) {
+      if (m.role !== 'user' || m.display !== 'runtime') return;
+      var kids = childrenOf[m.id] || [];
+      if (kids.length !== 1) return;
+      var c = kids[0];
+      if (c.role !== 'assistant' || c.display !== 'runtime') return;
+      removeIds[m.id] = true;
+      reparent[c.id] = m.parent_id || null;
+      userToAsst[m.id] = c.id;
+    });
+    if (headId && userToAsst[headId]) headId = userToAsst[headId];
+    var collapsed = [];
+    graph.forEach(function (m) {
+      if (removeIds[m.id]) return;
+      if (m.id in reparent) {
+        collapsed.push(Object.assign({}, m, { parent_id: reparent[m.id] }));
+      } else {
+        collapsed.push(m);
+      }
+    });
+    return { graph: collapsed, headId: headId };
+  }
+
   function _buildTree(graph) {
     var byId = Object.create(null);
     graph.forEach(function (m) { byId[m.id] = Object.assign({ children: [] }, m); });
@@ -298,6 +339,13 @@
   }
 
   function render(graph, headId) {
+    // Collapse user-runtime+asst-runtime pairs first so the rest of
+    // the renderer — signature, tree build, head-ancestor walk — sees
+    // the deduped graph.
+    var collapsed = _collapseRuntimePairs(graph, headId);
+    graph = collapsed.graph;
+    headId = collapsed.headId;
+
     var sig = _signature(graph, headId);
     if (sig === _lastSignature && _currentHead === headId) return;
     _lastSignature = sig;
