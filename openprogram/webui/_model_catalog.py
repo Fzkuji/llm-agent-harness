@@ -24,9 +24,12 @@ import shutil
 import threading
 from typing import Any
 
-# Importing this module triggers runtime-level registry augmentation
-# (adds Codex-route models like gpt-5.4 that aren't in models_generated.py).
+# Importing these modules triggers runtime-level registry augmentation:
+# - openai_codex runtime adds Codex-route models (gpt-5.4 family)
+# - anthropic._claude_code_registry adds Claude Code CLI models under
+#   the "claude-code" provider so list_enabled_models can find them
 from openprogram.providers.openai_codex import runtime as _codex_runtime  # noqa: F401
+from openprogram.providers.anthropic import _claude_code_registry as _cc_registry  # noqa: F401
 
 
 # Display labels for provider ids. Anything not listed falls back to
@@ -167,6 +170,11 @@ def _model_to_dict(model, enabled: bool) -> dict[str, Any]:
         "max_tokens": getattr(model, "max_tokens", 0) or 0,
         "vision": "image" in inputs,
         "reasoning": bool(getattr(model, "reasoning", False)),
+        # Thinking UX capability (see providers/thinking_catalog.py). Empty
+        # `thinking_levels` → UI hides the menu for this model.
+        "thinking_levels": list(getattr(model, "thinking_levels", []) or []),
+        "default_thinking_level": getattr(model, "default_thinking_level", None),
+        "thinking_variant": getattr(model, "thinking_variant", None),
         "tools": True,  # all HTTP providers route tool_calls
         "enabled": enabled,
     }
@@ -250,11 +258,17 @@ def list_models_for_provider(provider_id: str) -> list[dict[str, Any]]:
         out.append(_model_to_dict(m, m.id in enabled_ids))
 
     # Custom models: just {id, name?, context_window?} dicts from the user.
+    from openprogram.providers.thinking_catalog import derive_thinking_fields
     for raw in pcfg.get("custom_models", []):
         mid = raw.get("id") or ""
         if not mid or mid in seen:
             continue
-        # Lift into a pseudo-Model dict with whatever the user supplied.
+        reasoning = bool(raw.get("reasoning", False))
+        # Derive thinking capability from override table + defaults so custom
+        # models picked up via fetch-models still get a sensible picker.
+        levels, default_lv, variant = derive_thinking_fields(
+            provider_id, mid, reasoning, bool(raw.get("supports_xhigh", False))
+        )
         out.append({
             "id": mid,
             "name": raw.get("name", mid),
@@ -262,7 +276,10 @@ def list_models_for_provider(provider_id: str) -> list[dict[str, Any]]:
             "context_window": int(raw.get("context_window", 0)) or 0,
             "max_tokens": int(raw.get("max_tokens", 0)) or 0,
             "vision": bool(raw.get("vision", False)),
-            "reasoning": bool(raw.get("reasoning", False)),
+            "reasoning": reasoning,
+            "thinking_levels": levels,
+            "default_thinking_level": default_lv,
+            "thinking_variant": variant,
             "tools": bool(raw.get("tools", True)),
             "enabled": mid in enabled_ids,
             "custom": True,
@@ -457,6 +474,8 @@ def fetch_models_remote(provider_id: str, timeout: float = 15.0) -> dict[str, An
     if not isinstance(items, list):
         return {"error": "Unexpected /models response shape"}
 
+    from openprogram.providers.thinking_catalog import derive_thinking_fields
+
     models: list[dict[str, Any]] = []
     for it in items:
         if isinstance(it, str):
@@ -478,8 +497,21 @@ def fetch_models_remote(provider_id: str, timeout: float = 15.0) -> dict[str, An
             except Exception: pass
         if it.get("vision") or "vision" in str(it.get("architecture", {})).lower():
             entry["vision"] = True
-        if it.get("reasoning"):
+        reasoning_hint = bool(it.get("reasoning"))
+        if reasoning_hint:
             entry["reasoning"] = True
+        # Derive thinking capability so newly-discovered models come through
+        # with a working picker. Static data only — still re-derived at read
+        # time in list_models_for_provider to pick up override-table edits.
+        levels, default_lv, variant = derive_thinking_fields(
+            provider_id, mid, reasoning_hint
+        )
+        if levels:
+            entry["thinking_levels"] = levels
+            if default_lv:
+                entry["default_thinking_level"] = default_lv
+            if variant:
+                entry["thinking_variant"] = variant
         models.append(entry)
 
     result = add_custom_models(provider_id, models)
