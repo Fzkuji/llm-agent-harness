@@ -18,7 +18,7 @@ Optional metadata keys on the TOOL dict (all have safe defaults):
     "max_result_size_chars": int             advisory truncation budget
 
 Registration stays lazy — import only the tools you pass to
-``runtime.exec(..., tools=...)``.
+``runtime.exec(..., tools=...)`` or pick via ``get_many(toolset=...)``.
 """
 
 from __future__ import annotations
@@ -26,6 +26,11 @@ from __future__ import annotations
 from typing import Any
 
 from ._helpers import is_available as _is_available
+
+# Use builtin list/dict/etc. by aliasing them before importing the
+# ``list`` submodule — otherwise ``list(...)`` below would call the
+# module. Same concern isn't there for other submodule names.
+_builtin_list = list
 
 from .apply_patch import TOOL as APPLY_PATCH
 from .bash import TOOL as BASH
@@ -95,6 +100,20 @@ DEFAULT_TOOLS: list[str] = [
     "todo_write",
 ]
 
+# Named toolset presets. Pass the name to ``get_many(toolset=...)`` instead
+# of curating a list inline. The preset machinery stays here for future
+# role-based curation, but for now we treat every tool as generic — no
+# categorization by agent type. Only the two non-curated extremes are
+# kept as named entries:
+#
+# "default" — matches DEFAULT_TOOLS (kept in sync below).
+# "full"    — every registered tool. Mostly for debugging / listing.
+TOOLSETS: dict[str, list[str]] = {
+    "default": DEFAULT_TOOLS,
+    "full": _builtin_list(ALL_TOOLS.keys()),
+}
+
+
 def get(name: str) -> dict[str, Any]:
     """Look up a tool record by name. Raises KeyError if not registered."""
     return ALL_TOOLS[name]
@@ -103,16 +122,27 @@ def get(name: str) -> dict[str, Any]:
 def get_many(
     names: list[str] | None = None,
     *,
+    toolset: str | None = None,
     only_available: bool = False,
 ) -> list[dict[str, Any]]:
     """Look up several tools.
 
     - Pass ``names`` for an explicit list.
-    - Pass nothing to get ``DEFAULT_TOOLS``.
+    - Pass ``toolset="research"`` (etc) to use a named preset.
+    - Pass nothing to get DEFAULT_TOOLS.
     - Set ``only_available=True`` to drop tools whose ``check_fn`` /
       ``requires_env`` gating says they can't run right now (e.g. missing
       API keys) — useful so the model doesn't see tools it can't use.
     """
+    if names is not None and toolset is not None:
+        raise ValueError("Pass either `names` or `toolset`, not both.")
+    if toolset is not None:
+        try:
+            names = TOOLSETS[toolset]
+        except KeyError as e:
+            raise KeyError(
+                f"Unknown toolset {toolset!r}. Known: {sorted(TOOLSETS)}"
+            ) from e
     if names is None:
         names = DEFAULT_TOOLS
     tools = [get(n) for n in names]
@@ -126,15 +156,26 @@ def list_available() -> list[str]:
     return [name for name, tool in ALL_TOOLS.items() if _is_available(tool)]
 
 
-def register_tool(name: str, tool: dict[str, Any]) -> None:
-    """Register a tool at runtime. Idempotent — re-registering the same
-    name overwrites the previous entry."""
+def register_tool(name: str, tool: dict[str, Any], *, toolsets: list[str] | None = None) -> None:
+    """Register a tool at runtime and optionally add it to named presets.
+
+    Used by tools that get added after the initial import (e.g. third-party
+    extensions). Idempotent — re-registering the same name overwrites the
+    previous entry. Updates ``TOOLSETS["full"]`` automatically.
+    """
     ALL_TOOLS[name] = tool
+    if name not in TOOLSETS["full"]:
+        TOOLSETS["full"].append(name)
+    for preset in toolsets or []:
+        bucket = TOOLSETS.setdefault(preset, [])
+        if name not in bucket:
+            bucket.append(name)
 
 
 __all__ = [
     "ALL_TOOLS",
     "DEFAULT_TOOLS",
+    "TOOLSETS",
     "APPLY_PATCH",
     "BASH",
     "READ",
