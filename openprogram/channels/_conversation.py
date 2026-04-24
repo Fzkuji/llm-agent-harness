@@ -3,30 +3,33 @@
 Before this module existed, every channel just called ``rt.exec(text)``
 — stateless, every message independent, the bot couldn't follow up.
 
-Now each external user gets a named conversation that's:
+Then we added a crude 1:1 mapping (``conv_id = f"{platform}_{user_id}"``)
+so history persisted, but that baked the channel identity into the
+conversation id and made bindings impossible to change. Now we delegate
+to :mod:`openprogram.channels.bindings`: each (platform, user_id) is
+bound to a ``conv_id`` in a dedicated table, the conversation has its
+own UUID-style id, and a WeChat user's first incoming message either
+reuses the existing binding or auto-creates a new conversation +
+binding entry.
 
-* stored under ``~/.agentic/sessions/<platform>_<user_id>/`` via the
-  same webui persistence module, so it survives process restarts and
-  appears in the Web UI's session list alongside REPL-created
-  conversations
-* loaded fresh each turn (so concurrent CLI REPL, web UI, and channel
-  turns on the same conversation don't stomp each other's messages
-  in-memory — the on-disk file is the source of truth)
-* rendered as a text prefix in front of the incoming user message,
-  mirroring what ``webui/server.py:560`` does for its own chat path
+Per-turn flow:
 
-The format lines up with the one webui uses (``[User]: ...`` /
-``[Assistant]: ...``) so the same history works whichever front-end
-displays it later.
+1. ``auto_bind(platform, user_id)`` → ``conv_id``
+2. Load the persisted conversation (meta + messages) off disk.
+3. Render history as a ``[User]: ...`` / ``[Assistant]: ...`` prefix
+   (bounded by MAX_HISTORY_CHARS) and hand it plus the new user text
+   to ``rt.exec``.
+4. Append the user message + reply to messages, save, and poke any
+   running Web UI so browser tabs see the update live.
 """
 from __future__ import annotations
 
-import re
 import time
 import uuid
 from typing import Any
 
 from openprogram.webui import persistence as _persist
+from openprogram.channels import bindings as _bindings
 
 
 # Keep the history prefix bounded so a long-running WeChat thread
@@ -37,36 +40,23 @@ from openprogram.webui import persistence as _persist
 MAX_HISTORY_CHARS = 60_000
 
 
-def conv_id_for(platform: str, user_id: str) -> str:
-    """Deterministic conv id derived from platform + external user id.
-
-    Safe for use as a directory name — replaces anything outside
-    ``[A-Za-z0-9_-]`` with ``-`` so Tencent / Discord / Slack id
-    shapes (which may contain ``@``, ``.``, ``:`` etc.) don't break
-    the path.
-    """
-    safe_user = re.sub(r"[^A-Za-z0-9_-]", "-", user_id) or "anon"
-    return f"{platform}_{safe_user}"
-
-
 def turn_with_history(platform: str, user_id: str, user_text: str, rt,
                       *, user_display: str | None = None) -> str:
     """Run one turn with persistent history.
 
-    Loads the conversation (if any), appends the user's message, builds
-    a ``[User]: ... [Assistant]: ...`` prefix from the recent history,
-    calls ``rt.exec``, appends the reply, and saves. Returns the
-    assistant text.
+    Resolves the (platform, user_id) to a conversation via the bindings
+    table — creating one on first contact. Loads the conversation,
+    appends the user's message, builds a ``[User]: ... [Assistant]:``
+    prefix from the recent history, calls ``rt.exec``, appends the
+    reply, and saves. Returns the assistant text.
 
-    ``user_display`` is a human-readable label for the user side of
-    the conversation — e.g. WeChat nickname or Telegram @handle. If
-    omitted we fall back to ``user_id``. Only used for the
-    conversation title shown in the Web UI list; the prompt itself
-    always says ``[User]:``.
+    ``user_display`` is a human-readable label — WeChat nickname,
+    Telegram @handle, etc. Only used for the conversation title shown
+    in the Web UI list; the prompt itself always says ``[User]:``.
     """
-    conv_id = conv_id_for(platform, user_id)
-    meta, messages = _load_or_init(conv_id, platform,
-                                   user_display or user_id)
+    display = user_display or user_id
+    conv_id = _bindings.auto_bind(platform, user_id, user_display=display)
+    meta, messages = _load_or_init(conv_id, platform, display)
 
     user_msg_id = uuid.uuid4().hex[:12]
     messages.append({
@@ -246,17 +236,21 @@ def _poke_live_webui(conv_id: str, messages: list[dict], meta: dict) -> None:
         if was_new:
             # Rebuild the full sidebar list the same shape the normal
             # `list_conversations` action returns, so clients pick it
-            # up through the existing dispatcher.
+            # up through the existing dispatcher. Include the binding
+            # entry so the sidebar can show a "WeChat: alice"-style
+            # badge the moment the conversation appears.
             conv_list = []
             with srv._conversations_lock:
                 for cid, c in srv._conversations.items():
                     runtime = c.get("runtime")
                     sid = getattr(runtime, "_session_id", None) if runtime else None
+                    binding = _bindings.get_binding_for_conv(cid)
                     conv_list.append({
                         "id": cid,
                         "title": c.get("title", "Untitled"),
                         "created_at": c.get("created_at"),
                         "has_session": sid is not None,
+                        "binding": binding,
                     })
             conv_list.sort(key=lambda c: c.get("created_at") or 0)
             srv._broadcast(json.dumps(

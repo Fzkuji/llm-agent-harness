@@ -146,6 +146,23 @@ def main():
     channels_sub.add_parser("status",
         help="Show whether the channels worker is running, which PID, "
              "and when it started.")
+    channels_sub.add_parser("bindings",
+        help="List every conversation ↔ (platform, user) binding.")
+    p_chatt = channels_sub.add_parser("attach",
+        help="Attach a conversation to an external channel user so "
+             "inbound messages land in it and outbound replies are "
+             "routed back.")
+    p_chatt.add_argument("conv_id", help="Conversation id")
+    p_chatt.add_argument("--platform", required=True,
+        choices=["wechat", "telegram", "discord", "slack"])
+    p_chatt.add_argument("--user", required=True,
+        help="External user id (Telegram chat_id, WeChat from_user_id, "
+             "or <channel_id>_<user_id> for Discord / Slack).")
+    p_chatt.add_argument("--display", default=None,
+        help="Human-readable label for the binding (defaults to --user).")
+    p_chdet = channels_sub.add_parser("detach",
+        help="Remove a conversation's channel binding.")
+    p_chdet.add_argument("conv_id", help="Conversation id to unbind")
 
     # ---- cron-worker ------------------------------------------------------
     p_cron = sub.add_parser("cron-worker",
@@ -293,6 +310,46 @@ def main():
         if verb == "status":
             from openprogram.channels.worker import print_status
             sys.exit(print_status())
+        if verb == "bindings":
+            from openprogram.channels import bindings as _bindings_mod
+            _bindings_mod.migrate_legacy_if_needed()
+            rows = _bindings_mod.list_all()
+            if not rows:
+                print("No channel bindings. Inbound messages will "
+                      "auto-create new conversations; or attach an "
+                      "existing one with `openprogram channels attach`.")
+                return
+            print(f"{'platform':10} {'user_id':24} {'conv_id':22} "
+                  f"display")
+            for e in rows:
+                print(f"{e['platform']:10} "
+                      f"{str(e['user_id'])[:23]:24} "
+                      f"{e['conv_id']:22} "
+                      f"{e.get('user_display','')}")
+            return
+        if verb == "attach":
+            from openprogram.channels import bindings as _bindings_mod
+            displaced = _bindings_mod.attach(
+                args.platform, args.user, args.conv_id,
+                args.display or args.user,
+            )
+            if displaced:
+                print(f"Attached. (Displaced prior binding: "
+                      f"{displaced['platform']}:{displaced['user_id']} "
+                      f"→ {displaced['conv_id']})")
+            else:
+                print(f"Attached {args.platform}:{args.user} → "
+                      f"{args.conv_id}")
+            return
+        if verb == "detach":
+            from openprogram.channels import bindings as _bindings_mod
+            removed = _bindings_mod.detach(conv_id=args.conv_id)
+            if removed:
+                print(f"Detached {removed['platform']}:"
+                      f"{removed['user_id']} from {args.conv_id}")
+            else:
+                print(f"No binding on {args.conv_id}.")
+            return
         p_channels.print_help()
         return
 

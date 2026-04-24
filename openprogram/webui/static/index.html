@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Agentic</title>
-<link rel="stylesheet" href="/css/style.css?v=113">
+<link rel="stylesheet" href="/css/style.css?v=107">
 </head>
 <body>
 <div class="app">
@@ -22,6 +22,7 @@
         <span id="statusBadge" class="status-badge">connecting...</span>
         <span id="chatAgentBadge" class="runtime-badge agent-badge" onclick="openAgentSelector('chat')" title="Chat agent model">Chat: ...</span>
         <span id="execAgentBadge" class="runtime-badge agent-badge" onclick="openAgentSelector('exec')" title="Execution agent model">Exec: ...</span>
+        <span id="channelBadge" class="runtime-badge channel-badge" onclick="openChannelBindingMenu()" title="Channel binding — click to attach / detach">Channel: none</span>
       </div>
       <div class="topbar-right">
         <button class="btn" onclick="toggleDetail()" id="btnDetail">Detail Panel</button>
@@ -34,7 +35,7 @@
         <div class="chat-messages" id="chatMessages">
           <div class="welcome" id="welcomeScreen" style="display:none">
             <div class="welcome-top">
-              <div class="welcome-logo">{<span class="logo-l1">L</span><span class="logo-l2">L</span><span class="logo-m">M</span><span class="welcome-logo-caret"></span>}</div>
+              <div class="welcome-logo">{<span class="logo-l1">L</span><span class="logo-l2">L</span><span class="logo-m">M</span>}</div>
               <div class="welcome-title">Agentic Programming</div>
               <div class="welcome-text">
                 Run agentic functions, create new ones, or ask questions.
@@ -100,11 +101,11 @@
 <script src="/js/helpers.js?v=15"></script>
 <script src="/js/tree.js?v=8"></script>
 <script src="/js/chat.js?v=10"></script>
-<script src="/js/workdir.js?v=3"></script>
-<script src="/js/sidebar.js?v=34"></script>
-<script src="/js/providers.js?v=8"></script>
-<script src="/js/settings.js?v=13"></script>
-<script src="/js/ui.js?v=11"></script>
+<script src="/js/sidebar.js?v=29"></script>
+<script src="/js/bindings.js?v=1"></script>
+<script src="/js/providers.js?v=5"></script>
+<script src="/js/settings.js?v=5"></script>
+<script src="/js/ui.js?v=10"></script>
 <script src="/js/scrollbar.js?v=2"></script>
 <script src="/js/init.js?v=13"></script>
 </body>

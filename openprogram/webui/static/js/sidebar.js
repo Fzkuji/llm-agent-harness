@@ -19,7 +19,16 @@ function renderConversations() {
     for (var ci = 0; ci < convs.length; ci++) {
       var c = convs[ci];
       var active = c.id === currentConvId ? ' active' : '';
+      var bindingIcon = '';
+      if (c.binding && c.binding.platform
+          && typeof platformIcon === 'function') {
+        bindingIcon = '<span class="conv-binding-icon" title="'
+          + escAttr(platformLabel(c.binding.platform) + ': '
+              + (c.binding.user_display || c.binding.user_id))
+          + '">' + platformIcon(c.binding.platform) + '</span>';
+      }
       html += '<div class="conv-item' + active + '" onclick="switchConversation(\'' + c.id + '\')" title="' + escAttr(c.title || 'Untitled') + '">' +
+        bindingIcon +
         '<span class="conv-title">' + escHtml(c.title || 'Untitled') + '</span>' +
         '<span class="conv-del" onclick="event.stopPropagation();deleteConversation(\'' + c.id + '\')" title="Delete"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="2" y1="2" x2="8" y2="8"/><line x1="8" y1="2" x2="2" y2="8"/></svg></span>' +
       '</div>';
@@ -106,7 +115,7 @@ function newConversation() {
   welcome.id = 'welcomeScreen';
   welcome.innerHTML =
     '<div class="welcome-top">' +
-      '<div class="welcome-logo">{<span class="logo-l1">L</span><span class="logo-l2">L</span><span class="logo-m">M</span><span class="welcome-logo-caret"></span>}</div>' +
+      '<div class="welcome-logo">{<span class="logo-l1">L</span><span class="logo-l2">L</span><span class="logo-m">M</span>}</div>' +
       '<div class="welcome-title">Agentic Programming</div>' +
       '<div class="welcome-text">Run agentic functions, create new ones, or ask questions. Type a command or natural language below.</div>' +
     '</div>';
@@ -129,8 +138,16 @@ function newConversation() {
 
 function loadConversationData(data) {
   if (!data.messages) data.messages = [];
+  // Preserve any binding the sidebar learned from the
+  // conversations_list response — the conversation_loaded envelope
+  // doesn't always carry binding fields.
+  var prev = conversations[data.id];
+  if (prev && prev.binding && !data.binding) {
+    data.binding = prev.binding;
+  }
   conversations[data.id] = data;
   renderConversations();
+  if (typeof renderChannelBadge === 'function') renderChannelBadge();
   if (data.id === currentConvId) {
     var area = document.getElementById('chatArea');
     var hasSavedScroll = !!sessionStorage.getItem('agentic_scroll');
@@ -639,7 +656,6 @@ function _pinBottomRow(bottomRow) {
 
 function _buildFormHtml(fn, fieldsHtml) {
   // No footer — .input-bottom-row stays as permanent element in wrapper
-  var workdirHtml = (typeof buildWorkdirField === 'function') ? buildWorkdirField() : '';
   return '<div class="fn-form-header">' +
     '<div class="fn-form-title">' +
       '<span class="fn-form-name"><span style="color:var(--text-secondary);font-weight:400">function </span>' + escHtml(fn.name) + '</span>' +
@@ -647,7 +663,7 @@ function _buildFormHtml(fn, fieldsHtml) {
     '</div>' +
     '<button class="fn-form-close" onclick="closeFnForm()" title="Close">&times;</button>' +
   '</div>' +
-  '<div class="fn-form-body">' + workdirHtml + fieldsHtml + '</div>';
+  '<div class="fn-form-body">' + fieldsHtml + '</div>';
 }
 
 function _showFnFormSwitch(fn, wrapper, sendBtn) {
@@ -688,7 +704,6 @@ function _showFnFormSwitch(fn, wrapper, sendBtn) {
   wrapper.dataset.fnName = fn.name;
   sendBtn.setAttribute('onclick', "submitFnForm('" + escAttr(fn.name) + "')");
   if (typeof buildThinkingMenu === 'function') buildThinkingMenu();
-  if (typeof initWorkdirField === 'function') initWorkdirField(fn.name);
 
   // Animate to target height
   requestAnimationFrame(function() {
@@ -839,9 +854,6 @@ function showFnForm(fn) {
       });
     }
   }, 50);
-
-  // --- Prefill workdir from server (remembered per conversation+function) ---
-  if (typeof initWorkdirField === 'function') initWorkdirField(fn.name);
 }
 
 function closeFnForm() {
@@ -999,17 +1011,6 @@ function submitFnForm(fnName) {
   var fn = availableFunctions.find(function(f) { return f.name === fnName; });
   if (!fn) return;
 
-  // work_dir is always required — it's a runtime-level setting, not a param.
-  var workdirEl = document.getElementById('fnField_work_dir');
-  var workdirVal = workdirEl ? workdirEl.value.trim() : '';
-  if (!workdirVal) {
-    if (workdirEl) {
-      workdirEl.classList.add('workdir-input-error');
-      workdirEl.focus();
-    }
-    return;
-  }
-
   var params = (fn.params_detail || []).filter(function(p) {
     if (p.name === 'runtime' || p.name === 'callback' || p.name === 'exec_runtime' || p.name === 'review_runtime') return false;
     if (p.hidden) return false;
@@ -1040,13 +1041,6 @@ function submitFnForm(fnName) {
     } else {
       parts.push(p.name + '=' + val);
     }
-  }
-
-  // Append work_dir last so user-facing command text keeps function params first.
-  if (workdirVal.indexOf(' ') !== -1 || workdirVal.indexOf('"') !== -1) {
-    parts.push('work_dir=' + JSON.stringify(workdirVal));
-  } else {
-    parts.push('work_dir=' + workdirVal);
   }
 
   var command = parts.join(' ');

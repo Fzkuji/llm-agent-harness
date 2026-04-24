@@ -668,6 +668,23 @@ def _execute_in_context(conv_id: str, msg_id: str, action: str,
                 })
                 _broadcast_context_stats(conv_id, msg_id, chat_runtime=runtime)
 
+                # If this conversation is bound to an external channel
+                # (WeChat/Telegram/etc.), route the reply back out so
+                # the person chatting from their phone sees it.
+                try:
+                    from openprogram.channels import bindings as _bindings
+                    from openprogram.channels.outbound import send_to_channel
+                    entry = _bindings.get_binding_for_conv(conv_id)
+                    if entry:
+                        send_to_channel(
+                            entry["platform"],
+                            entry["user_id"],
+                            str(result),
+                        )
+                except Exception as e:  # noqa: BLE001
+                    _log(f"[channel outbound] skipped: "
+                         f"{type(e).__name__}: {e}")
+
             elif action == "run":
                 # Validate create() description
                 if func_name == "create" and kwargs and "description" in kwargs:
@@ -1739,22 +1756,76 @@ async def _handle_ws_command(ws, cmd: dict):
             fq.put(answer)
 
     elif action == "list_conversations":
+        try:
+            from openprogram.channels import bindings as _bindings_mod
+            # Pay the one-time migration scan on the first list request.
+            _bindings_mod.migrate_legacy_if_needed()
+        except Exception:
+            _bindings_mod = None  # type: ignore[assignment]
         conv_list = []
         with _conversations_lock:
             for cid, conv in _conversations.items():
                 runtime = conv.get("runtime")
                 session_id = getattr(runtime, '_session_id', None) if runtime else None
+                binding = None
+                if _bindings_mod is not None:
+                    binding = _bindings_mod.get_binding_for_conv(cid)
                 conv_list.append({
                     "id": cid,
                     "title": conv.get("title", "Untitled"),
                     "created_at": conv.get("created_at"),
                     "has_session": session_id is not None,
+                    "binding": binding,
                 })
         conv_list.sort(key=lambda c: c.get("created_at") or 0)
         await ws.send_text(json.dumps({
             "type": "conversations_list",
             "data": conv_list,
         }, default=str))
+
+    elif action == "list_channel_bindings":
+        try:
+            from openprogram.channels import bindings as _bindings_mod
+            rows = _bindings_mod.list_all()
+        except Exception:
+            rows = []
+        await ws.send_text(json.dumps({
+            "type": "channel_bindings",
+            "data": rows,
+        }, default=str))
+
+    elif action == "attach_channel":
+        from openprogram.channels import bindings as _bindings_mod
+        conv_id = cmd.get("conv_id") or ""
+        platform = cmd.get("platform") or ""
+        user_id = cmd.get("user_id") or ""
+        user_display = cmd.get("user_display") or user_id
+        if conv_id and platform and user_id:
+            displaced = _bindings_mod.attach(
+                platform, user_id, conv_id, user_display,
+            )
+            _broadcast(json.dumps({
+                "type": "channel_binding_changed",
+                "data": {
+                    "conv_id": conv_id,
+                    "binding": _bindings_mod.get_binding_for_conv(conv_id),
+                    "displaced": displaced,
+                },
+            }, default=str))
+
+    elif action == "detach_channel":
+        from openprogram.channels import bindings as _bindings_mod
+        conv_id = cmd.get("conv_id") or ""
+        if conv_id:
+            removed = _bindings_mod.detach(conv_id=conv_id)
+            _broadcast(json.dumps({
+                "type": "channel_binding_changed",
+                "data": {
+                    "conv_id": conv_id,
+                    "binding": None,
+                    "removed": removed,
+                },
+            }, default=str))
 
 
 # ---------------------------------------------------------------------------
