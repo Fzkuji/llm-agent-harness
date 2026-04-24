@@ -125,48 +125,46 @@ _POINTER = "❯"
 def _qstyle():
     """Late-bound style object so import-time failures in questionary
     don't cascade into setup_wizard import.
+
+    Never pass ``default=`` to a single-select prompt. Questionary's
+    ``_is_selected`` (prompts/common.py:327) flags the default-matching
+    choice permanently, and the render code falls into an ``elif``
+    cascade where ``class:selected`` wins over ``class:highlighted``
+    forever — so the cursor-on-that-row state is never reachable. Put
+    the desired default at index 0 instead and let questionary's own
+    initial-pointer land on it. Then ``class:highlighted`` works as
+    expected: whichever row the cursor is on gets the cyan bold style.
     """
     try:
         from questionary import Style
     except ImportError:
         return None
-    # questionary's InquirerControl puts the DEFAULT choice into
-    # ``selected_options`` permanently (not just when the cursor is on
-    # it), so `class:selected` gets applied to the default row every
-    # render. If that style has any bg or reverse bits, the default
-    # row ends up looking "selected" even after the user arrow-keyed
-    # to a different item.
-    #
-    # Explicit bg:default + noinherit on both `selected` and
-    # `highlighted` defeats any bg / reverse that might leak in from
-    # questionary's or prompt_toolkit's fallback layers. The cursor is
-    # then identified purely by the `❯` pointer + cyan bold text; the
-    # default row looks identical to non-cursor rows once you've moved
-    # away.
     return Style([
         ("qmark",        "fg:ansicyan bold"),
         ("question",     "bold"),
         ("answer",       "fg:ansicyan bold"),
-        ("pointer",      "noinherit fg:ansicyan bold"),
-        ("highlighted",  "noinherit fg:ansicyan bold bg:default"),
-        ("selected",     "noinherit bg:default"),  # match plain text
+        ("pointer",      "fg:ansicyan bold"),
+        ("highlighted",  "fg:ansicyan bold"),
+        ("selected",     "fg:ansicyan"),
         ("separator",    "fg:ansibrightblack"),
         ("instruction",  "fg:ansibrightblack"),
-        ("text",         "bg:default"),
         ("disabled",     "fg:ansibrightblack italic"),
     ])
 
 
 def _confirm(prompt: str, default: bool = True) -> bool:
     """Arrow-key Yes/No select. Uses questionary.select for a consistent
-    look with every other prompt — no y/n keypress."""
+    look with every other prompt — no y/n keypress.
+
+    Default is placed at index 0 (not passed via ``default=``) — see
+    the comment in ``_qstyle`` for why.
+    """
     if _have_questionary():
         import questionary
-        default_label = "Yes" if default else "No"
+        choices = ["Yes", "No"] if default else ["No", "Yes"]
         ans = questionary.select(
             prompt,
-            choices=["Yes", "No"],
-            default=default_label,
+            choices=choices,
             use_shortcuts=False,
             use_arrow_keys=True,
             instruction="(↑/↓ enter)",
@@ -190,10 +188,14 @@ def _choose_one(prompt: str, choices: list[str],
         return None
     if _have_questionary():
         import questionary
+        # Never pass default= to questionary.select — see _qstyle
+        # docstring. Reorder so the default sits at index 0; the initial
+        # cursor position lands on it naturally.
+        if default and default in choices and choices[0] != default:
+            choices = [default] + [c for c in choices if c != default]
         ans = questionary.select(
             prompt,
             choices=choices,
-            default=default or choices[0],
             use_shortcuts=False,
             use_arrow_keys=True,
             instruction="(↑/↓ enter)",

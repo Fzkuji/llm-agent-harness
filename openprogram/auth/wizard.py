@@ -331,15 +331,23 @@ def _action_profiles_menu() -> None:
 # ---------------------------------------------------------------------------
 
 def _pick_profile(pm, *, default: str) -> Optional[str]:
-    """Ask which profile to act on. Returns None on cancel."""
+    """Ask which profile to act on. Returns None on cancel.
+
+    Never pass default= to questionary.select — questionary flags the
+    default-matching choice permanently and the cursor-row highlight
+    breaks for that row (see setup_wizard._qstyle docstring). We
+    reorder instead so the default sits at index 0 where the initial
+    cursor lands.
+    """
     profiles = pm.list_profiles()
     if len(profiles) == 1:
         return profiles[0].name
-    choices = [Choice(p.name, value=p.name) for p in profiles]
+    ordered = ([p for p in profiles if p.name == default]
+               + [p for p in profiles if p.name != default])
+    choices = [Choice(p.name, value=p.name) for p in ordered]
     return questionary.select(
         "Which profile?",
         choices=choices,
-        default=default,
         qmark="›",
     ).ask()
 
