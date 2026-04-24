@@ -151,7 +151,9 @@ def main():
 
     args = parser.parse_args()
 
-    # -------- No subcommand: mode flags or interactive chooser --------
+    # -------- No subcommand: bare `openprogram` drops into CLI chat --------
+    # Hermes-style: no mode chooser, the banner + REPL is the default
+    # experience. --web routes to the browser UI; --print runs one-shot.
     if args.command is None:
         if args.print_prompt:
             _cmd_cli_chat(oneshot=args.print_prompt)
@@ -159,10 +161,7 @@ def main():
         if args.web:
             _cmd_web(args.port, not args.no_browser)
             return
-        if args.cli:
-            _cmd_cli_chat(oneshot=None)
-            return
-        _launch_mode_chooser(args.port, not args.no_browser)
+        _cmd_cli_chat(oneshot=None)
         return
 
     # -------- Subcommand dispatch --------
@@ -240,50 +239,14 @@ def main():
         return
 
 
-def _launch_mode_chooser(port: int, open_browser: bool) -> None:
-    """Interactive mode picker when bare ``openprogram`` is invoked.
-
-    Two options for now: the terminal chat (stub, TBD) and the web UI.
-    Kept deliberately minimal — no ncurses / prompt_toolkit dependency,
-    just plain stdin so the entry point stays dep-free.
-    """
-    print()
-    print("Welcome to OpenProgram")
-    print("-" * 30)
-    print("  1) CLI chat   in-terminal conversation")
-    print(f"  2) Web UI     browser at http://localhost:{port}")
-    print("  q) Quit")
-    print()
-    try:
-        choice = input("> ").strip().lower()
-    except (EOFError, KeyboardInterrupt):
-        print()
-        return
-    if choice in ("1", "c", "cli"):
-        _cmd_cli_chat(oneshot=None)
-    elif choice in ("2", "w", "web"):
-        _cmd_web(port, open_browser)
-    elif choice in ("", "q", "quit", "exit"):
-        return
-    else:
-        print(f"Unknown choice: {choice!r}")
-        sys.exit(1)
-
-
 def _cmd_cli_chat(oneshot: str | None = None) -> None:
     """Terminal chat entry point.
 
-    Stub pending the TUI implementation. For now we tell the user to
-    use the web UI. The argparse shape + chooser wiring is in place so
-    the TUI can land as a single drop-in later.
+    Implementation lives in :mod:`openprogram.cli_chat` so cli.py stays
+    focused on argparse + dispatch.
     """
-    if oneshot:
-        print("CLI one-shot mode not yet implemented.")
-        print(f"Would have sent: {oneshot!r}")
-        print("Workaround: `openprogram --web` or `openprogram web`.")
-        return
-    print("CLI chat mode not yet implemented.")
-    print("Workaround: `openprogram --web` or `openprogram web`.")
+    from openprogram.cli_chat import run_cli_chat
+    run_cli_chat(oneshot=oneshot)
 
 
 def _cmd_resume(session_id, answer):
