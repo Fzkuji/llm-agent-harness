@@ -7,7 +7,11 @@ No weixin-official-account / Enterprise WeChat registration required
 Protocol summary (host: ``https://ilinkai.weixin.qq.com``):
 
     GET /ilink/bot/get_bot_qrcode?bot_type=3
-        → {qrcode, qrcode_img_content(base64 PNG)}
+        → {qrcode, qrcode_img_content}
+           qrcode            — session token to pass to get_qrcode_status
+           qrcode_img_content — URL string to encode into a QR the user
+                                scans with WeChat. NOT an image, despite
+                                the name.
     GET /ilink/bot/get_qrcode_status?qrcode=<token>
         → wait | scaned | confirmed | expired
            (confirmed includes {bot_token, ilink_bot_id, baseurl, ilink_user_id})
@@ -30,10 +34,6 @@ import base64
 import json
 import os
 import random
-import shutil
-import subprocess
-import sys
-import tempfile
 import threading
 import time
 import uuid
@@ -287,30 +287,23 @@ def _qr_login() -> dict[str, str] | None:
         return None
 
     token = data.get("qrcode")
-    png_b64 = data.get("qrcode_img_content")
-    if not token or not png_b64:
+    # iLink returns qrcode_img_content as the URL string to encode into
+    # a QR, NOT a base64-encoded image — the client renders it locally.
+    # (weclaw/cmd/start.go:294 uses qrterminal.GenerateWithConfig on
+    # this field for the same reason.)
+    qr_url = data.get("qrcode_img_content")
+    if not token or not qr_url:
         print("[wechat] QR response missing fields; aborting login")
         return None
 
-    try:
-        qr_path = _save_qr_png(png_b64)
-    except RuntimeError as e:
-        print(f"[wechat] {e}")
-        print(f"[wechat] fallback — QR payload URL: {token}")
-        print("[wechat] render this URL as a QR code (e.g. "
-              "https://www.qr-code-generator.com) and scan with WeChat.")
-        qr_path = ""
-
-    if qr_path:
-        print(f"[wechat] QR image saved to {qr_path}")
-        opened = _open_file(qr_path)
-        if not opened:
-            print("[wechat] open the file above in any image viewer, "
-                  "then scan it with WeChat on your phone.")
-        else:
-            print("[wechat] opened in your default image viewer. "
-                  "Scan with WeChat on your phone.")
-
+    print()
+    rendered = _print_qr_terminal(qr_url)
+    if not rendered:
+        print(f"[wechat] QR payload URL: {qr_url}")
+        print("[wechat] install `qrcode` (`pip install openprogram[channels]`) "
+              "to render the QR in-terminal, or paste the URL above into any "
+              "QR generator and scan with WeChat.")
+    print()
     print("[wechat] waiting for scan + confirm (up to a few minutes)...")
     while True:
         try:
@@ -344,69 +337,35 @@ def _qr_login() -> dict[str, str] | None:
                 print("[wechat] confirm response missing token/bot id; abort")
                 return None
             _save_creds(creds)
-            try:
-                os.unlink(qr_path)
-            except OSError:
-                pass
             print(f"[wechat] logged in! credentials saved to {_creds_path(creds['ilink_bot_id'])}")
             return creds
         print(f"[wechat] unexpected status {status!r}; retrying...")
 
 
-def _save_qr_png(b64_png: str) -> str:
-    """Decode iLink's qrcode_img_content to a PNG file.
+def _print_qr_terminal(payload: str) -> bool:
+    """Render ``payload`` as an ASCII QR code to stdout. Returns True
+    on success, False if the ``qrcode`` library isn't installed.
 
-    The server sometimes returns a bare base64 payload, sometimes a
-    full data URI (``data:image/png;base64,iVBOR...``). Strip the
-    prefix if present. After decoding we check the PNG magic header —
-    if it doesn't match we raise so the caller can surface the raw
-    payload instead of silently writing a garbage file that breaks
-    Preview when ``open`` hands it over.
+    Uses ``print_ascii(invert=True)`` so the QR has a white background
+    and black squares — same orientation WeChat's phone camera expects.
+    Half-block rendering isn't used because many terminal font pairings
+    still clip at 1x row heights; the full-block ASCII path is
+    reliable across iTerm / Terminal.app / VS Code terminal.
     """
-    payload = b64_png.strip()
-    if payload.startswith("data:"):
-        # "data:image/png;base64,<b64>" or "data:image/jpeg;base64,<b64>"
-        _, _, payload = payload.partition(",")
-    raw = base64.b64decode(payload)
-    if not raw.startswith(b"\x89PNG\r\n\x1a\n"):
-        # Not a PNG — could be JPEG or something else; still save but
-        # name it .bin so the user sees the mismatch rather than a
-        # broken .png file.
-        fd, path = tempfile.mkstemp(prefix="op-wechat-qr-", suffix=".bin")
-        with os.fdopen(fd, "wb") as f:
-            f.write(raw)
-        raise RuntimeError(
-            f"server returned a non-PNG QR image ({len(raw)} bytes, "
-            f"first magic: {raw[:8]!r}). Dumped to {path}. "
-            "Please report this."
-        )
-    fd, path = tempfile.mkstemp(prefix="op-wechat-qr-", suffix=".png")
-    with os.fdopen(fd, "wb") as f:
-        f.write(raw)
-    return path
-
-
-def _open_file(path: str) -> bool:
-    if sys.platform == "darwin":
-        cmd = "open"
-    elif sys.platform.startswith("linux"):
-        cmd = "xdg-open"
-    elif sys.platform == "win32":
-        try:
-            os.startfile(path)  # type: ignore[attr-defined]
-            return True
-        except Exception:
-            return False
-    else:
-        return False
-    if not shutil.which(cmd):
-        return False
     try:
-        subprocess.Popen([cmd, path], stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL)
-        return True
-    except Exception:
+        import qrcode
+    except ImportError:
         return False
+    qr = qrcode.QRCode(
+        version=None,
+        error_correction=qrcode.constants.ERROR_CORRECT_L,
+        box_size=1,
+        border=2,
+    )
+    qr.add_data(payload)
+    qr.make(fit=True)
+    qr.print_ascii(invert=True)
+    return True
 
 
 # --- Misc helpers -----------------------------------------------------------

@@ -70,6 +70,16 @@ gui = [
     "ultralytics>=8.3.0",
     "requests>=2.31.0",
 ]
+channels = [
+    # WeChat (iLink bot) QR login renders a QR code in the terminal
+    # from the server-provided URL. Pure Python, tiny. No Pillow
+    # needed for print_ascii() rendering.
+    "qrcode>=7.0",
+    # Discord channel bot.
+    "discord.py>=2.3.0",
+    # Slack Socket Mode bot.
+    "slack_sdk>=3.27.0",
+]
 all = [
     # LLM providers
     "anthropic>=0.30.0",
@@ -86,6 +96,10 @@ all = [
     "pynput>=1.7.0",
     "ultralytics>=8.3.0",
     "requests>=2.31.0",
+    # Channels
+    "qrcode>=7.0",
+    "discord.py>=2.3.0",
+    "slack_sdk>=3.27.0",
 ]
 
 [project.scripts]
