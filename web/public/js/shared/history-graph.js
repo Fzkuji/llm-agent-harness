@@ -209,31 +209,47 @@
     }
   }
 
+  // Build a shape element at an arbitrary base radius. Used both for
+  // the full-size coloured node and for the shrunk white cursor that
+  // rides on top of the current node.
+  function _buildShapeEl(shape, color, r) {
+    if (shape === 'circle') {
+      return _svg('circle', { r: r, fill: color });
+    } else if (shape === 'triangle') {
+      var t = r + 1.2;
+      return _svg('polygon', {
+        points: '0,' + (-t) + ' ' + t + ',' + (t * 0.85) + ' ' + (-t) + ',' + (t * 0.85),
+        fill: color,
+      });
+    } else if (shape === 'square') {
+      var s = r - 0.2;
+      return _svg('rect', {
+        x: -s, y: -s, width: s * 2, height: s * 2, rx: 0.8, ry: 0.8, fill: color,
+      });
+    }
+    return null;
+  }
+
   function _appendShape(parent, shape, color, isCurrent) {
     // Solid coloured shapes — no outline. The "current view" marker
-    // is a separate white dot (appended after all nodes) that slides
-    // between nodes via a CSS transform transition. Current node is
-    // slightly bigger so the white dot sits inside it, reading as a
-    // hollow centre on top of the coloured ring.
-    var common = { fill: color };
-    var el;
-    if (shape === 'circle') {
-      el = _svg('circle', Object.assign({ r: NODE_R }, common));
-    } else if (shape === 'triangle') {
-      var t0 = NODE_R + 1.2;
-      el = _svg('polygon', Object.assign({
-        points: '0,' + (-t0) + ' ' + t0 + ',' + (t0 * 0.85) + ' ' + (-t0) + ',' + (t0 * 0.85),
-      }, common));
-    } else if (shape === 'square') {
-      var s0 = NODE_R - 0.2;
-      el = _svg('rect', Object.assign({
-        x: -s0, y: -s0, width: s0 * 2, height: s0 * 2, rx: 0.8, ry: 0.8,
-      }, common));
-    }
-    if (el) {
-      if (isCurrent) _applyShapeSize(el, true);
-      parent.appendChild(el);
-    }
+    // is a separate shape-matched white fill appended after all
+    // nodes that slides between nodes via a CSS transform
+    // transition. Current node is slightly bigger so the white
+    // shape sits inside it, reading as a hollow centre.
+    var el = _buildShapeEl(shape, color, NODE_R);
+    if (!el) return;
+    if (isCurrent) _applyShapeSize(el, true);
+    parent.appendChild(el);
+  }
+
+  // Radius used for the white cursor shape — ~55% of the node radius
+  // so it fits cleanly inside the bumped-up current node.
+  var CURSOR_R = NODE_R * 0.55;
+
+  function _shapeTypeFromTag(tagName) {
+    if (tagName === 'polygon') return 'triangle';
+    if (tagName === 'rect') return 'square';
+    return 'circle';
   }
 
   function _ensureTooltip(body) {
@@ -362,22 +378,23 @@
       nodeG.appendChild(g);
     });
 
-    // Floating white cursor — a single small circle that rides on top
-    // of the current node. On _setCurrentView it updates its transform
-    // and the CSS transition slides it to the new position. Painted
-    // last so it stacks above the coloured shapes.
+    // Floating white cursor — shape-matched to whichever node is
+    // current (circle/triangle/square). A single <g> whose transform
+    // animates on setCurrentView, so the white shape slides from
+    // node to node. Painted last so it stacks above the coloured
+    // shapes.
     if (_currentViewId && tree.byId[_currentViewId]) {
-      var cp = pos(tree.byId[_currentViewId]);
-      var cursor = _svg('circle', {
+      var curNode = tree.byId[_currentViewId];
+      var cp = pos(curNode);
+      var curShape = _shapeFor(curNode);
+      var cursor = _svg('g', {
         class: 'history-cursor',
-        r: String(NODE_R * 0.55),
-        fill: '#ffffff',
-        cx: '0',
-        cy: '0',
+        'data-shape': curShape,
         transform: 'translate(' + cp.x + ',' + cp.y + ')',
         style: 'transition: transform 220ms cubic-bezier(0.4,0,0.2,1); '
           + 'pointer-events: none;',
       });
+      cursor.appendChild(_buildShapeEl(curShape, '#ffffff', CURSOR_R));
       nodeG.appendChild(cursor);
     }
 
@@ -434,6 +451,18 @@
     var cursor = body.querySelector('.history-cursor');
     if (target && cursor) {
       cursor.setAttribute('transform', target.getAttribute('transform'));
+      // If the target node has a different shape type, swap the
+      // white inner element so the cursor matches (circle/square/
+      // triangle). Position transition still animates via the <g>
+      // transform; the shape swap itself is instantaneous.
+      var targetShapeEl = target.querySelector('circle, polygon, rect');
+      var targetShape = targetShapeEl
+        ? _shapeTypeFromTag(targetShapeEl.tagName)
+        : 'circle';
+      if (cursor.getAttribute('data-shape') !== targetShape) {
+        cursor.replaceChildren(_buildShapeEl(targetShape, '#ffffff', CURSOR_R));
+        cursor.setAttribute('data-shape', targetShape);
+      }
     }
   }
 
