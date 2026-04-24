@@ -101,51 +101,95 @@ def execute(
     if cwd and not os.path.isdir(cwd):
         return f"Error: cwd does not exist: {cwd}"
 
-    # Write to a temp file instead of `-c` to avoid argv size limits +
-    # make stack traces readable (``-c`` frames show as ``<string>``).
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as f:
-        f.write(code)
-        script_path = f.name
+    # Pick execution path based on the active backend. Local gets the
+    # tempfile treatment so stack traces name a real filename (``-c``
+    # / ``<stdin>`` frames read as <string>); remote backends fall
+    # back to ``python -`` + stdin since the tempfile lives on the
+    # host filesystem and isn't reachable from docker/ssh.
+    from openprogram.backend import get_active_backend, LocalBackend
 
+    backend = get_active_backend()
     started = time.time()
-    try:
+
+    if isinstance(backend, LocalBackend):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False,
+                                         encoding="utf-8") as f:
+            f.write(code)
+            script_path = f.name
         try:
-            completed = subprocess.run(
-                [python, script_path],
-                cwd=cwd or None,
-                capture_output=True,
-                timeout=timeout,
-                check=False,
-            )
+            try:
+                completed = subprocess.run(
+                    [python, script_path],
+                    cwd=cwd or None,
+                    capture_output=True,
+                    timeout=timeout,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired as e:
+                out_text = (e.stdout or b"").decode("utf-8", errors="replace")
+                err_text = (e.stderr or b"").decode("utf-8", errors="replace")
+                elapsed = time.time() - started
+                return (
+                    f"Error: timed out after {timeout:.1f}s "
+                    f"(elapsed {elapsed:.1f}s)\n\n"
+                    f"## stdout (partial)\n{out_text[:4000]}\n\n"
+                    f"## stderr (partial)\n{err_text[:4000]}"
+                )
+            except FileNotFoundError:
+                return f"Error: python interpreter not found at {python!r}"
+            return_code = completed.returncode
+            stdout_b = completed.stdout
+            stderr_b = completed.stderr
+        finally:
+            try:
+                os.unlink(script_path)
+            except OSError:
+                pass
+    else:
+        # Non-local: spawn python reading from stdin, pipe code in.
+        # backend.spawn merges stderr into stdout (see Backend contract),
+        # so stderr_b ends up empty; stack traces still appear in stdout
+        # which is fine for the combined display below.
+        shell_cmd = f"{python} -"
+        if cwd:
+            shell_cmd = f"cd {cwd} && {shell_cmd}"
+        proc = backend.spawn(shell_cmd)
+        try:
+            stdout_text, _ = proc.communicate(input=code, timeout=timeout)
         except subprocess.TimeoutExpired as e:
-            out_text = (e.stdout or b"").decode("utf-8", errors="replace")
-            err_text = (e.stderr or b"").decode("utf-8", errors="replace")
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            partial = (e.stdout or "") if isinstance(e.stdout, str) \
+                      else (e.stdout or b"").decode("utf-8", errors="replace")
             elapsed = time.time() - started
             return (
-                f"Error: timed out after {timeout:.1f}s (elapsed {elapsed:.1f}s)\n\n"
-                f"## stdout (partial)\n{out_text[:4000]}\n\n"
-                f"## stderr (partial)\n{err_text[:4000]}"
+                f"Error: timed out after {timeout:.1f}s "
+                f"(elapsed {elapsed:.1f}s) via {backend.backend_id}\n\n"
+                f"## stdout (partial)\n{partial[:4000]}"
             )
-        except FileNotFoundError:
-            return f"Error: python interpreter not found at {python!r}"
-    finally:
-        try:
-            os.unlink(script_path)
-        except OSError:
-            pass
+        return_code = proc.returncode
+        stdout_b = stdout_text.encode("utf-8") if isinstance(stdout_text, str) \
+                   else (stdout_text or b"")
+        stderr_b = b""
 
     elapsed = time.time() - started
-    out_text, out_truncated = _truncate(completed.stdout)
-    err_text, err_truncated = _truncate(completed.stderr)
+    out_text, out_truncated = _truncate(stdout_b)
+    err_text, err_truncated = _truncate(stderr_b)
+    suffix = f" backend={backend.backend_id}" if backend.backend_id != "local" else ""
     parts = [
-        f"# execute_code exit={completed.returncode} elapsed={elapsed:.2f}s",
+        f"# execute_code exit={return_code} elapsed={elapsed:.2f}s{suffix}",
         "",
         "## stdout" + (" (truncated)" if out_truncated else ""),
         out_text or "(empty)",
-        "",
-        "## stderr" + (" (truncated)" if err_truncated else ""),
-        err_text or "(empty)",
     ]
+    if stderr_b:
+        parts += [
+            "",
+            "## stderr" + (" (truncated)" if err_truncated else ""),
+            err_text or "(empty)",
+        ]
     return "\n".join(parts)
 
 
