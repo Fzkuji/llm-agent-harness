@@ -187,23 +187,39 @@ def _render_history(messages: list[dict]) -> str:
 
 
 def _poke_live_webui(conv_id: str, messages: list[dict], meta: dict) -> None:
-    """Patch the running webui's in-memory conversation if applicable.
+    """Patch the running webui's in-memory conversation and push live
+    WebSocket updates to any browser tabs.
 
     Noop when webui isn't imported (CLI chat only, or pure
-    ``channels start``) — the on-disk save has already happened.
-    Imports ``openprogram.webui.server`` lazily so this module stays
-    cheap for the CLI path.
+    ``channels start``) — the on-disk save has already happened, so
+    the conversation will appear when the user next opens the Web UI.
+
+    Two events are emitted for connected clients:
+
+    * ``conversations_list`` if the conversation is new to the
+      in-memory dict — so the sidebar gets the new entry without a
+      page reload.
+    * ``conversation_reload`` for this conv_id — the frontend only
+      reacts if the user is currently viewing it, in which case it
+      asks the server to re-send the conversation data. Cheap and
+      prevents us from having to re-implement the frontend's message
+      merge logic here.
     """
+    import json
     try:
         import sys
         srv = sys.modules.get("openprogram.webui.server")
         if srv is None:
             return
+    except Exception:
+        return
+
+    was_new = False
+    try:
         with srv._conversations_lock:
             conv = srv._conversations.get(conv_id)
             if conv is None:
-                # Build a minimal shape compatible with _save_conversation
-                # and the UI's conversation list endpoint.
+                was_new = True
                 from openprogram.agentic_programming.context import Context
                 conv = {
                     "id": conv_id,
@@ -223,5 +239,33 @@ def _poke_live_webui(conv_id: str, messages: list[dict], meta: dict) -> None:
             else:
                 conv["messages"] = list(messages)
                 conv["head_id"] = meta.get("head_id")
+    except Exception:
+        return
+
+    try:
+        if was_new:
+            # Rebuild the full sidebar list the same shape the normal
+            # `list_conversations` action returns, so clients pick it
+            # up through the existing dispatcher.
+            conv_list = []
+            with srv._conversations_lock:
+                for cid, c in srv._conversations.items():
+                    runtime = c.get("runtime")
+                    sid = getattr(runtime, "_session_id", None) if runtime else None
+                    conv_list.append({
+                        "id": cid,
+                        "title": c.get("title", "Untitled"),
+                        "created_at": c.get("created_at"),
+                        "has_session": sid is not None,
+                    })
+            conv_list.sort(key=lambda c: c.get("created_at") or 0)
+            srv._broadcast(json.dumps(
+                {"type": "conversations_list", "data": conv_list},
+                default=str,
+            ))
+        srv._broadcast(json.dumps(
+            {"type": "conversation_reload", "data": {"conv_id": conv_id}},
+            default=str,
+        ))
     except Exception:
         pass
