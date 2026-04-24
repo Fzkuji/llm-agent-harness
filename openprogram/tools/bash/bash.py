@@ -9,8 +9,9 @@ across files to stay close to the reference:
 
 from __future__ import annotations
 
-import subprocess
 from typing import Any
+
+from openprogram.backend import get_active_backend
 
 from .prompt import DEFAULT_MAX_TIMEOUT_MS, DEFAULT_TIMEOUT_MS, DESCRIPTION
 
@@ -48,29 +49,30 @@ SPEC: dict[str, Any] = {
 
 
 def execute(command: str, timeout: float | None = None, description: str | None = None, **_ignored: Any) -> str:
-    """Run `command` in a shell, return a plain-text result the LLM can read."""
+    """Run `command` via the active backend, return a plain-text result.
+
+    Backend is resolved per-call (local / docker / ssh) so switching
+    via `openprogram config backend` takes effect immediately, and
+    --profile isolation flows through correctly.
+    """
     timeout_ms = min(timeout or DEFAULT_TIMEOUT_MS, DEFAULT_MAX_TIMEOUT_MS)
     timeout_sec = timeout_ms / 1000.0
-    try:
-        proc = subprocess.run(
-            command,
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=timeout_sec,
-        )
-    except subprocess.TimeoutExpired as e:
-        partial_stdout = (e.stdout or "").decode(errors="replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
-        partial_stderr = (e.stderr or "").decode(errors="replace") if isinstance(e.stderr, bytes) else (e.stderr or "")
+
+    backend = get_active_backend()
+    result = backend.run(command, timeout=timeout_sec)
+
+    if result.timed_out:
         return (
-            f"[timeout after {timeout_sec:.1f}s]\n"
-            f"--- stdout (partial) ---\n{partial_stdout}\n"
-            f"--- stderr (partial) ---\n{partial_stderr}"
+            f"[timeout after {timeout_sec:.1f}s via {backend.backend_id}]\n"
+            f"--- stdout (partial) ---\n{result.stdout}\n"
+            f"--- stderr (partial) ---\n{result.stderr}"
         )
 
-    parts = [f"exit_code={proc.returncode}"]
-    if proc.stdout:
-        parts.append(f"--- stdout ---\n{proc.stdout.rstrip()}")
-    if proc.stderr:
-        parts.append(f"--- stderr ---\n{proc.stderr.rstrip()}")
+    parts = [f"exit_code={result.exit_code}"]
+    if backend.backend_id != "local":
+        parts[0] += f" (backend={backend.backend_id})"
+    if result.stdout:
+        parts.append(f"--- stdout ---\n{result.stdout.rstrip()}")
+    if result.stderr:
+        parts.append(f"--- stderr ---\n{result.stderr.rstrip()}")
     return "\n".join(parts)
