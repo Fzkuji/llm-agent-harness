@@ -195,10 +195,16 @@
     if (shape.tagName === 'circle') {
       shape.setAttribute('r', String(r));
     } else if (shape.tagName === 'polygon') {
+      // Must mirror _buildShapeEl's formula — equilateral with
+      // centroid at origin, so inner and outer triangles stay
+      // concentric during size transitions.
       var t = r + 1.2;
+      var COS30 = 0.8660254;
       shape.setAttribute(
         'points',
-        '0,' + (-t) + ' ' + t + ',' + (t * 0.85) + ' ' + (-t) + ',' + (t * 0.85)
+        '0,' + (-t)
+          + ' ' + (t * COS30) + ',' + (t * 0.5)
+          + ' ' + (-t * COS30) + ',' + (t * 0.5)
       );
     } else if (shape.tagName === 'rect') {
       var s = r - 0.2;
@@ -216,9 +222,17 @@
     if (shape === 'circle') {
       return _svg('circle', { r: r, fill: color });
     } else if (shape === 'triangle') {
+      // Equilateral triangle with circumradius t, centroid at origin.
+      // Vertices at 90°, 210°, 330° on the circumscribing circle.
+      // The old formula put the centroid at y ≈ 0.233t, which made
+      // shrunk inner shapes look offset upward inside the larger
+      // outer triangle (they shared origin, but not centre-of-mass).
       var t = r + 1.2;
+      var COS30 = 0.8660254;
       return _svg('polygon', {
-        points: '0,' + (-t) + ' ' + t + ',' + (t * 0.85) + ' ' + (-t) + ',' + (t * 0.85),
+        points: '0,' + (-t)
+          + ' ' + (t * COS30) + ',' + (t * 0.5)
+          + ' ' + (-t * COS30) + ',' + (t * 0.5),
         fill: color,
       });
     } else if (shape === 'square') {
@@ -507,20 +521,34 @@
         if (!container) return;
         var areaTop = area.getBoundingClientRect().top;
         // Anchor ~40px below viewport top so the cursor tracks what
-        // the user is actually reading, not a bubble half-hidden at
-        // the edge.
+        // the user is actually reading.
         var target = areaTop + 40;
-        var bubbles = container.querySelectorAll('[data-msg-id]');
-        var bestId = null;
-        var bestDist = Infinity;
+        // Direct children only — avoids matching data-msg-id
+        // elements nested inside runtime cards (which also carry
+        // the attribute on their root).
+        var bubbles = container.querySelectorAll(':scope > [data-msg-id]');
+        var chosenId = null;
+        var chosenTop = -Infinity;
+        var firstId = null;
+        var firstTop = Infinity;
         for (var i = 0; i < bubbles.length; i++) {
           var r = bubbles[i].getBoundingClientRect();
-          var d = Math.abs(r.top - target);
-          if (d < bestDist) {
-            bestDist = d;
-            bestId = bubbles[i].getAttribute('data-msg-id');
+          var id = bubbles[i].getAttribute('data-msg-id');
+          // Pick the last message whose top has already crossed the
+          // anchor — i.e. the one the user is currently reading,
+          // including when they're partway down a tall runtime
+          // card (previous heuristic picked the "closest top" and
+          // flipped to the next short bubble mid-card).
+          if (r.top <= target && r.top > chosenTop) {
+            chosenTop = r.top;
+            chosenId = id;
+          }
+          if (r.top < firstTop) {
+            firstTop = r.top;
+            firstId = id;
           }
         }
+        var bestId = chosenId || firstId;
         if (bestId) _setCurrentView(bestId);
       });
     }, { passive: true });
