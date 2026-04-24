@@ -477,13 +477,14 @@ def run_channels_section() -> int:
     cfg = _read_config()
     ch = cfg.get("channels", {}) or {}
 
-    # Slack needs TWO tokens under Socket Mode: a bot OAuth token
-    # (xoxb-...) and an app-level token (xapp-...). Others just one.
-    PLATFORMS = [
+    # Platform → list of (env_var, label) pairs for token auth, or
+    # special value "qr" for QR-scan login (WeChat).
+    PLATFORMS: list[tuple[str, Any]] = [
         ("telegram", [("TELEGRAM_BOT_TOKEN", "Telegram bot token")]),
         ("discord",  [("DISCORD_BOT_TOKEN",  "Discord bot token")]),
         ("slack",    [("SLACK_BOT_TOKEN",    "Slack bot (xoxb-)"),
                       ("SLACK_APP_TOKEN",    "Slack app-level (xapp-, Socket Mode)")]),
+        ("wechat",   "qr"),
     ]
     items = [
         (p[0], bool((ch.get(p[0]) or {}).get("enabled", False)))
@@ -495,12 +496,36 @@ def run_channels_section() -> int:
         return 1
 
     new_ch: dict[str, Any] = {}
-    for pid, envs in PLATFORMS:
+    for pid, cfg_info in PLATFORMS:
         prev = ch.get(pid, {}) or {}
         enabled = pid in picked
+        entry: dict[str, Any]
+        if cfg_info == "qr":
+            # WeChat: no env-var token. Credentials come from a QR scan
+            # during `channels start`. We capture intent here + optionally
+            # drive the login right now for a fully-configured install.
+            entry = {"enabled": enabled, "auth": "qr"}
+            if enabled:
+                try:
+                    from openprogram.channels.wechat import _find_saved_creds
+                    already = _find_saved_creds() is not None
+                except Exception:
+                    already = False
+                if already:
+                    print("[wechat] already logged in — skipping QR scan.")
+                elif _confirm("Scan WeChat QR now? (needs your phone)",
+                              default=True):
+                    from openprogram.channels.wechat import _qr_login
+                    _qr_login()
+                else:
+                    print("[wechat] skipped. You'll be prompted on "
+                          "`openprogram channels start`.")
+            new_ch[pid] = entry
+            continue
+
+        envs: list[tuple[str, str]] = cfg_info  # type: ignore[assignment]
         first_env = envs[0][0]
-        entry: dict[str, Any] = {"enabled": enabled, "api_key_env": first_env}
-        # Preserve extra env slots (e.g. Slack's app_token_env).
+        entry = {"enabled": enabled, "api_key_env": first_env}
         if pid == "slack":
             entry["app_token_env"] = envs[1][0]
         if enabled:
@@ -563,77 +588,205 @@ def run_backend_section() -> int:
 
 # --- Orchestrator -----------------------------------------------------------
 
-# Sections ordered so "required for the minimum useful install" runs
-# first; anything that only captures intent (for future runtime work)
-# is gated behind a confirm so first-run users aren't forced through it.
+# Section spec:
+#   (key, title, description, fn, default_run)
+#   default_run = True  → auto-run (user can Ctrl+C to abort the section)
+#   default_run = False → ask first, default No
 _CORE_SECTIONS = [
-    ("providers", "Connect LLM provider(s)",        run_providers_section, False),
-    ("model",     "Pick your default chat model",   run_model_section,     False),
-    ("tools",     "Enable/disable tools",           run_tools_section,     True),
-    ("agent",     "Default thinking effort",        run_agent_section,     False),
-    ("skills",    "Enable/disable skills",          run_skills_section,    True),
-    ("ui",        "Web UI port + auto-open",        run_ui_section,        True),
-    ("memory",    "Memory backend",                 run_memory_section,    True),
+    ("providers", "Connect LLM provider(s)",
+     "Import existing CLI logins (Claude Code / Codex / Gemini / GH CLI), "
+     "or add API keys. At least one provider is required.",
+     run_providers_section, True),
+    ("model", "Pick your default chat model",
+     "Choose which enabled model starts every new conversation.",
+     run_model_section, True),
+    ("agent", "Default reasoning effort",
+     "How hard should the model think by default? "
+     "low = fastest, xhigh = deepest.",
+     run_agent_section, True),
+    ("tools", "Enable / disable tools",
+     f"Which of the built-in tools should the agent have access to.",
+     run_tools_section, False),
+    ("skills", "Enable / disable skills",
+     "SKILL.md instruction packs the agent can load on demand.",
+     run_skills_section, False),
+    ("ui", "Web UI preferences",
+     "Port and auto-open-browser for `openprogram web`.",
+     run_ui_section, False),
+    ("tts", "Text-to-speech (optional)",
+     "Spoken replies in CLI chat. Providers: openai / elevenlabs / "
+     "edge-tts (free).",
+     run_tts_section, False),
+    ("channels", "Chat-channel bots (optional)",
+     "Route messages from Telegram / Discord / Slack / WeChat through "
+     "your chat agent.",
+     run_channels_section, False),
+    ("memory", "Memory backend (optional)",
+     "Pick between the local JSON store and 'none' (disables the "
+     "memory tool).",
+     run_memory_section, False),
 ]
 
 _EXTRA_SECTIONS = [
-    ("profile",   "Active profile name",            run_profile_section,   True),
-    ("tts",       "Text-to-speech (stored for future)",       run_tts_section,      True),
-    ("channels",  "Chat-channel bots (stored for future)",    run_channels_section, True),
-    ("backend",   "Terminal exec backend (stored for future)", run_backend_section, True),
+    ("profile", "Named profile (advanced)",
+     "Stored profile name. Per-profile state-dir isolation is done via "
+     "`--profile <name>` at launch.",
+     run_profile_section, True),
+    ("backend", "Terminal exec backend (advanced)",
+     "Where the `bash` / `execute_code` / `process` tools actually "
+     "run: local / ssh / docker.",
+     run_backend_section, True),
 ]
 
 
-def run_full_setup() -> int:
-    """Walk through every setup section.
+def _section_header(idx: int, total: int, title: str, desc: str) -> None:
+    """Rich-aware section header; falls back to plain text."""
+    try:
+        from rich.console import Console
+        from rich.panel import Panel
+        from rich.text import Text
+        console = Console()
+        console.print()
+        header = Text(f"Step {idx}/{total}  ", style="bold bright_blue")
+        header.append(title, style="bold")
+        body = Text(desc, style="dim")
+        console.print(Panel(body, title=header, border_style="bright_blue",
+                            padding=(0, 1)))
+    except ImportError:
+        print()
+        print(f"--- Step {idx}/{total}: {title} ---")
+        print(f"    {desc}")
 
-    Sections split into two groups:
-      * _CORE_SECTIONS — things the runtime actually consumes today
-      * _EXTRA_SECTIONS — config stored for features whose runtime is
-        pending (TTS, channels, docker/ssh backend, profiles). Gated
-        behind a single "Configure advanced sections?" confirm so the
-        first-run path stays short.
 
-    Any section flagged ``skippable`` is wrapped with a per-section
-    confirm so the user can breeze through the defaults.
+def _run_section(name: str, fn, ask_default: bool) -> int:
+    """Run a section body. ``ask_default`` controls the 'Configure X now?'
+    prompt default: True = default-yes, False = default-no.
     """
-    print("=" * 60)
-    print("  OpenProgram setup")
-    print("=" * 60)
-    print()
-    print("We'll walk through the config sections. You can rerun any of")
-    print("them individually with `openprogram config <name>`.")
-    print()
+    if ask_default:
+        if not _confirm(f"Configure {name} now?", default=True):
+            print(f"Skipped {name}.")
+            return 0
+    else:
+        if not _confirm(f"Configure {name} now?", default=False):
+            print(f"Skipped {name}.")
+            return 0
+    return fn()
+
+
+def _print_intro() -> None:
+    try:
+        from rich.console import Console
+        from rich.panel import Panel
+        from rich.text import Text
+        console = Console()
+        body = Text()
+        body.append("Welcome to OpenProgram.\n\n", style="bold bright_blue")
+        body.append(
+            "Setup has three parts:\n"
+            "  Required — provider + default model + reasoning effort\n"
+            "  Tailored — tools / skills / UI / TTS / channels / memory\n"
+            "  Advanced — profiles, terminal exec backend\n\n",
+            style="dim",
+        )
+        body.append(
+            "Each step is rerunnable with `openprogram config <name>`. "
+            "Ctrl+C to exit at any point — partial progress is saved.",
+            style="dim italic",
+        )
+        console.print()
+        console.print(Panel(body, title=Text("OpenProgram setup",
+                                             style="bold bright_blue"),
+                            border_style="bright_blue", padding=(1, 2)))
+    except ImportError:
+        print()
+        print("=" * 60)
+        print("  OpenProgram setup")
+        print("=" * 60)
+        print("Required: provider + default model + reasoning effort.")
+        print("Tailored: tools / skills / UI / TTS / channels / memory.")
+        print("Advanced: profiles, terminal exec backend.")
+        print("Rerun any step with `openprogram config <name>`.")
+        print()
+
+
+def _print_summary() -> None:
+    """Recap the stored config at the end of the wizard."""
+    cfg = _read_config()
+    try:
+        from rich.console import Console
+        from rich.table import Table
+        console = Console()
+        tbl = Table.grid(padding=(0, 2))
+        tbl.add_column(style="bold")
+        tbl.add_column()
+        tbl.add_row("default model:",
+                    f"{cfg.get('default_provider', '?')}/{cfg.get('default_model', '?')}")
+        tbl.add_row("thinking effort:",
+                    str((cfg.get("agent", {}) or {}).get("thinking_effort", "medium")))
+        tools_disabled = (cfg.get("tools", {}) or {}).get("disabled", []) or []
+        tbl.add_row("disabled tools:",
+                    ", ".join(tools_disabled) if tools_disabled else "(none)")
+        channels = cfg.get("channels", {}) or {}
+        enabled_ch = [k for k, v in channels.items() if isinstance(v, dict) and v.get("enabled")]
+        tbl.add_row("channels:",
+                    ", ".join(enabled_ch) if enabled_ch else "(none)")
+        tts = (cfg.get("tts") or {}).get("provider") or "none"
+        tbl.add_row("tts:", tts)
+        profile = cfg.get("profile", "default")
+        tbl.add_row("profile:", profile)
+        console.print()
+        console.print("[bold green]Setup complete.[/]")
+        console.print(tbl)
+    except ImportError:
+        print("\nSetup complete.")
+        print(f"  default model:    {cfg.get('default_provider')}/{cfg.get('default_model')}")
+        print(f"  thinking effort:  {(cfg.get('agent') or {}).get('thinking_effort', 'medium')}")
+
+
+def run_full_setup() -> int:
+    """Polished multi-step first-run wizard.
+
+    Required sections default-yes; tailored/advanced sections default-no so
+    users can breeze through the minimal install. End-of-wizard shows a
+    config summary and offers to drop straight into CLI chat.
+    """
+    _print_intro()
     if not _confirm("Start?", default=True):
         return 0
 
     total = len(_CORE_SECTIONS)
-    for i, (name, desc, fn, skippable) in enumerate(_CORE_SECTIONS, 1):
-        print(f"\n--- {i}/{total}: {name} — {desc} ---")
-        if skippable and not _confirm(f"Configure {name} now?", default=False):
-            print(f"Skipped {name}.")
-            continue
-        rc = fn()
+    for i, (name, title, desc, fn, default_run) in enumerate(_CORE_SECTIONS, 1):
+        _section_header(i, total, title, desc)
+        if default_run:
+            rc = fn()
+        else:
+            rc = _run_section(name, fn, ask_default=False)
         if rc != 0:
             print(f"[warn] {name} exited with status {rc}; continuing.")
 
     print()
-    if not _confirm(
-        "Also configure advanced sections "
-        "(profile / tts / channels / backend)?", default=False
+    if _confirm(
+        "Configure advanced sections (profile / backend)?",
+        default=False,
     ):
-        print("\nSetup complete. Run `openprogram` to start chatting.")
-        return 0
+        extra_total = len(_EXTRA_SECTIONS)
+        for i, (name, title, desc, fn, default_run) in enumerate(_EXTRA_SECTIONS, 1):
+            _section_header(i, extra_total, title, desc)
+            rc = _run_section(name, fn, ask_default=default_run)
+            if rc != 0:
+                print(f"[warn] {name} exited with status {rc}; continuing.")
 
-    extra_total = len(_EXTRA_SECTIONS)
-    for i, (name, desc, fn, skippable) in enumerate(_EXTRA_SECTIONS, 1):
-        print(f"\n--- extra {i}/{extra_total}: {name} — {desc} ---")
-        if skippable and not _confirm(f"Configure {name} now?", default=False):
-            print(f"Skipped {name}.")
-            continue
-        rc = fn()
-        if rc != 0:
-            print(f"[warn] {name} exited with status {rc}; continuing.")
+    _print_summary()
 
-    print("\nSetup complete. Run `openprogram` to start chatting.")
+    # Hand off straight to chat so "first install → first message" is one
+    # continuous flow, not two commands with a manual restart between.
+    if _confirm("Start chatting now?", default=True):
+        try:
+            from openprogram.cli_chat import run_cli_chat
+            run_cli_chat()
+        except Exception as e:  # noqa: BLE001
+            print(f"[setup] couldn't launch chat: {type(e).__name__}: {e}")
+            print("Run `openprogram` manually.")
+    else:
+        print("\nRun `openprogram` when ready.")
     return 0
