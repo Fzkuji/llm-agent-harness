@@ -166,8 +166,14 @@ def spawn_detached() -> int:
                 pass
             return 1
         if current_worker_pid() == proc.pid:
-            print(f"channels worker started (PID {proc.pid}). "
-                  f"Logs: {log_file}")
+            active = _active_platform_list()
+            if active:
+                print(f"channels worker started (PID {proc.pid}), "
+                      f"polling: {active}. Logs: {log_file}")
+            else:
+                print(f"channels worker started (PID {proc.pid}) but "
+                      f"nothing enabled/configured to poll. "
+                      f"Logs: {log_file}")
             return 0
 
     # Hit the timeout but child is still alive — lock hasn't landed
@@ -175,6 +181,24 @@ def spawn_detached() -> int:
     print(f"channels worker starting (PID {proc.pid}); not yet ready. "
           f"Watch {log_file}.")
     return 0
+
+
+def _active_platform_list() -> str:
+    """Comma-joined names of platforms this worker will actually poll.
+
+    Reads config through the same filter the runner uses
+    (enabled + configured + implemented). Returns "" if none — worker
+    is running but has nothing to do.
+    """
+    try:
+        from openprogram.channels import list_channels_status
+        rows = list_channels_status()
+        names = [r["platform"] for r in rows
+                 if r.get("enabled") and r.get("implemented")
+                 and r.get("configured")]
+        return ", ".join(names)
+    except Exception:
+        return ""
 
 
 def stop_worker() -> int:

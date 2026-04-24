@@ -338,6 +338,9 @@ def main():
             return
         if verb == "attach":
             from openprogram.channels import bindings as _bindings_mod
+            from openprogram.channels.worker import (
+                current_worker_pid, spawn_detached,
+            )
             displaced = _bindings_mod.attach(
                 args.platform, args.user, args.conv_id,
                 args.display or args.user,
@@ -349,6 +352,12 @@ def main():
             else:
                 print(f"Attached {args.platform}:{args.user} → "
                       f"{args.conv_id}")
+            # Make the binding actually useful: start a worker if
+            # none is running. Attach is the user's explicit "I want
+            # to receive messages" signal.
+            if current_worker_pid() is None:
+                print("Starting channels worker in the background...")
+                spawn_detached()
             return
         if verb == "detach":
             from openprogram.channels import bindings as _bindings_mod
@@ -919,19 +928,18 @@ def _cmd_web(port, open_browser):
 
     thread = start_web(port=port, open_browser=open_browser)
 
-    # Channels run in their own worker process (see channels/worker.py).
-    # Give the user one shot at starting one here if they've configured
-    # channels but no worker is live — otherwise this server wouldn't
-    # route any inbound WeChat/Telegram/etc. into the Web UI session list.
+    # Channels are opt-in (attach a conversation in the UI to start
+    # exchanging with an external user). If a worker is already
+    # running we mention it; otherwise stay quiet — the Web UI will
+    # offer to start one the moment a user hits "Attach" on a
+    # conversation.
     try:
-        from rich.console import Console as _Console
-        from openprogram.channels.worker import (
-            prompt_spawn_if_configured_but_dead,
-        )
-        prompt_spawn_if_configured_but_dead(_Console(), verb="browse")
-    except Exception as e:  # noqa: BLE001
-        print(f"[channels] worker check skipped: "
-              f"{type(e).__name__}: {e}")
+        from openprogram.channels.worker import current_worker_pid
+        pid = current_worker_pid()
+        if pid:
+            print(f"Channels worker running (PID {pid}).")
+    except Exception:
+        pass
 
     print("Press Ctrl+C to stop.")
     try:

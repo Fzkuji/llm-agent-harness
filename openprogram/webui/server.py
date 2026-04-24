@@ -1804,6 +1804,20 @@ async def _handle_ws_command(ws, cmd: dict):
             displaced = _bindings_mod.attach(
                 platform, user_id, conv_id, user_display,
             )
+            # Attaching is the user saying "I want this conversation
+            # to receive messages from outside". That only works if a
+            # worker is polling, so spin one up if it isn't already
+            # running. Fire-and-forget — spawn_detached returns fast
+            # and logs to channels.log.
+            try:
+                from openprogram.channels.worker import (
+                    current_worker_pid, spawn_detached,
+                )
+                if current_worker_pid() is None:
+                    spawn_detached()
+            except Exception as e:  # noqa: BLE001
+                _log(f"[attach] worker auto-start failed: "
+                     f"{type(e).__name__}: {e}")
             _broadcast(json.dumps({
                 "type": "channel_binding_changed",
                 "data": {

@@ -787,21 +787,16 @@ def run_backend_section() -> int:
 
 # Section spec: (key, title, description, fn)
 #
-# Two tables:
-#   _QUICKSTART_SECTIONS — run in BOTH QuickStart and Advanced modes.
-#       Things the user must participate in: provider login, pick default
-#       model, set reasoning effort, connect chat channels (or skip in
-#       the Finished-first prompt).
-#   _ADVANCED_EXTRA_SECTIONS — run ONLY in Advanced mode. Detail knobs
-#       with sane defaults the average user never touches: Web UI port,
-#       tool toggles, skill toggles, TTS, memory backend, profile name,
-#       terminal backend.
+# QuickStart = the things a user MUST answer to have a working chat:
+#   provider login, default model, reasoning effort.
+# Advanced   = detail knobs with sane defaults, plus channel bots which
+#   are an opt-in "let external users talk to my agent" feature — not
+#   part of getting chat working at all.
 #
-# QuickStart doesn't touch the _ADVANCED_EXTRA_SECTIONS config at all —
-# the runtime reads each knob with a fallback default (ui.port=8765,
-# memory.backend=local, tools.disabled=[], etc.) so omitting the
-# section writes the same effective state as explicitly accepting the
-# default would.
+# The runtime reads each advanced knob with a fallback default
+# (ui.port=8765, memory.backend=local, tools.disabled=[], etc.), so
+# QuickStart skipping them writes the same effective state as
+# explicitly accepting the defaults.
 _QUICKSTART_SECTIONS = [
     ("providers", "Connect LLM provider(s)",
      "Import existing CLI logins (Claude Code / Codex / Gemini / GH CLI), "
@@ -814,10 +809,6 @@ _QUICKSTART_SECTIONS = [
      "How hard should the model think by default? "
      "low = fastest, xhigh = deepest.",
      run_agent_section),
-    ("channels", "Chat-channel bots (optional)",
-     "Route messages from Telegram / Discord / Slack / WeChat through "
-     "your chat agent. Pick 'Finished' to skip.",
-     run_channels_section),
 ]
 
 _ADVANCED_EXTRA_SECTIONS = [
@@ -829,6 +820,10 @@ _ADVANCED_EXTRA_SECTIONS = [
      "SKILL.md instruction packs the agent can load on demand. "
      "QuickStart enables everything discovered.",
      run_skills_section),
+    ("channels", "Chat-channel bots (optional)",
+     "Let Telegram / Discord / Slack / WeChat users talk to your agent. "
+     "Leave for later if you only want local chat.",
+     run_channels_section),
     ("tts", "Text-to-speech",
      "Spoken replies in CLI chat. Providers: openai / elevenlabs / "
      "edge-tts (free). QuickStart leaves TTS off.",

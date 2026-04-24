@@ -408,14 +408,20 @@ def run_cli_chat(oneshot: str | None = None) -> None:
         print(reply)
         return
 
-    # Channels live in their own worker process (see channels/worker.py)
-    # so closing this terminal doesn't kill the WeChat/Telegram bot.
-    # If channels are configured but no worker is live, offer to fork
-    # one now — one question, arrow-key Yes/No. The worker, once up,
-    # survives every front-end coming and going.
+    # Show the channels worker status without asking the user to start
+    # anything: the primary thing this REPL does is chat. Channels are
+    # an opt-in "let external users talk to my agent" feature, not a
+    # gatekeeper on launch. We surface the status line only if a worker
+    # happens to already be running, so the user knows their bindings
+    # are live.
     try:
-        from openprogram.channels.worker import prompt_spawn_if_configured_but_dead
-        prompt_spawn_if_configured_but_dead(console, verb="chat")
+        from openprogram.channels.worker import current_worker_pid
+        pid = current_worker_pid()
+        if pid:
+            console.print(
+                f"[dim]↪ channels worker running (PID {pid})  "
+                f"— bindings active (attach/detach in the Web UI)[/]"
+            )
     except Exception:
         pass
 
