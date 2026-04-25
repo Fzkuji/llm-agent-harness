@@ -13,6 +13,9 @@ export type WsRequest =
   | ChatRequest
   | { action: 'sync' }
   | { action: 'stats' }
+  | { action: 'stop'; conv_id: string }
+  | { action: 'list_models' }
+  | { action: 'switch_model'; model: string; provider?: string; conv_id?: string }
   | { action: 'list_agents' }
   | { action: 'add_agent'; agent: Record<string, unknown> }
   | { action: 'delete_agent'; id: string }
@@ -65,6 +68,21 @@ export interface ConversationLoadedEnvelope {
   data: { id: string; messages: Array<{ role: string; content: string; [k: string]: unknown }>; [k: string]: unknown };
 }
 
+export interface ModelsListEnvelope {
+  type: 'models_list';
+  data: { provider?: string; current?: string; models?: string[] };
+}
+
+export interface ModelSwitchedEnvelope {
+  type: 'model_switched';
+  data: { provider?: string; model?: string };
+}
+
+export interface HistoryListEnvelope {
+  type: 'history_list';
+  data: Array<{ id?: string; title?: string; created_at?: number; agent_id?: string }>;
+}
+
 export interface StatsEnvelope {
   type: 'stats';
   data: {
@@ -91,6 +109,9 @@ export type WsEnvelope =
   | ConversationsListEnvelope
   | ConversationLoadedEnvelope
   | StatsEnvelope
+  | ModelsListEnvelope
+  | ModelSwitchedEnvelope
+  | HistoryListEnvelope
   | ErrorEnvelope
   | { type: 'pong' };
 

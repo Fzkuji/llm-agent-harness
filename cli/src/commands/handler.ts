@@ -8,6 +8,8 @@ export interface SlashContext {
   clearCommitted: () => void;
   newSession: () => void;
   exit: () => void;
+  /** Open an interactive picker (model / resume / agent). */
+  openPicker: (kind: 'model' | 'resume' | 'agent') => void;
   currentAgent?: string;
   currentModel?: string;
   currentConversation?: string;
@@ -142,14 +144,30 @@ export function handleSlash(line: string, ctx: SlashContext): boolean {
     }
 
     case 'agent': {
-      // slash commands run silently — no user echo
+      // /agent with no arg → picker; /agent <id> → direct switch.
       if (args.length < 1) {
-        ctx.pushSystem('Usage: /agent <agent_id>');
+        ctx.openPicker('agent');
         return true;
       }
       const id = args[0]!;
       ctx.client.send({ action: 'set_default_agent', id });
       ctx.pushSystem(`Set default agent → ${id}`);
+      return true;
+    }
+
+    case 'model': {
+      // /model with no arg → picker; /model <id> → direct switch.
+      if (args.length < 1) {
+        ctx.client.send({ action: 'list_models' });
+        ctx.openPicker('model');
+        return true;
+      }
+      ctx.client.send({ action: 'switch_model', model: args[0]!, conv_id: ctx.currentConversation });
+      return true;
+    }
+
+    case 'resume': {
+      ctx.openPicker('resume');
       return true;
     }
 

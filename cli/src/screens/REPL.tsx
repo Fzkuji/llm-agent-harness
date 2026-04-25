@@ -4,6 +4,7 @@ import { BackendClient, WsEnvelope, StatsEnvelope } from '../ws/client.js';
 import { BottomBar } from '../components/BottomBar.js';
 import { Messages } from '../components/Messages.js';
 import { Spinner } from '../components/Spinner.js';
+import { Picker, PickerItem } from '../components/Picker.js';
 import { Turn, ToolCall } from '../components/Turn.js';
 import { PromptInput } from '../components/PromptInput/PromptInput.js';
 import { handleSlash } from '../commands/handler.js';
@@ -20,6 +21,12 @@ interface AgentInfo {
   model?: string | { provider?: string; id?: string };
   default?: boolean;
 }
+
+const tsToDate = (ts?: number): string => {
+  if (!ts) return '';
+  const d = new Date(ts * 1000);
+  return d.toLocaleDateString();
+};
 
 const renderModel = (m: AgentInfo['model']): string | undefined => {
   if (!m) return undefined;
@@ -48,6 +55,15 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
   const [tick, setTick] = useState(0);
   const [slashMode, setSlashMode] = useState(false);
   const [tokens, setTokens] = useState<{ input?: number; output?: number }>({});
+  const [history, setHistory] = useState<string[]>([]);
+  const [modelsList, setModelsList] = useState<string[]>([]);
+  const [pastConversations, setPastConversations] = useState<
+    Array<{ id?: string; title?: string; created_at?: number }>
+  >([]);
+  const [pickerKind, setPickerKind] = useState<null | 'model' | 'resume' | 'agent'>(
+    null,
+  );
+  const [agentsList, setAgentsList] = useState<AgentInfo[]>([]);
   const agentSetRef = useRef(false);
 
   // 1Hz tick for elapsed-seconds display while a turn is active.
@@ -166,8 +182,38 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
           agentSetRef.current = true;
           setAgent(ev.data.agent.id);
         }
+      } else if (ev.type === 'models_list') {
+        const list = ev.data?.models ?? [];
+        setModelsList(list);
+        if (ev.data?.current) setModel(ev.data.current);
+      } else if (ev.type === 'history_list') {
+        setPastConversations(ev.data ?? []);
+      } else if (ev.type === 'conversation_loaded') {
+        const data = ev.data as {
+          id?: string;
+          messages?: Array<{ role?: string; content?: string }>;
+        };
+        if (data.id) setConversationId(data.id);
+        const turns = (data.messages ?? [])
+          .filter((m) => m.role && m.content)
+          .map((m, i) => ({
+            id: `loaded-${data.id}-${i}`,
+            role: (m.role === 'assistant' ? 'assistant' : m.role === 'user' ? 'user' : 'system') as
+              | 'assistant'
+              | 'user'
+              | 'system',
+            text: m.content ?? '',
+          }));
+        setCommitted(turns);
+        setStreaming(null);
+      } else if (ev.type === 'model_switched') {
+        if (ev.data?.model) setModel(ev.data.model);
+        pushSystem(
+          `Switched model → ${ev.data?.provider ?? '?'}:${ev.data?.model ?? '?'}`,
+        );
       } else if (ev.type === 'agents_list') {
         const list = ev.data as AgentInfo[];
+        setAgentsList(list);
         const def = list.find((a) => a.default) ?? list[0];
         if (def && !agentSetRef.current) {
           agentSetRef.current = true;
@@ -215,6 +261,7 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
           setCommitted([]);
         },
         exit: () => app.exit(),
+        openPicker: (kind) => setPickerKind(kind),
         currentAgent: agent,
         currentModel: model,
         currentConversation: conversationId,
@@ -222,6 +269,9 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
       if (handled) return;
     }
     setCommitted((m) => [...m, { id: `u-${Date.now()}`, role: 'user', text }]);
+    setHistory((h) =>
+      h[h.length - 1] === text ? h : [...h, text].slice(-200),
+    );
     startTurn('Thinking');
     client.send({
       action: 'chat',
@@ -231,8 +281,83 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
     });
   };
 
+  const onCancel = () => {
+    if (!conversationId) return;
+    client.send({ action: 'stop', conv_id: conversationId });
+    setStreaming(null);
+    finishTurn();
+    pushSystem('Stopped.');
+  };
+
   const elapsed = activity ? (Date.now() - activity.startedAt) / 1000 : undefined;
   void tick; // depend on tick so elapsed re-renders every second
+
+  // Build picker items based on the current pickerKind.
+  let pickerNode: React.ReactElement | null = null;
+  if (pickerKind === 'model') {
+    const items: PickerItem<string>[] = modelsList.map((m) => ({
+      label: m,
+      description: m === model ? 'current' : undefined,
+      value: m,
+    }));
+    pickerNode = (
+      <Picker
+        title="Switch model"
+        items={items}
+        onSelect={(it) => {
+          client.send({
+            action: 'switch_model',
+            model: it.value,
+            conv_id: conversationId,
+          });
+          setPickerKind(null);
+        }}
+        onCancel={() => setPickerKind(null)}
+      />
+    );
+  } else if (pickerKind === 'agent') {
+    const items: PickerItem<string>[] = agentsList.map((a) => ({
+      label: a.name || a.id,
+      description: a.default
+        ? `${a.id} · default`
+        : a.id,
+      value: a.id,
+    }));
+    pickerNode = (
+      <Picker
+        title="Switch agent"
+        items={items}
+        onSelect={(it) => {
+          client.send({ action: 'set_default_agent', id: it.value });
+          setAgent(it.value);
+          setPickerKind(null);
+        }}
+        onCancel={() => setPickerKind(null)}
+      />
+    );
+  } else if (pickerKind === 'resume') {
+    const items: PickerItem<string>[] = pastConversations
+      .filter((c) => c.id)
+      .map((c) => ({
+        label: (c.title || c.id || '').slice(0, 60),
+        description: `${c.id ?? ''} · ${tsToDate(c.created_at)}`,
+        value: c.id!,
+      }));
+    pickerNode = (
+      <Picker
+        title="Resume a session"
+        items={items}
+        onSelect={(it) => {
+          client.send({ action: 'load_conversation', id: it.value });
+          setConversationId(it.value);
+          setCommitted([]);
+          setStreaming(null);
+          setPickerKind(null);
+        }}
+        onCancel={() => setPickerKind(null)}
+      />
+    );
+  }
 
   return (
     <Box flexDirection="column">
@@ -244,7 +369,17 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
       {activity ? (
         <Spinner verb={activity.verb} detail={activity.detail} elapsed={elapsed} />
       ) : null}
-      <PromptInput onSubmit={onSubmit} busy={!!activity} onSlashModeChange={setSlashMode} />
+      {pickerNode ? (
+        pickerNode
+      ) : (
+        <PromptInput
+          onSubmit={onSubmit}
+          busy={!!activity}
+          onSlashModeChange={setSlashMode}
+          onCancel={onCancel}
+          history={history}
+        />
+      )}
       <BottomBar
         agent={agent}
         model={model}

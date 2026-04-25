@@ -1411,6 +1411,152 @@ async def _handle_ws_command(ws, cmd: dict):
     action = cmd.get("action")
     print(f"[ws] command received: action={action}")
 
+    if action == "list_models":
+        # Mirrors GET /api/models for ws clients (the Ink CLI).
+        try:
+            with _runtime_management._runtime_lock:
+                if _runtime_management._default_provider is None:
+                    _runtime_management._default_provider, _runtime_management._default_runtime = _detect_default_provider()
+            provider = _runtime_management._default_provider or "none"
+            runtime = _runtime_management._default_runtime
+            current = runtime.model if runtime else None
+            models: list[str] = []
+            if runtime and hasattr(runtime, "list_models"):
+                try:
+                    models = list(runtime.list_models())
+                except Exception:
+                    models = []
+            if current and current not in models:
+                models = [current] + models
+        except Exception:
+            provider, current, models = "none", None, []
+        await ws.send_text(json.dumps({
+            "type": "models_list",
+            "data": {"provider": provider, "current": current, "models": models},
+        }, default=str))
+        return
+
+    if action == "switch_model":
+        # Same logic as POST /api/model, but driven over ws.
+        try:
+            model = (cmd.get("model") or "").strip()
+            explicit_provider = (cmd.get("provider") or "").strip() or None
+            conv_id = cmd.get("conv_id")
+            if not model:
+                await ws.send_text(json.dumps({
+                    "type": "error", "data": {"message": "Missing model"},
+                }))
+                return
+            inferred_provider = None
+            bare_model = model
+            if explicit_provider is None and ":" in model:
+                head, tail = model.split(":", 1)
+                from openprogram.providers import get_providers as _get_providers
+                known = set(_get_providers())
+                known.update({"claude-code", "openai-codex", "gemini-cli",
+                              "anthropic", "openai", "gemini"})
+                if head in known:
+                    inferred_provider = head
+                    bare_model = tail
+            target_provider = explicit_provider or inferred_provider
+
+            async def _build_rt(provider: str):
+                return await asyncio.to_thread(
+                    _create_runtime_for_visualizer, provider, bare_model,
+                )
+
+            if conv_id:
+                with _conversations_lock:
+                    conv = _conversations.get(conv_id)
+                if conv:
+                    old_rt = conv.get("runtime")
+                    cur_prov = conv.get(
+                        "provider_name", _runtime_management._default_provider,
+                    )
+                    prov = target_provider or cur_prov
+                    need_new_rt = (
+                        (target_provider and target_provider != cur_prov)
+                        or (old_rt is None)
+                    )
+                    if need_new_rt:
+                        new_rt = await _build_rt(prov)
+                        if old_rt and hasattr(old_rt, "close"):
+                            try: old_rt.close()
+                            except Exception: pass
+                        conv["runtime"] = new_rt
+                        conv["provider_name"] = prov
+                    else:
+                        old_rt.model = bare_model
+                    info = _get_provider_info(conv_id)
+                    _broadcast(json.dumps(
+                        {"type": "provider_changed", "data": info},
+                    ))
+                    await ws.send_text(json.dumps({
+                        "type": "model_switched",
+                        "data": {"provider": prov, "model": bare_model},
+                    }))
+                    return
+
+            # No conv_id → swap default runtime.
+            if (
+                target_provider
+                and target_provider != _runtime_management._default_provider
+            ):
+                new_rt = await _build_rt(target_provider)
+                if (
+                    _runtime_management._default_runtime
+                    and hasattr(_runtime_management._default_runtime, "close")
+                ):
+                    try: _runtime_management._default_runtime.close()
+                    except Exception: pass
+                _runtime_management._default_runtime = new_rt
+                _runtime_management._default_provider = target_provider
+            elif _runtime_management._default_runtime:
+                _runtime_management._default_runtime.model = bare_model
+            else:
+                await ws.send_text(json.dumps({
+                    "type": "error", "data": {"message": "No active runtime"},
+                }))
+                return
+            info = _get_provider_info()
+            _broadcast(json.dumps({"type": "provider_changed", "data": info}))
+            await ws.send_text(json.dumps({
+                "type": "model_switched",
+                "data": {
+                    "provider": target_provider or _runtime_management._default_provider,
+                    "model": bare_model,
+                },
+            }))
+        except Exception as e:  # noqa: BLE001
+            await ws.send_text(json.dumps({
+                "type": "error", "data": {"message": str(e)},
+            }))
+        return
+
+    if action == "stop":
+        # Cancel the in-flight turn for a conversation. Mirrors the REST
+        # /api/stop endpoint.
+        conv_id = cmd.get("conv_id")
+        if not conv_id:
+            return
+        _mark_cancelled(conv_id)
+        resume_execution()
+        _kill_active_runtime(conv_id)
+        with _follow_up_lock:
+            q = _follow_up_queues.get(conv_id)
+        if q is not None:
+            try:
+                q.put_nowait({"_cancelled": True})
+            except Exception:
+                pass
+        _broadcast(json.dumps({
+            "type": "status",
+            "paused": False,
+            "stopped": True,
+            "conv_id": conv_id,
+        }))
+        return
+
     if action == "stats":
         # Lightweight summary used by the CLI welcome banner.
         try:
@@ -3271,11 +3417,18 @@ def start_server(port: int = 8765, open_browser: bool = True) -> threading.Threa
         print(f"Visualizer already running")
         return _server_thread
 
-    # Restore saved sessions from disk
-    _restore_sessions()
-
-    # Register our event callback
+    # Register our event callback (cheap)
     on_event(_on_context_event)
+
+    # Session restore is disk-bound and can take ~200–800ms on a busy
+    # transcript dir. Defer it into a background thread so the uvicorn
+    # socket comes up first — the CLI can connect while restore is still
+    # walking files. /resume queries pull straight from disk anyway.
+    threading.Thread(
+        target=_restore_sessions,
+        name="openprogram-session-restore",
+        daemon=True,
+    ).start()
 
     def _run():
         global _loop

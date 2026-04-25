@@ -8,6 +8,10 @@ export interface PromptInputProps {
   onSubmit: (text: string) => void;
   busy?: boolean;
   onSlashModeChange?: (slashMode: boolean) => void;
+  /** Called when the user hits esc while busy — REPL sends a stop. */
+  onCancel?: () => void;
+  /** Past submissions for ↑/↓ recall (newest last). */
+  history?: string[];
 }
 
 const filterCommands = (filter: string): SlashCommand[] => {
@@ -16,10 +20,18 @@ const filterCommands = (filter: string): SlashCommand[] => {
   return SLASH_COMMANDS.filter((c) => c.name.toLowerCase().includes(needle));
 };
 
-export const PromptInput: React.FC<PromptInputProps> = ({ onSubmit, busy, onSlashModeChange }) => {
+export const PromptInput: React.FC<PromptInputProps> = ({
+  onSubmit,
+  busy,
+  onSlashModeChange,
+  onCancel,
+  history,
+}) => {
   const [value, setValue] = useState('');
   const [cursor, setCursor] = useState(0);
   const [menuIndex, setMenuIndex] = useState(0);
+  // -1 means we're not browsing history. 0..history.length-1 picks an entry.
+  const [historyIndex, setHistoryIndex] = useState<number>(-1);
 
   const inSlashMode = value.startsWith('/');
   const matches = useMemo(() => (inSlashMode ? filterCommands(value) : []), [value, inSlashMode]);
@@ -37,11 +49,16 @@ export const PromptInput: React.FC<PromptInputProps> = ({ onSubmit, busy, onSlas
     setValue('');
     setCursor(0);
     setMenuIndex(0);
+    setHistoryIndex(-1);
     onSubmit(text);
   };
 
   useInput((input, key) => {
-    if (busy) return;
+    // While the agent is busy, esc cancels the in-flight turn.
+    if (busy) {
+      if (key.escape) onCancel?.();
+      return;
+    }
 
     // Slash-menu navigation has priority when active.
     if (inSlashMode && matches.length > 0) {
@@ -87,6 +104,31 @@ export const PromptInput: React.FC<PromptInputProps> = ({ onSubmit, busy, onSlas
       setValue('');
       setCursor(0);
       setMenuIndex(0);
+      setHistoryIndex(-1);
+      return;
+    }
+    // History recall: ↑ on an empty/inactive line walks backwards through
+    // past submissions, ↓ walks forward toward the live input.
+    if (key.upArrow && history && history.length > 0) {
+      const next = historyIndex < 0 ? history.length - 1 : Math.max(0, historyIndex - 1);
+      setHistoryIndex(next);
+      const v = history[next] ?? '';
+      setValue(v);
+      setCursor(v.length);
+      return;
+    }
+    if (key.downArrow && history && historyIndex >= 0) {
+      const next = historyIndex + 1;
+      if (next >= history.length) {
+        setHistoryIndex(-1);
+        setValue('');
+        setCursor(0);
+      } else {
+        setHistoryIndex(next);
+        const v = history[next] ?? '';
+        setValue(v);
+        setCursor(v.length);
+      }
       return;
     }
     if (key.leftArrow) {
@@ -105,6 +147,7 @@ export const PromptInput: React.FC<PromptInputProps> = ({ onSubmit, busy, onSlas
     }
     // Plain character insert. Filter out control chars.
     if (input && !key.ctrl && !key.meta) {
+      setHistoryIndex(-1);
       setValue((v) => v.slice(0, cursor) + input + v.slice(cursor));
       setCursor((c) => c + input.length);
     }

@@ -31,14 +31,33 @@ const ToolRow: React.FC<{ call: ToolCall }> = ({ call }) => {
       : call.status === 'error'
       ? colors.error
       : colors.muted;
-  const inputPreview = call.input ? ` ${call.input.slice(0, 80)}` : '';
   return (
-    <Box paddingLeft={2}>
-      <Text color={color}>{arrow} </Text>
-      <Text color={colors.text} bold>
-        {call.tool}
-      </Text>
-      <Text color={colors.muted}>{inputPreview}</Text>
+    <Box flexDirection="column" paddingLeft={2}>
+      <Box>
+        <Text color={color}>{arrow} </Text>
+        <Text color={colors.text} bold>
+          {call.tool}
+        </Text>
+        {call.input ? (
+          <>
+            <Text color={colors.muted}> · </Text>
+            <Text color={colors.muted} wrap="truncate-end">
+              {call.input}
+            </Text>
+          </>
+        ) : null}
+      </Box>
+      {call.result ? (
+        <Box paddingLeft={2}>
+          <Text color={colors.border}>└ </Text>
+          <Text color={colors.muted} wrap="truncate-end">
+            {call.result.split('\n')[0] ?? ''}
+            {call.result.includes('\n')
+              ? `  (+${call.result.split('\n').length - 1} lines)`
+              : ''}
+          </Text>
+        </Box>
+      ) : null}
     </Box>
   );
 };
