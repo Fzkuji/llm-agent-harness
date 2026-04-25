@@ -200,6 +200,86 @@ export function handleSlash(line: string, ctx: SlashContext): boolean {
       return true;
     }
 
+    case 'web': {
+      // Try to open the local web UI in the browser. Falls back to printing
+      // the URL if the open package isn't available.
+      try {
+        const wsUrl = process.env.OPENPROGRAM_WS ?? '';
+        const m = wsUrl.match(/^ws:\/\/(?:[^/]+):(\d+)/);
+        if (m) {
+          const port = m[1];
+          const httpUrl = `http://localhost:${port}`;
+          import('child_process').then(({ spawn }) => {
+            const opener =
+              process.platform === 'darwin' ? 'open'
+              : process.platform === 'win32' ? 'start' : 'xdg-open';
+            try {
+              spawn(opener, [httpUrl], { stdio: 'ignore', detached: true }).unref();
+            } catch {
+              // ignore
+            }
+          });
+          ctx.pushSystem(`Web UI: ${httpUrl}`);
+        } else {
+          ctx.pushSystem('Could not determine web UI URL from OPENPROGRAM_WS.');
+        }
+      } catch (e) {
+        ctx.pushSystem(`/web failed: ${(e as Error).message}`);
+      }
+      return true;
+    }
+
+    case 'init': {
+      try {
+        const cwd = process.cwd();
+        import('fs').then(({ writeFileSync, existsSync }) => {
+          const seeds: Array<[string, string]> = [
+            [
+              'AGENTS.md',
+              '# Agents\n\nDescribe agent personas in this directory: name, role, what they should know.\n',
+            ],
+            [
+              'SOUL.md',
+              '# Soul\n\nThe project\'s mission, voice, and guardrails go here.\n',
+            ],
+            [
+              'USER.md',
+              '# User profile\n\nWho the user is, how they communicate, what to remember.\n',
+            ],
+          ];
+          for (const [name, content] of seeds) {
+            const p = `${cwd}/${name}`;
+            if (!existsSync(p)) writeFileSync(p, content);
+          }
+          ctx.pushSystem(
+            `Initialized OpenProgram workspace at ${cwd}: AGENTS.md, SOUL.md, USER.md`,
+          );
+        });
+      } catch (e) {
+        ctx.pushSystem(`/init failed: ${(e as Error).message}`);
+      }
+      return true;
+    }
+
+    case 'memory':
+    case 'mcp':
+    case 'doctor':
+    case 'login':
+    case 'logout':
+    case 'config':
+    case 'review':
+    case 'compact': {
+      // Stubs — real implementations live behind ws actions that aren't
+      // wired yet. Print a hint so the input doesn't fall through to the LLM.
+      ctx.pushSystem(`/${cmd} is not implemented in the TUI yet — try \`openprogram ${cmd}\` from the shell.`);
+      return true;
+    }
+
+    case 'copy': {
+      ctx.pushSystem('Use ⌘+C / ctrl+shift+C in your terminal to copy. Native clipboard from inside Ink coming later.');
+      return true;
+    }
+
     default:
       // Unknown slash command: treat as chat. Server may reject or the LLM
       // may handle it. We still forward so the user can see what happened.

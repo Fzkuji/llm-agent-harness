@@ -93,6 +93,7 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
       role: 'assistant',
       text: (s?.text ?? '') + delta,
       tools: s?.tools ?? [],
+      streaming: true,
     }));
   };
 
@@ -103,11 +104,12 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
         role: 'assistant',
         text: '',
         tools: [],
+        streaming: true,
       };
       const tools = base.tools ?? [];
       const callId = `t-${Date.now()}-${tools.length}`;
       const call: ToolCall = { id: callId, tool, input, status: 'running' };
-      return { ...base, tools: [...tools, call] };
+      return { ...base, tools: [...tools, call], streaming: true };
     });
   };
 

@@ -20,6 +20,9 @@ export interface Turn {
   /** Inline tool calls between text segments. Order is preserved. */
   tools?: ToolCall[];
   tag?: string;
+  /** While streaming, skip the markdown renderer (re-running it every
+   * token gets expensive on long replies). */
+  streaming?: boolean;
 }
 
 const ToolRow: React.FC<{ call: ToolCall }> = ({ call }) => {
@@ -81,7 +84,11 @@ const UserRow: React.FC<{ turn: Turn }> = ({ turn }) => {
 };
 
 const AssistantRow: React.FC<{ turn: Turn }> = ({ turn }) => {
-  const rendered = turn.text ? renderMarkdown(turn.text) : '';
+  const rendered = turn.streaming
+    ? turn.text
+    : turn.text
+    ? renderMarkdown(turn.text)
+    : '';
   const lines = rendered.split('\n');
   return (
     <Box marginBottom={1} flexDirection="column">
