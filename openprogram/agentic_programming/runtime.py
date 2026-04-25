@@ -231,7 +231,11 @@ class Runtime:
         return False
 
     def __del__(self):
-        if not self._closed:
+        # Defensive: subclasses that raise mid-__init__ never reach
+        # Runtime.__init__, so `_closed` may be missing on the
+        # partially-built object the GC eventually reaps. Treat
+        # missing as already closed.
+        if not getattr(self, "_closed", True):
             self.close()
 
     def exec(

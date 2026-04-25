@@ -293,7 +293,9 @@ class OpenProgramTUI(App):
         except ValueError:
             idx = -1
         next_id = ids[(idx + 1) % len(ids)]
-        await self._switch_agent(next_id)
+        if next_id == self.agent.id:
+            return
+        self._switch_agent_threaded(next_id, None)
 
     async def action_toggle_sidebar(self) -> None:
         self._sidebar.display = not self._sidebar.display
@@ -365,36 +367,38 @@ class OpenProgramTUI(App):
         self._run_turn(text)
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
-        """Either palette pick or sidebar entry pick."""
+        """Either palette pick or sidebar entry pick.
+
+        Important: ListView fires Selected when the list is rebuilt
+        (the previously-active row is auto-selected). We have to
+        ignore "selecting the agent / session you're already on" or
+        every refresh causes a runtime rebuild + agent switch loop.
+        """
         if event.list_view is self._palette:
             cmd = getattr(event.item, "data_cmd", None)
             if cmd:
-                # Replace input with the selected command + space, leave
-                # focus there so the user can finish arguments.
                 self._input.value = cmd + " "
                 self._input.cursor_position = len(self._input.value)
                 self.set_focus(self._input)
                 self.show_palette = False
             return
 
-        # Sidebar entry
         sb_data = getattr(event.item, "data", None)
         if not sb_data:
             return
         if sb_data["kind"] == "agent":
-            # User clicked an agent header — switch to it.
-            self.run_worker(self._switch_agent(sb_data["agent_id"]),
-                             exclusive=True)
+            target = sb_data["agent_id"]
+            if target == self.agent.id:
+                return
+            self._switch_agent_threaded(target, None)
         elif sb_data["kind"] == "session":
             cid = sb_data["conv_id"]
             agent_id = sb_data["agent_id"]
+            if agent_id == self.agent.id and cid == self.conv_id:
+                return
             if agent_id != self.agent.id:
-                # Switching agent + session at the same time
-                self.run_worker(
-                    self._switch_agent(agent_id, then_conv_id=cid),
-                    exclusive=True,
-                )
-            elif cid != self.conv_id:
+                self._switch_agent_threaded(agent_id, cid)
+            else:
                 self.conv_id = cid
                 self._chat.remove_children()
                 self._load_history_into_scroll()
@@ -470,20 +474,31 @@ class OpenProgramTUI(App):
     # Agent switching
     # ------------------------------------------------------------------
 
-    async def _switch_agent(self, agent_id: str,
-                            then_conv_id: Optional[str] = None) -> None:
+    @work(exclusive=True, thread=True, group="switch")
+    def _switch_agent_threaded(self, agent_id: str,
+                               then_conv_id: Optional[str]) -> None:
+        """Build the new runtime in a worker thread (so any auth
+        refresh can spin its own loop), then bounce back to the UI
+        thread to apply the change."""
         from openprogram.agents import manager as _A
         from openprogram.agents import runtime_registry as _R
         spec = _A.get(agent_id)
         if spec is None:
-            self._append_error(f"no agent {agent_id!r}")
+            self.call_from_thread(self._append_error,
+                                  f"no agent {agent_id!r}")
             return
         try:
-            self.rt = _R.get_runtime_for(spec)
+            rt = _R.get_runtime_for(spec)
         except Exception as e:  # noqa: BLE001
-            self._append_error(f"runtime build failed: {e}")
+            self.call_from_thread(
+                self._append_error, f"runtime build failed: {e}",
+            )
             return
+        self.call_from_thread(self._apply_switch, spec, rt, then_conv_id)
+
+    def _apply_switch(self, spec, rt, then_conv_id: Optional[str]) -> None:
         self.agent = spec
+        self.rt = rt
         self.conv_id = then_conv_id or ("local_" + uuid.uuid4().hex[:10])
         self._chat.remove_children()
         self._load_history_into_scroll()

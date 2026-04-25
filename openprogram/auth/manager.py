@@ -145,31 +145,46 @@ class AuthManager:
     # -- acquire (async) -----------------------------------------------------
 
     def acquire_sync(self, provider_id: str, profile_id: str = "default") -> Credential:
-        """Sync wrapper around :meth:`acquire` for callers in non-async
-        contexts (legacy runtimes, CLI entry points, subprocess drivers).
+        """Sync wrapper around :meth:`acquire`.
 
-        Rules:
-          * if no event loop is running on the current thread, we spin up
-            a private one for the call. Creating one loop per acquire is
-            cheap (refresh involves at most one HTTPS POST) and keeps the
-            code path self-contained.
-          * if a loop IS running on this thread, we refuse — an async
-            caller should use :meth:`acquire` directly rather than
-            nesting loops. The error message names the caller to reduce
-            "wait why doesn't this work" debugging.
-
-        Cross-thread is fine either way: one event loop per thread is
-        independent."""
+        Three cases:
+          * no event loop running on this thread → spin up a private
+            one (cheap, refresh is at most one HTTPS POST).
+          * loop running on this thread → run ``acquire`` on a private
+            background thread (joined synchronously). Doing this rather
+            than raising lets sync constructors that are called from
+            inside async front-ends — Textual TUI, FastAPI handlers,
+            asyncio test fixtures — keep working without each one
+            having to refactor to be async.
+          * cross-thread is always safe: each thread has its own loop.
+        """
         try:
             running = asyncio.get_running_loop()
         except RuntimeError:
             running = None
-        if running is not None:
-            raise RuntimeError(
-                "AuthManager.acquire_sync() called from inside a running "
-                "event loop — use `await acquire(...)` instead"
-            )
-        return asyncio.run(self.acquire(provider_id, profile_id))
+        if running is None:
+            return asyncio.run(self.acquire(provider_id, profile_id))
+
+        import threading
+        box: dict = {}
+
+        def _runner() -> None:
+            try:
+                box["cred"] = asyncio.run(
+                    self.acquire(provider_id, profile_id),
+                )
+            except BaseException as e:  # noqa: BLE001
+                box["err"] = e
+
+        t = threading.Thread(
+            target=_runner, daemon=True,
+            name=f"acquire_sync-{provider_id}-{profile_id}",
+        )
+        t.start()
+        t.join()
+        if "err" in box:
+            raise box["err"]
+        return box["cred"]
 
     async def acquire(self, provider_id: str, profile_id: str = "default") -> Credential:
         """Return a usable credential for ``(provider, profile)``.
