@@ -1,0 +1,97 @@
+"""Launch the Ink-based TUI front-end.
+
+The CLI front-end is a Node.js program (cli/dist/index.js) that talks to the
+Python webui server over WebSocket. ``run_ink_tui`` starts the server in
+this process, picks a free port, and spawns the Node child with stdin/stdout
+attached so it owns the terminal.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import socket
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+
+def _find_free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return int(s.getsockname()[1])
+
+
+def _wait_until_listening(port: int, timeout: float = 5.0) -> bool:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.2)
+            try:
+                s.connect(("127.0.0.1", port))
+                return True
+            except OSError:
+                time.sleep(0.05)
+    return False
+
+
+def _resolve_cli_entry() -> Path:
+    here = Path(__file__).resolve()
+    project_root = here.parent.parent
+    candidate = project_root / "cli" / "dist" / "index.js"
+    if candidate.exists():
+        return candidate
+    raise FileNotFoundError(
+        f"Ink CLI bundle not found at {candidate}. "
+        f"Run `cd cli && npm install && npm run build` first."
+    )
+
+
+def _resolve_node() -> str:
+    node = shutil.which("node")
+    if not node:
+        raise RuntimeError(
+            "node binary not found in PATH. Install Node.js (>=20) to use the TUI."
+        )
+    return node
+
+
+def run_ink_tui(*, agent=None, conv_id: str | None = None, rt=None) -> None:
+    """Start the webui server, then exec the Node CLI as a child.
+
+    The agent / conv_id / rt arguments are kept for signature compatibility
+    with the old Textual entry; the Node front-end discovers the default
+    agent over the ws ``list_agents`` action and picks its own conv_id when
+    the user sends the first message.
+    """
+    from openprogram.webui import start_web
+
+    node = _resolve_node()
+    entry = _resolve_cli_entry()
+
+    port = _find_free_port()
+    start_web(port=port, open_browser=False)
+    if not _wait_until_listening(port):
+        raise RuntimeError(f"webui server did not come up on port {port}")
+
+    ws_url = f"ws://127.0.0.1:{port}/ws"
+    env = os.environ.copy()
+    env["OPENPROGRAM_WS"] = ws_url
+    if agent is not None and getattr(agent, "id", None):
+        env["OPENPROGRAM_AGENT"] = agent.id
+    if conv_id:
+        env["OPENPROGRAM_CONV"] = conv_id
+
+    cmd = [node, str(entry), "--ws", ws_url]
+    proc = subprocess.Popen(cmd, env=env)
+    try:
+        proc.wait()
+    except KeyboardInterrupt:
+        proc.terminate()
+        try:
+            proc.wait(timeout=2.0)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+    finally:
+        sys.exit(proc.returncode or 0)

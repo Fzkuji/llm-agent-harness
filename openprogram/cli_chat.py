@@ -904,8 +904,8 @@ def run_cli_chat(oneshot: str | None = None,
     # because rendering a scroll buffer for a single turn is overkill.
     if tui and not oneshot:
         try:
-            from openprogram.cli_tui import run_tui
-            run_tui(agent=agent, conv_id=conv_id, rt=rt)
+            from openprogram.cli_ink import run_ink_tui
+            run_ink_tui(agent=agent, conv_id=conv_id, rt=rt)
             return
         except Exception as e:  # noqa: BLE001
             console.print(
