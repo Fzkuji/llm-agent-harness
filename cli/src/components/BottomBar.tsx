@@ -16,6 +16,10 @@ export interface BottomBarProps {
   tokens?: { input?: number; output?: number };
   /** Tools available for next turn. */
   toolsOn?: boolean;
+  /** Permission mode for tool calls: ask / auto / bypass. */
+  permissionMode?: 'ask' | 'auto' | 'bypass';
+  /** Thinking budget cycle: off / low / medium / high. */
+  thinkingEffort?: 'off' | 'low' | 'medium' | 'high';
   /** ws connection state. */
   connState?: 'connecting' | 'connected' | 'disconnected';
   /** Total context window in tokens (for the % indicator). */
@@ -37,6 +41,8 @@ export const BottomBar: React.FC<BottomBarProps> = ({
   slashMode,
   tokens,
   toolsOn,
+  permissionMode,
+  thinkingEffort,
   connState,
   contextWindow,
 }) => {
@@ -73,8 +79,24 @@ export const BottomBar: React.FC<BottomBarProps> = ({
   return (
     <Box paddingX={1} justifyContent="space-between" width={width}>
       <Box flexShrink={1}>
-        <Text color={toolsOn ? colors.success : colors.muted}>
-          {toolsOn ? '▸▸ tools on' : '▸▸ tools off'}
+        {/* Permission cycle indicator (shift+tab) */}
+        <Text color={
+          permissionMode === 'bypass' ? colors.error
+          : permissionMode === 'auto' ? colors.warning
+          : colors.muted
+        }>
+          {permissionMode === 'bypass' ? '▸▸ bypass'
+            : permissionMode === 'auto' ? '▸▸ auto'
+            : '▸▸ ask'}
+        </Text>
+        <Text color={colors.border}> · </Text>
+        {/* Thinking effort cycle (tab) */}
+        <Text color={
+          thinkingEffort === 'high' ? colors.primary
+          : thinkingEffort === 'off' ? colors.muted
+          : colors.warning
+        }>
+          {`✦${thinkingEffort ?? 'medium'}`}
         </Text>
         {showHint ? (
           <>

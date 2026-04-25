@@ -8,8 +8,8 @@ export interface SlashContext {
   clearCommitted: () => void;
   newSession: () => void;
   exit: () => void;
-  /** Open an interactive picker (model / resume / agent). */
-  openPicker: (kind: 'model' | 'resume' | 'agent') => void;
+  /** Open an interactive picker (model / resume / agent / channel). */
+  openPicker: (kind: 'model' | 'resume' | 'agent' | 'channel') => void;
   /** Toggle (or set) the "tools-on" flag passed with the next chat turn. */
   toggleTools: () => void;
   /** Toggle the terminal-bell-on-long-turn-complete flag. */
@@ -216,6 +216,13 @@ export function handleSlash(line: string, ctx: SlashContext): boolean {
 
     case 'tools': {
       ctx.toggleTools();
+      return true;
+    }
+
+    case 'channel': {
+      // Multi-step: pick channel → pick account → guides /attach.
+      ctx.client.send({ action: 'list_channel_accounts' });
+      ctx.openPicker('channel');
       return true;
     }
 

@@ -27,6 +27,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { name: 'review', description: 'Review the diff' },
   { name: 'diff', description: 'Show git working-tree diff' },
   { name: 'init', description: 'Initialize an OpenProgram workspace' },
+  { name: 'channel', description: 'Connect a chat channel (wechat/telegram/...)' },
   { name: 'attach', description: 'Attach a channel peer to this session' },
   { name: 'detach', description: 'Detach a channel peer' },
   { name: 'connections', description: 'List channel bindings' },

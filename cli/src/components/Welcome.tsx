@@ -11,6 +11,11 @@ export interface WelcomeStats {
   conversations_count?: number;
   top_programs?: Array<{ name?: string; category?: string }>;
   top_skills?: Array<{ name?: string; slug?: string }>;
+  top_agents?: Array<{ name?: string; id?: string }>;
+  top_sessions?: Array<{ id?: string; title?: string }>;
+  top_tools?: string[];
+  top_providers?: string[];
+  top_channels?: Array<{ channel?: string; id?: string }>;
 }
 
 export interface WelcomeProps {
@@ -19,24 +24,132 @@ export interface WelcomeProps {
 
 const fmt = (n?: number): string => (typeof n === 'number' ? String(n) : '—');
 
-const Tile: React.FC<{ value: string; label: string }> = ({ value, label }) => (
-  <Box flexDirection="column" flexGrow={1} alignItems="center" paddingX={1}>
-    <Text bold color={colors.primary}>
-      {value}
-    </Text>
-    <Text color={colors.muted}>{label}</Text>
-  </Box>
-);
+interface ColumnSpec {
+  count: string;
+  label: string;
+  items: string[];
+}
+
+const Column: React.FC<{
+  spec: ColumnSpec;
+  width: number;
+  /** When true, items wrap into 2 sub-columns inside the column. */
+  twoCols: boolean;
+}> = ({ spec, width, twoCols }) => {
+  const innerWidth = Math.max(8, width - 2);
+  const subWidth = twoCols ? Math.floor(innerWidth / 2) : innerWidth;
+  const rows: Array<[string, string | undefined]> = [];
+  if (twoCols) {
+    const half = Math.ceil(spec.items.length / 2);
+    for (let i = 0; i < half; i++) {
+      rows.push([spec.items[i] ?? '', spec.items[i + half]]);
+    }
+  } else {
+    for (const it of spec.items) rows.push([it, undefined]);
+  }
+  return (
+    <Box flexDirection="column" width={width} paddingX={1}>
+      <Box justifyContent="center">
+        <Text bold color={colors.primary}>
+          {spec.count}
+        </Text>
+      </Box>
+      <Box justifyContent="center">
+        <Text color={colors.muted}>{spec.label}</Text>
+      </Box>
+      {rows.length > 0 ? <Box height={1} /> : null}
+      {rows.map(([a, b], i) => (
+        <Box key={i}>
+          <Box width={subWidth}>
+            <Text color={colors.muted} wrap="truncate-end">
+              {a}
+            </Text>
+          </Box>
+          {twoCols && b ? (
+            <Box width={subWidth}>
+              <Text color={colors.muted} wrap="truncate-end">
+                {b}
+              </Text>
+            </Box>
+          ) : null}
+        </Box>
+      ))}
+    </Box>
+  );
+};
 
 export const Welcome: React.FC<WelcomeProps> = ({ stats }) => {
   const cols = useTerminalWidth();
+  const width = usePanelWidth();
   const agentName = stats?.agent?.name ?? stats?.agent?.id ?? '—';
   const model = stats?.agent?.model ?? '—';
 
-  // Cap the panel width so a 200-column terminal doesn't stretch the
-  // border into a long strip — looks better aligned with the input box.
-  const width = usePanelWidth();
-  const compactTiles = cols < 60;
+  const programs: ColumnSpec = {
+    count: fmt(stats?.programs_count),
+    label: 'programs',
+    items: (stats?.top_programs ?? [])
+      .map((p) => p.name)
+      .filter((s): s is string => !!s),
+  };
+  const skills: ColumnSpec = {
+    count: fmt(stats?.skills_count),
+    label: 'skills',
+    items: (stats?.top_skills ?? [])
+      .map((s) => s.name)
+      .filter((s): s is string => !!s),
+  };
+  const agentsCol: ColumnSpec = {
+    count: fmt(stats?.agents_count),
+    label: 'agents',
+    items: (stats?.top_agents ?? [])
+      .map((a) => a.name ?? a.id)
+      .filter((s): s is string => !!s),
+  };
+  const sessionsCol: ColumnSpec = {
+    count: fmt(stats?.conversations_count),
+    label: 'sessions',
+    items: (stats?.top_sessions ?? [])
+      .map((s) => s.title ?? s.id)
+      .filter((s): s is string => !!s),
+  };
+  const tools: ColumnSpec = {
+    count: fmt(stats?.top_tools?.length),
+    label: 'tools',
+    items: stats?.top_tools ?? [],
+  };
+  const providers: ColumnSpec = {
+    count: fmt(stats?.top_providers?.length),
+    label: 'providers',
+    items: stats?.top_providers ?? [],
+  };
+  const channels: ColumnSpec = {
+    count: fmt(stats?.top_channels?.length),
+    label: 'channels',
+    items: (stats?.top_channels ?? []).map((c) =>
+      c.channel && c.id ? `${c.channel}:${c.id}` : c.channel ?? c.id ?? '',
+    ),
+  };
+
+  // Layout decisions based on terminal width.
+  // - cols < 50 : 2 cols × 2 rows of headline tiles, no extras row
+  // - cols 50-100: single-row 4 tiles + extras row (3 tiles)
+  // - cols >= 100: same, items get a 2-sub-column layout per tile
+  const compact = cols < 50;
+  const twoSubCols = cols >= 110;
+
+  const headlineCols: ColumnSpec[] = compact
+    ? []
+    : [programs, skills, agentsCol, sessionsCol];
+  const headlineColWidth = compact
+    ? Math.floor((width - 4) / 2)
+    : Math.floor((width - 4) / 4);
+
+  const extrasCols: ColumnSpec[] = compact
+    ? [programs, skills, agentsCol, sessionsCol, tools, providers, channels]
+    : [tools, providers, channels];
+  const extrasColWidth = compact
+    ? Math.floor((width - 4) / 2)
+    : Math.floor((width - 4) / 3);
 
   return (
     <Box
@@ -48,7 +161,7 @@ export const Welcome: React.FC<WelcomeProps> = ({ stats }) => {
       marginBottom={1}
       width={width}
     >
-      {/* Title row + agent / model on the right */}
+      {/* Title row */}
       <Box justifyContent="space-between">
         <Text bold color={colors.primary}>
           OpenProgram
@@ -58,54 +171,33 @@ export const Welcome: React.FC<WelcomeProps> = ({ stats }) => {
         </Text>
       </Box>
 
-      {/* Stat tiles. Wide terminals: single row. Narrow: 2x2 grid. */}
-      {compactTiles ? (
+      {/* Headline row — 4 main tiles with vertical item lists */}
+      {headlineCols.length > 0 ? (
+        <Box marginTop={1}>
+          {headlineCols.map((c) => (
+            <Column key={c.label} spec={c} width={headlineColWidth} twoCols={twoSubCols} />
+          ))}
+        </Box>
+      ) : null}
+
+      {/* Compact: pack everything into 2-col grid; otherwise extras row */}
+      {compact ? (
         <Box flexDirection="column" marginTop={1}>
-          <Box>
-            <Tile value={fmt(stats?.programs_count)} label="programs" />
-            <Tile value={fmt(stats?.skills_count)} label="skills" />
-          </Box>
-          <Box>
-            <Tile value={fmt(stats?.agents_count)} label="agents" />
-            <Tile value={fmt(stats?.conversations_count)} label="sessions" />
-          </Box>
+          {Array.from({ length: Math.ceil(extrasCols.length / 2) }).map((_, row) => (
+            <Box key={row}>
+              {extrasCols.slice(row * 2, row * 2 + 2).map((c) => (
+                <Column key={c.label} spec={c} width={extrasColWidth} twoCols={false} />
+              ))}
+            </Box>
+          ))}
         </Box>
       ) : (
         <Box marginTop={1}>
-          <Tile value={fmt(stats?.programs_count)} label="programs" />
-          <Tile value={fmt(stats?.skills_count)} label="skills" />
-          <Tile value={fmt(stats?.agents_count)} label="agents" />
-          <Tile value={fmt(stats?.conversations_count)} label="sessions" />
+          {extrasCols.map((c) => (
+            <Column key={c.label} spec={c} width={extrasColWidth} twoCols={twoSubCols} />
+          ))}
         </Box>
       )}
-
-      {/* A peek at what's installed — first few names of each kind. */}
-      {stats?.top_programs?.length || stats?.top_skills?.length ? (
-        <Box marginTop={1} flexDirection="column">
-          {stats?.top_programs?.length ? (
-            <Text color={colors.muted}>
-              programs:{' '}
-              <Text color={colors.text}>
-                {stats.top_programs
-                  .map((p) => p.name)
-                  .filter(Boolean)
-                  .join(' · ')}
-              </Text>
-            </Text>
-          ) : null}
-          {stats?.top_skills?.length ? (
-            <Text color={colors.muted}>
-              skills:{' '}
-              <Text color={colors.text}>
-                {stats.top_skills
-                  .map((s) => s.name)
-                  .filter(Boolean)
-                  .join(' · ')}
-              </Text>
-            </Text>
-          ) : null}
-        </Box>
-      ) : null}
 
       <Box marginTop={1}>
         <Text color={colors.muted}>

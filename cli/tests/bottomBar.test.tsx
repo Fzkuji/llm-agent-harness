@@ -26,11 +26,12 @@ describe('BottomBar', () => {
     expect(slashOut).toContain('↑↓ choose');
   });
 
-  it('renders tools-on / tools-off mode indicator', () => {
-    const off = render(<BottomBar agent="main" toolsOn={false} />);
-    expect(stripAnsi(off.lastFrame() ?? '')).toContain('tools off');
-    const on = render(<BottomBar agent="main" toolsOn />);
-    expect(stripAnsi(on.lastFrame() ?? '')).toContain('tools on');
+  it('renders permission + thinking effort cycle indicators', () => {
+    const ask = render(<BottomBar agent="main" permissionMode="ask" thinkingEffort="medium" />);
+    expect(stripAnsi(ask.lastFrame() ?? '')).toContain('ask');
+    const bypass = render(<BottomBar agent="main" permissionMode="bypass" thinkingEffort="high" />);
+    expect(stripAnsi(bypass.lastFrame() ?? '')).toContain('bypass');
+    expect(stripAnsi(bypass.lastFrame() ?? '')).toContain('high');
   });
 
   it('renders busy indicator on the right', () => {

@@ -71,11 +71,19 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
   const [pastConversations, setPastConversations] = useState<
     Array<{ id?: string; title?: string; created_at?: number }>
   >([]);
-  const [pickerKind, setPickerKind] = useState<null | 'model' | 'resume' | 'agent'>(
-    null,
-  );
+  const [pickerKind, setPickerKind] = useState<
+    null | 'model' | 'resume' | 'agent' | 'channel' | 'channel_account'
+  >(null);
+  const [channelAccounts, setChannelAccounts] = useState<
+    Array<{ channel?: string; account_id?: string; configured?: boolean }>
+  >([]);
+  const [chosenChannel, setChosenChannel] = useState<string | undefined>(undefined);
   const [agentsList, setAgentsList] = useState<AgentInfo[]>([]);
-  const [toolsOn, setToolsOn] = useState(false);
+  const [toolsOn, setToolsOn] = useState(true);
+  // Permission cycle: ask before each tool call → auto-approve safe → bypass everything.
+  const [permissionMode, setPermissionMode] = useState<'ask' | 'auto' | 'bypass'>('ask');
+  // Thinking effort cycle: off → low → medium → high → off.
+  const [thinkingEffort, setThinkingEffort] = useState<'off' | 'low' | 'medium' | 'high'>('medium');
   const [connState, setConnState] = useState<ConnectionState>(client.getState());
   const agentSetRef = useRef(false);
 
@@ -253,6 +261,8 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
         const list = ev.data?.models ?? [];
         setModelsList(list);
         if (ev.data?.current) setModel(ev.data.current);
+      } else if (ev.type === 'channel_accounts') {
+        setChannelAccounts((ev.data ?? []) as Array<{ channel?: string; account_id?: string; configured?: boolean }>);
       } else if (ev.type === 'history_list') {
         setPastConversations(ev.data ?? []);
       } else if (ev.type === 'conversations_list') {
@@ -343,9 +353,17 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
       app.exit();
       return;
     }
-    // shift+tab toggles tool availability for the next turn (Claude Code parity).
+    // shift+tab cycles permission mode (Claude Code parity):
+    // ask → auto → bypass → ask. Always ask, auto-approve safe, or bypass all.
     if (key.shift && key.tab) {
-      setToolsOn((on) => !on);
+      setPermissionMode((m) => (m === 'ask' ? 'auto' : m === 'auto' ? 'bypass' : 'ask'));
+      return;
+    }
+    // tab cycles thinking effort: off → low → medium → high → off.
+    if (key.tab && !key.shift) {
+      setThinkingEffort((t) =>
+        t === 'off' ? 'low' : t === 'low' ? 'medium' : t === 'medium' ? 'high' : 'off',
+      );
       return;
     }
   });
@@ -455,7 +473,8 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
       agent_id: agent,
       text,
       tools: toolsOn,
-    });
+      thinking_effort: thinkingEffort === 'off' ? undefined : thinkingEffort,
+    } as never);
   };
 
   const onCancel = () => {
@@ -516,6 +535,68 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
           setPickerKind(null);
         }}
         onCancel={() => setPickerKind(null)}
+      />
+    );
+  } else if (pickerKind === 'channel') {
+    const channels = ['wechat', 'telegram', 'discord', 'slack'];
+    const items: PickerItem<string>[] = channels.map((ch) => ({
+      label: ch,
+      description:
+        channelAccounts.filter((a) => a.channel === ch).length > 0
+          ? `${channelAccounts.filter((a) => a.channel === ch).length} account(s) configured`
+          : 'no account yet',
+      value: ch,
+    }));
+    pickerNode = (
+      <Picker
+        title="Choose a channel"
+        items={items}
+        onSelect={(it) => {
+          setChosenChannel(it.value);
+          setPickerKind('channel_account');
+        }}
+        onCancel={() => setPickerKind(null)}
+      />
+    );
+  } else if (pickerKind === 'channel_account') {
+    const filtered = channelAccounts.filter((a) => a.channel === chosenChannel);
+    const items: PickerItem<string>[] = filtered.length === 0
+      ? [{ label: '(no accounts — run shell login first)', description: '', value: '' }]
+      : filtered.map((a) => ({
+          label: a.account_id ?? '',
+          description: a.configured ? 'logged in' : 'not configured',
+          value: a.account_id ?? '',
+        }));
+    pickerNode = (
+      <Picker
+        title={`Pick a ${chosenChannel} account`}
+        items={items}
+        onSelect={(it) => {
+          if (!it.value) {
+            pushSystem(
+              `Run \`openprogram channels accounts ${chosenChannel === 'wechat' ? 'login' : 'add'} ${chosenChannel} default\` from the shell first, then re-open /channel.`,
+            );
+            setPickerKind(null);
+            setChosenChannel(undefined);
+            return;
+          }
+          if (!conversationId) {
+            pushSystem('Send a message first to create a session, then attach.');
+            setPickerKind(null);
+            setChosenChannel(undefined);
+            return;
+          }
+          pushSystem(
+            `Selected ${chosenChannel}:${it.value}.\n` +
+            `Now type \`/attach ${chosenChannel} ${it.value} <peer-id>\` with the channel-side\n` +
+            `peer (e.g. wxid_xxx for WeChat) to bind that contact to ${conversationId}.`,
+          );
+          setPickerKind(null);
+          setChosenChannel(undefined);
+        }}
+        onCancel={() => {
+          setPickerKind('channel');
+        }}
       />
     );
   } else if (pickerKind === 'resume') {
@@ -580,6 +661,8 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
         slashMode={slashMode}
         tokens={tokens}
         toolsOn={toolsOn}
+        permissionMode={permissionMode}
+        thinkingEffort={thinkingEffort}
         connState={connState}
         contextWindow={contextWindow}
       />

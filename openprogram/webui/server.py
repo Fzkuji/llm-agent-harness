@@ -1636,6 +1636,65 @@ async def _handle_ws_command(ws, cmd: dict):
         except Exception:
             top_skills = []
 
+        # Top agents (we may have several once user creates more).
+        try:
+            top_agents = [
+                {"name": a.to_dict().get("name") or a.id, "id": a.id}
+                for a in agents[:6]
+            ] if agents else []
+        except Exception:
+            top_agents = []
+
+        # Top sessions by recency.
+        try:
+            from openprogram.webui import persistence as _persist
+            convs = list(_persist.list_conversations())[:6]
+            top_sessions = []
+            for agent_id, conv_id in convs:
+                # Best-effort title — fall back to truncated conv_id if a
+                # meta reader isn't available on this branch.
+                title = conv_id
+                try:
+                    loaded = _persist.load_conversation(agent_id, conv_id)
+                    if isinstance(loaded, dict):
+                        title = loaded.get("title") or conv_id
+                except Exception:
+                    pass
+                top_sessions.append({
+                    "id": conv_id,
+                    "title": str(title)[:40],
+                })
+        except Exception:
+            top_sessions = []
+
+        # Default tools available to the agent.
+        try:
+            from openprogram.tools import DEFAULT_TOOLS as _DT
+            top_tools = list(_DT)[:8]
+        except Exception:
+            top_tools = []
+
+        # Providers registered.
+        try:
+            from openprogram.providers import get_providers as _gp
+            top_providers = list(_gp())[:8]
+        except Exception:
+            top_providers = []
+
+        # Channel accounts logged in.
+        try:
+            from openprogram.channels import accounts as _acc
+            top_channels = []
+            for ch in _acc.SUPPORTED_CHANNELS:
+                for acc in _acc.list_for_channel(ch):
+                    top_channels.append({
+                        "channel": ch,
+                        "id": getattr(acc, "id", None) or acc.account_id,
+                    })
+            top_channels = top_channels[:6]
+        except Exception:
+            top_channels = []
+
         await ws.send_text(json.dumps({
             "type": "stats",
             "data": {
