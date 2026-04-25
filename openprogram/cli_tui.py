@@ -139,41 +139,55 @@ class _Sidebar(Vertical):
     """Sessions grouped by agent. Header row per agent acts as the
     active-agent toggle when clicked."""
     DEFAULT_CSS = """
-    _Sidebar {
+    #sidebar {
         width: 32;
         border-right: tall $accent 30%;
     }
-    _Sidebar Label.brand {
-        padding: 1 2 0 2;
-        color: $accent;
-        text-style: bold;
-    }
-    _Sidebar ListView { height: 1fr; }
-    _Sidebar ListItem.agent_header { color: $accent; }
-    _Sidebar ListItem.agent_header.active {
+    #sidebar ListView { height: 1fr; }
+    /* Same one-row-per-item rule as the palette — without it
+       ListItem.Horizontal expands to fill and only one row shows. */
+    #sidebar ListItem { height: 1; padding: 0 1; }
+    #sidebar ListItem.agent_header { color: $accent; }
+    #sidebar ListItem.agent_header.active {
         background: $accent 15%;
     }
-    _Sidebar ListItem.session { padding-left: 2; }
-    _Sidebar ListItem.session.active {
+    #sidebar ListItem.session { padding-left: 2; }
+    #sidebar ListItem.session.active {
         background: $accent 25%;
         text-style: bold;
+    }
+    #sidebar ListItem.action_row {
+        color: $warning;
+    }
+    #sidebar ListItem.separator_row {
+        color: $text-muted;
     }
     """
 
 
 class _SlashPalette(ListView):
     """Floating-ish palette that appears above the input when the
-    user starts a slash command. Filters by prefix as they type."""
+    user starts a slash command. Filters by prefix as they type.
+
+    NOTE: the CSS uses the ``#slash_palette`` id selector instead of
+    the class name. Textual's parser doesn't reliably match component
+    classes whose names start with an underscore (``_SlashPalette``);
+    sticking to id avoids that footgun and makes max-height land.
+    """
     DEFAULT_CSS = """
-    _SlashPalette {
-        height: auto;
-        max-height: 12;
+    #slash_palette {
+        height: 14;
+        min-height: 4;
         border: tall $accent 30%;
         background: $surface;
     }
-    _SlashPalette ListItem { padding: 0 1; }
-    _SlashPalette ListItem Label.cmd { color: $accent; }
-    _SlashPalette ListItem Label.desc { color: $text-muted; padding-left: 1; }
+    /* ListItem must be height 1 — without it, the Horizontal child
+       expands to fill, each row eats the whole palette and only one
+       command shows. */
+    #slash_palette ListItem { height: 1; padding: 0 1; }
+    #slash_palette ListItem Horizontal { height: 1; }
+    #slash_palette ListItem Label.cmd { color: $accent; width: 24; }
+    #slash_palette ListItem Label.desc { color: $text-muted; padding-left: 1; }
     """
 
 
@@ -399,12 +413,9 @@ class OpenProgramTUI(App):
             return
         self._palette.clear()
         for value, label in options:
-            cmd_lbl = Label(value, classes="cmd")
-            desc_lbl = Label(label, classes="desc")
-            row = ListItem(Horizontal(cmd_lbl, desc_lbl))
-            row.data_cmd = value  # type: ignore[attr-defined]
-            row.data_picker = True  # type: ignore[attr-defined]
-            self._palette.append(row)
+            self._palette.append(
+                self._make_palette_row(value, label, picker=True),
+            )
         self._picker_callback = on_select
         self.show_palette = True
         self.set_focus(self._palette)
@@ -497,12 +508,27 @@ class OpenProgramTUI(App):
                 ]
         self._palette.clear()
         for cmd, desc in candidates:
-            cmd_lbl = Label(cmd, classes="cmd")
-            desc_lbl = Label(desc, classes="desc")
-            row = ListItem(Horizontal(cmd_lbl, desc_lbl))
-            row.data_cmd = cmd  # type: ignore[attr-defined]
-            self._palette.append(row)
+            self._palette.append(self._make_palette_row(cmd, desc))
         self.show_palette = bool(candidates)
+
+    def _make_palette_row(self, cmd: str, desc: str,
+                          picker: bool = False) -> ListItem:
+        """Build a one-line palette row. We force height: 1 inline
+        because Textual's ListView CSS otherwise lets the inner
+        Horizontal stretch and crowd the rest of the rows out."""
+        cmd_lbl = Label(cmd, classes="cmd")
+        desc_lbl = Label(desc, classes="desc")
+        body = Horizontal(cmd_lbl, desc_lbl)
+        body.styles.height = 1
+        cmd_lbl.styles.width = 24
+        cmd_lbl.styles.height = 1
+        desc_lbl.styles.height = 1
+        row = ListItem(body)
+        row.styles.height = 1
+        row.data_cmd = cmd  # type: ignore[attr-defined]
+        if picker:
+            row.data_picker = True  # type: ignore[attr-defined]
+        return row
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         text = (event.value or "").strip()
