@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Box, useApp, useInput } from 'ink';
-import { BackendClient, WsEnvelope } from '../ws/client.js';
+import { BackendClient, WsEnvelope, StatsEnvelope } from '../ws/client.js';
 import { StatusLine } from '../components/StatusLine.js';
 import { Messages } from '../components/Messages.js';
 import { Welcome } from '../components/Welcome.js';
 import { PromptInput } from '../components/PromptInput/PromptInput.js';
+import { handleSlash } from '../commands/handler.js';
 
 export interface REPLProps {
   client: BackendClient;
@@ -40,7 +41,11 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
   const [model, setModel] = useState<string | undefined>(undefined);
   const [conversationId, setConversationId] = useState<string | undefined>(initialConversation);
   const [busy, setBusy] = useState(false);
+  const [stats, setStats] = useState<StatsEnvelope['data'] | undefined>(undefined);
   const agentSetRef = useRef(false);
+
+  const pushSystem = (text: string) =>
+    setCommitted((m) => [...m, { id: `s-${Date.now()}-${m.length}`, role: 'system', text }]);
 
   useEffect(() => {
     const off = client.on((ev: WsEnvelope) => {
@@ -67,13 +72,19 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
           ]);
           setBusy(false);
         } else if (d.type === 'status' && typeof d.content === 'string') {
-          // Skip noisy "Thinking..." status — busy indicator already covers it.
           if (d.content !== 'Thinking...') {
             setCommitted((m) => [
               ...m,
               { id: `s-${Date.now()}`, role: 'system', text: d.content as string },
             ]);
           }
+        }
+      } else if (ev.type === 'stats') {
+        setStats(ev.data);
+        if (ev.data.agent?.model) setModel(ev.data.agent.model);
+        if (ev.data.agent?.id && !agentSetRef.current) {
+          agentSetRef.current = true;
+          setAgent(ev.data.agent.id);
         }
       } else if (ev.type === 'agents_list') {
         const list = ev.data as AgentInfo[];
@@ -88,6 +99,7 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
         const e = ev as { type: 'event'; event: string; data: Record<string, unknown> };
         if (e.event === 'agents') {
           client.send({ action: 'list_agents' });
+          client.send({ action: 'stats' });
         }
       } else if (ev.type === 'error') {
         const data = (ev as { data?: { message?: string } }).data;
@@ -95,7 +107,7 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
         setCommitted((m) => [...m, { id: `e-${Date.now()}`, role: 'system', text: `error: ${msg}` }]);
       }
     });
-    client.send({ action: 'sync' });
+    client.send({ action: 'stats' });
     client.send({ action: 'list_agents' });
     return () => {
       off();
@@ -111,6 +123,24 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
 
   const onSubmit = (text: string) => {
     if (!text.trim()) return;
+    if (text.startsWith('/')) {
+      const handled = handleSlash(text, {
+        client,
+        pushUser: () => setCommitted((m) => [...m, { id: `u-${Date.now()}`, role: 'user', text }]),
+        pushSystem,
+        clearCommitted: () => setCommitted([]),
+        newSession: () => {
+          setConversationId(undefined);
+          setStreaming(null);
+          setCommitted([]);
+        },
+        exit: () => app.exit(),
+        currentAgent: agent,
+        currentModel: model,
+        currentConversation: conversationId,
+      });
+      if (handled) return;
+    }
     setCommitted((m) => [...m, { id: `u-${Date.now()}`, role: 'user', text }]);
     setBusy(true);
     client.send({
@@ -123,7 +153,7 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
 
   return (
     <Box flexDirection="column">
-      {committed.length === 0 && !streaming ? <Welcome /> : null}
+      {committed.length === 0 && !streaming ? <Welcome stats={stats} /> : null}
       <Messages committed={committed} streaming={streaming} />
       <PromptInput onSubmit={onSubmit} busy={busy} />
       <StatusLine agent={agent} model={model} conversationId={conversationId ?? '(new)'} busy={busy} />

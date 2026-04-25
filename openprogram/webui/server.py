@@ -1411,6 +1411,66 @@ async def _handle_ws_command(ws, cmd: dict):
     action = cmd.get("action")
     print(f"[ws] command received: action={action}")
 
+    if action == "stats":
+        # Lightweight summary used by the CLI welcome banner.
+        try:
+            from openprogram.agents import manager as _A
+            agents = _A.list_all()
+            default_agent = next((a for a in agents if getattr(a, "default", False)), None)
+            if default_agent is None and agents:
+                default_agent = agents[0]
+            agent_summary = None
+            if default_agent is not None:
+                d = default_agent.to_dict()
+                model = d.get("model")
+                model_str = (
+                    model.get("id") if isinstance(model, dict)
+                    else (str(model) if model else None)
+                )
+                agent_summary = {
+                    "id": d.get("id"),
+                    "name": d.get("name") or d.get("id"),
+                    "model": model_str,
+                }
+        except Exception:
+            agents = []
+            agent_summary = None
+
+        # Programs (loaded callable functions, excluding internal helpers).
+        try:
+            programs = _discover_functions()
+            programs_count = len([p for p in programs if p.get("category") not in ("meta",)])
+        except Exception:
+            programs_count = 0
+
+        # Skills (SKILL.md registry).
+        try:
+            from openprogram.agentic_programming.skills import (
+                default_skill_dirs, load_skills,
+            )
+            skills_count = len(load_skills(default_skill_dirs()))
+        except Exception:
+            skills_count = 0
+
+        # Conversations on disk (across all agents).
+        try:
+            from openprogram.webui import persistence as _persist
+            conversations_count = sum(1 for _ in _persist.list_conversations())
+        except Exception:
+            conversations_count = 0
+
+        await ws.send_text(json.dumps({
+            "type": "stats",
+            "data": {
+                "agent": agent_summary,
+                "agents_count": len(agents) if agents else 0,
+                "programs_count": programs_count,
+                "skills_count": skills_count,
+                "conversations_count": conversations_count,
+            },
+        }, default=str))
+        return
+
     if action == "sync":
         # Reconnect handshake: client sends the max seq it has seen per
         # message; server replies with the frames needed to catch up. The

@@ -12,6 +12,7 @@ export type ChatRequest = {
 export type WsRequest =
   | ChatRequest
   | { action: 'sync' }
+  | { action: 'stats' }
   | { action: 'list_agents' }
   | { action: 'add_agent'; agent: Record<string, unknown> }
   | { action: 'delete_agent'; id: string }
@@ -64,6 +65,17 @@ export interface ConversationLoadedEnvelope {
   data: { id: string; messages: Array<{ role: string; content: string; [k: string]: unknown }>; [k: string]: unknown };
 }
 
+export interface StatsEnvelope {
+  type: 'stats';
+  data: {
+    agent?: { id?: string; name?: string; model?: string } | null;
+    agents_count?: number;
+    programs_count?: number;
+    skills_count?: number;
+    conversations_count?: number;
+  };
+}
+
 export interface ErrorEnvelope {
   type: 'error';
   data?: { message?: string };
@@ -76,6 +88,7 @@ export type WsEnvelope =
   | AgentsListEnvelope
   | ConversationsListEnvelope
   | ConversationLoadedEnvelope
+  | StatsEnvelope
   | ErrorEnvelope
   | { type: 'pong' };
 
