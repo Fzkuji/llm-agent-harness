@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { colors } from '../theme/colors.js';
-import { useTerminalWidth, usePanelWidth } from '../utils/useTerminalWidth.js';
+import { useTerminalWidth, usePanelWidth, useTerminalHeight } from '../utils/useTerminalWidth.js';
 
 export interface WelcomeStats {
   agent?: { id?: string; name?: string; model?: string } | null;
@@ -35,17 +35,21 @@ const Column: React.FC<{
   width: number;
   /** When true, items wrap into 2 sub-columns inside the column. */
   twoCols: boolean;
-}> = ({ spec, width, twoCols }) => {
+  /** Cap on number of item rows shown (truncates with "+N more"). */
+  maxRows: number;
+}> = ({ spec, width, twoCols, maxRows }) => {
   const innerWidth = Math.max(8, width - 2);
   const subWidth = twoCols ? Math.floor(innerWidth / 2) : innerWidth;
+  const limitedItems = spec.items.slice(0, twoCols ? maxRows * 2 : maxRows);
+  const overflow = spec.items.length - limitedItems.length;
   const rows: Array<[string, string | undefined]> = [];
   if (twoCols) {
-    const half = Math.ceil(spec.items.length / 2);
+    const half = Math.ceil(limitedItems.length / 2);
     for (let i = 0; i < half; i++) {
-      rows.push([spec.items[i] ?? '', spec.items[i + half]]);
+      rows.push([limitedItems[i] ?? '', limitedItems[i + half]]);
     }
   } else {
-    for (const it of spec.items) rows.push([it, undefined]);
+    for (const it of limitedItems) rows.push([it, undefined]);
   }
   return (
     <Box flexDirection="column" width={width} paddingX={1}>
@@ -57,7 +61,6 @@ const Column: React.FC<{
       <Box justifyContent="center">
         <Text color={colors.muted}>{spec.label}</Text>
       </Box>
-      {rows.length > 0 ? <Box height={1} /> : null}
       {rows.map(([a, b], i) => (
         <Box key={i}>
           <Box width={subWidth}>
@@ -74,12 +77,16 @@ const Column: React.FC<{
           ) : null}
         </Box>
       ))}
+      {overflow > 0 ? (
+        <Text color={colors.border}>  +{overflow}</Text>
+      ) : null}
     </Box>
   );
 };
 
 export const Welcome: React.FC<WelcomeProps> = ({ stats }) => {
   const cols = useTerminalWidth();
+  const rows = useTerminalHeight();
   const width = usePanelWidth();
   const agentName = stats?.agent?.name ?? stats?.agent?.id ?? '—';
   const model = stats?.agent?.model ?? '—';
@@ -137,6 +144,26 @@ export const Welcome: React.FC<WelcomeProps> = ({ stats }) => {
   const compact = cols < 50;
   const twoSubCols = cols >= 110;
 
+  // Vertical budget. Other UI elements consume ~6-8 rows (input box +
+  // bottom bar + spinner + safety margin). Whatever remains we spend on
+  // welcome content: title, gaps, two header rows (count + label), N item
+  // rows per tile, optional extras row, tip, padding+border.
+  const reservedRows = 8;
+  const available = Math.max(8, rows - reservedRows);
+  // Per-tile fixed cost = count + label + (extras gap) ≈ 3.
+  // With one row of headline tiles + tip line ≈ 6 fixed rows.
+  // Items budget = available - 6 (single row) or - 9 (two rows).
+  const headlineFixed = 5; // title row + count + label + tip + gap
+  const extrasFixed = 4; // count + label + gap + (margin row)
+  const showExtras = available >= headlineFixed + extrasFixed + 4;
+  const itemsRowsForHeadline = Math.max(
+    1,
+    Math.min(8, available - headlineFixed - (showExtras ? extrasFixed : 0)),
+  );
+  const itemsRowsForExtras = showExtras
+    ? Math.max(1, Math.min(4, available - headlineFixed - extrasFixed - itemsRowsForHeadline + 2))
+    : 0;
+
   const headlineCols: ColumnSpec[] = compact
     ? []
     : [programs, skills, agentsCol, sessionsCol];
@@ -175,7 +202,13 @@ export const Welcome: React.FC<WelcomeProps> = ({ stats }) => {
       {headlineCols.length > 0 ? (
         <Box marginTop={1}>
           {headlineCols.map((c) => (
-            <Column key={c.label} spec={c} width={headlineColWidth} twoCols={twoSubCols} />
+            <Column
+              key={c.label}
+              spec={c}
+              width={headlineColWidth}
+              twoCols={twoSubCols}
+              maxRows={itemsRowsForHeadline}
+            />
           ))}
         </Box>
       ) : null}
@@ -186,18 +219,30 @@ export const Welcome: React.FC<WelcomeProps> = ({ stats }) => {
           {Array.from({ length: Math.ceil(extrasCols.length / 2) }).map((_, row) => (
             <Box key={row}>
               {extrasCols.slice(row * 2, row * 2 + 2).map((c) => (
-                <Column key={c.label} spec={c} width={extrasColWidth} twoCols={false} />
+                <Column
+                  key={c.label}
+                  spec={c}
+                  width={extrasColWidth}
+                  twoCols={false}
+                  maxRows={Math.max(1, itemsRowsForHeadline - 1)}
+                />
               ))}
             </Box>
           ))}
         </Box>
-      ) : (
+      ) : showExtras ? (
         <Box marginTop={1}>
           {extrasCols.map((c) => (
-            <Column key={c.label} spec={c} width={extrasColWidth} twoCols={twoSubCols} />
+            <Column
+              key={c.label}
+              spec={c}
+              width={extrasColWidth}
+              twoCols={twoSubCols}
+              maxRows={itemsRowsForExtras}
+            />
           ))}
         </Box>
-      )}
+      ) : null}
 
       <Box marginTop={1}>
         <Text color={colors.muted}>

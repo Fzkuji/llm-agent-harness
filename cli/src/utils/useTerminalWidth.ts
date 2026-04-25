@@ -32,3 +32,18 @@ export function usePanelWidth(): number {
   const cols = useTerminalWidth();
   return Math.min(cols, MAX_PANEL_WIDTH);
 }
+
+/** Returns the current terminal row count, re-renders on resize. */
+export function useTerminalHeight(): number {
+  const { stdout } = useStdout();
+  const [rows, setRows] = useState<number>(stdout?.rows ?? 24);
+  useEffect(() => {
+    if (!stdout) return;
+    const handler = () => setRows(stdout.rows ?? 24);
+    stdout.on('resize', handler);
+    return () => {
+      stdout.off('resize', handler);
+    };
+  }, [stdout]);
+  return rows;
+}
