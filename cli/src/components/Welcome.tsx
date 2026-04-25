@@ -14,7 +14,16 @@ export interface WelcomeProps {
   stats?: WelcomeStats;
 }
 
-const dim = (n?: number) => (typeof n === 'number' ? String(n) : '—');
+const fmt = (n?: number): string => (typeof n === 'number' ? String(n) : '—');
+
+const Tile: React.FC<{ value: string; label: string }> = ({ value, label }) => (
+  <Box flexDirection="column" flexGrow={1} alignItems="center" paddingX={1}>
+    <Text bold color={colors.primary}>
+      {value}
+    </Text>
+    <Text color={colors.muted}>{label}</Text>
+  </Box>
+);
 
 export const Welcome: React.FC<WelcomeProps> = ({ stats }) => {
   const agentName = stats?.agent?.name ?? stats?.agent?.id ?? '—';
@@ -29,27 +38,24 @@ export const Welcome: React.FC<WelcomeProps> = ({ stats }) => {
       paddingY={0}
       marginBottom={1}
     >
-      <Text bold color={colors.primary}>
-        OpenProgram
-      </Text>
-      <Box marginTop={0}>
+      {/* Title row + agent / model on the right */}
+      <Box justifyContent="space-between">
+        <Text bold color={colors.primary}>
+          OpenProgram
+        </Text>
         <Text color={colors.muted}>
-          agent <Text color={colors.text}>{agentName}</Text>
-          <Text color={colors.border}> · </Text>
-          model <Text color={colors.text}>{model}</Text>
+          {agentName} <Text color={colors.border}>·</Text> {model}
         </Text>
       </Box>
-      <Box>
-        <Text color={colors.muted}>
-          <Text color={colors.text}>{dim(stats?.programs_count)}</Text> programs
-          <Text color={colors.border}> · </Text>
-          <Text color={colors.text}>{dim(stats?.skills_count)}</Text> skills
-          <Text color={colors.border}> · </Text>
-          <Text color={colors.text}>{dim(stats?.agents_count)}</Text> agents
-          <Text color={colors.border}> · </Text>
-          <Text color={colors.text}>{dim(stats?.conversations_count)}</Text> sessions
-        </Text>
+
+      {/* 4 stat tiles, evenly distributed across the panel */}
+      <Box marginTop={1}>
+        <Tile value={fmt(stats?.programs_count)} label="programs" />
+        <Tile value={fmt(stats?.skills_count)} label="skills" />
+        <Tile value={fmt(stats?.agents_count)} label="agents" />
+        <Tile value={fmt(stats?.conversations_count)} label="sessions" />
       </Box>
+
       <Box marginTop={1}>
         <Text color={colors.muted}>
           Type a message and press <Text color={colors.primary}>enter</Text>, or{' '}

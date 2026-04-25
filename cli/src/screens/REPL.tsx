@@ -4,6 +4,8 @@ import { BackendClient, WsEnvelope, StatsEnvelope } from '../ws/client.js';
 import { StatusLine } from '../components/StatusLine.js';
 import { Messages } from '../components/Messages.js';
 import { Welcome } from '../components/Welcome.js';
+import { Spinner } from '../components/Spinner.js';
+import { Turn, ToolCall } from '../components/Turn.js';
 import { PromptInput } from '../components/PromptInput/PromptInput.js';
 import { handleSlash } from '../commands/handler.js';
 
@@ -11,13 +13,6 @@ export interface REPLProps {
   client: BackendClient;
   initialAgent?: string;
   initialConversation?: string;
-}
-
-export interface UIMessage {
-  id: string;
-  role: 'user' | 'assistant' | 'system';
-  text: string;
-  tag?: string;
 }
 
 interface AgentInfo {
@@ -33,19 +28,78 @@ const renderModel = (m: AgentInfo['model']): string | undefined => {
   return m.id ?? m.provider;
 };
 
+interface Activity {
+  /** Verb shown next to the spinner — "Thinking", "Calling Bash", etc. */
+  verb: string;
+  /** Optional inline detail — usually the truncated tool input. */
+  detail?: string;
+  /** Wall clock when this turn started (used for elapsed display). */
+  startedAt: number;
+}
+
 export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConversation }) => {
   const app = useApp();
-  const [committed, setCommitted] = useState<UIMessage[]>([]);
-  const [streaming, setStreaming] = useState<UIMessage | null>(null);
+  const [committed, setCommitted] = useState<Turn[]>([]);
+  const [streaming, setStreaming] = useState<Turn | null>(null);
   const [agent, setAgent] = useState<string | undefined>(initialAgent);
   const [model, setModel] = useState<string | undefined>(undefined);
   const [conversationId, setConversationId] = useState<string | undefined>(initialConversation);
-  const [busy, setBusy] = useState(false);
+  const [activity, setActivity] = useState<Activity | null>(null);
   const [stats, setStats] = useState<StatsEnvelope['data'] | undefined>(undefined);
+  const [tick, setTick] = useState(0);
   const agentSetRef = useRef(false);
 
+  // 1Hz tick for elapsed-seconds display while a turn is active.
+  useEffect(() => {
+    if (!activity) return;
+    const t = setInterval(() => setTick((x) => x + 1), 1000);
+    return () => clearInterval(t);
+  }, [activity]);
+
   const pushSystem = (text: string) =>
-    setCommitted((m) => [...m, { id: `s-${Date.now()}-${m.length}`, role: 'system', text }]);
+    setCommitted((m) => [
+      ...m,
+      { id: `s-${Date.now()}-${m.length}`, role: 'system', text },
+    ]);
+
+  const startTurn = (verb: string) =>
+    setActivity({ verb, startedAt: Date.now() });
+
+  const finishTurn = () => setActivity(null);
+
+  const upsertStreamingText = (delta: string) => {
+    setStreaming((s) => ({
+      id: s?.id ?? `a-${Date.now()}`,
+      role: 'assistant',
+      text: (s?.text ?? '') + delta,
+      tools: s?.tools ?? [],
+    }));
+  };
+
+  const appendStreamingTool = (tool: string, input?: string) => {
+    setStreaming((s) => {
+      const base: Turn = s ?? {
+        id: `a-${Date.now()}`,
+        role: 'assistant',
+        text: '',
+        tools: [],
+      };
+      const tools = base.tools ?? [];
+      const callId = `t-${Date.now()}-${tools.length}`;
+      const call: ToolCall = { id: callId, tool, input, status: 'running' };
+      return { ...base, tools: [...tools, call] };
+    });
+  };
+
+  const finalizeStreamingTools = () => {
+    setStreaming((s) => {
+      if (!s || !s.tools || s.tools.length === 0) return s;
+      const tools = s.tools.map((t) =>
+        t.status === 'running' ? { ...t, status: 'done' as const } : t,
+      );
+      return { ...s, tools };
+    });
+  };
 
   useEffect(() => {
     const off = client.on((ev: WsEnvelope) => {
@@ -53,31 +107,53 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
         setConversationId(ev.data.conv_id);
       } else if (ev.type === 'chat_response') {
         const d = ev.data;
-        if (d.type === 'stream_event' && typeof d.content === 'string') {
-          setStreaming((s) => ({
-            id: s?.id ?? `a-${Date.now()}`,
-            role: 'assistant',
-            text: (s?.text ?? '') + (d.content as string),
-          }));
+        if (d.type === 'stream_event') {
+          const inner = (d as { event?: { type?: string; text?: string; tool?: string; input?: string } }).event;
+          if (!inner) return;
+          if (inner.type === 'text' && typeof inner.text === 'string') {
+            upsertStreamingText(inner.text);
+            setActivity((a) => (a ? { ...a, verb: 'Streaming' } : a));
+          } else if (inner.type === 'tool_use' && inner.tool) {
+            appendStreamingTool(inner.tool, inner.input);
+            setActivity((a) =>
+              a
+                ? {
+                    ...a,
+                    verb: `Calling ${inner.tool}`,
+                    detail: inner.input ? inner.input.slice(0, 50) : undefined,
+                  }
+                : a,
+            );
+          }
         } else if (d.type === 'result' && typeof d.content === 'string') {
           const text = d.content as string;
-          setStreaming(null);
-          setCommitted((m) => [...m, { id: `a-${Date.now()}`, role: 'assistant', text }]);
-          setBusy(false);
+          finalizeStreamingTools();
+          setStreaming((s) => {
+            const tools = s?.tools ?? [];
+            const final: Turn = {
+              id: s?.id ?? `a-${Date.now()}`,
+              role: 'assistant',
+              text,
+              tools,
+            };
+            // Move into committed (Static) and clear streaming.
+            setCommitted((m) => [...m, final]);
+            return null;
+          });
+          finishTurn();
         } else if (d.type === 'error' && typeof d.content === 'string') {
           setStreaming(null);
           setCommitted((m) => [
             ...m,
             { id: `e-${Date.now()}`, role: 'system', text: `error: ${d.content as string}` },
           ]);
-          setBusy(false);
+          finishTurn();
         } else if (d.type === 'status' && typeof d.content === 'string') {
-          if (d.content !== 'Thinking...') {
-            setCommitted((m) => [
-              ...m,
-              { id: `s-${Date.now()}`, role: 'system', text: d.content as string },
-            ]);
-          }
+          // Server sends "Thinking..." — fold it into the spinner verb so the
+          // committed area stays uncluttered.
+          setActivity((a) =>
+            a ? { ...a, verb: (d.content as string).replace(/\.+$/, '') } : a,
+          );
         }
       } else if (ev.type === 'stats') {
         setStats(ev.data);
@@ -105,6 +181,7 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
         const data = (ev as { data?: { message?: string } }).data;
         const msg = data?.message ?? 'unknown error';
         setCommitted((m) => [...m, { id: `e-${Date.now()}`, role: 'system', text: `error: ${msg}` }]);
+        finishTurn();
       }
     });
     client.send({ action: 'stats' });
@@ -142,7 +219,7 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
       if (handled) return;
     }
     setCommitted((m) => [...m, { id: `u-${Date.now()}`, role: 'user', text }]);
-    setBusy(true);
+    startTurn('Thinking');
     client.send({
       action: 'chat',
       conv_id: conversationId,
@@ -151,12 +228,23 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
     });
   };
 
+  const elapsed = activity ? (Date.now() - activity.startedAt) / 1000 : undefined;
+  void tick; // depend on tick so elapsed re-renders every second
+
   return (
     <Box flexDirection="column">
-      {committed.length === 0 && !streaming ? <Welcome stats={stats} /> : null}
+      {committed.length === 0 && !streaming && !activity ? <Welcome stats={stats} /> : null}
       <Messages committed={committed} streaming={streaming} />
-      <PromptInput onSubmit={onSubmit} busy={busy} />
-      <StatusLine agent={agent} model={model} conversationId={conversationId ?? '(new)'} busy={busy} />
+      {activity ? (
+        <Spinner verb={activity.verb} detail={activity.detail} elapsed={elapsed} />
+      ) : null}
+      <PromptInput onSubmit={onSubmit} busy={!!activity} />
+      <StatusLine
+        agent={agent}
+        model={model}
+        conversationId={conversationId ?? '(new)'}
+        busy={!!activity}
+      />
     </Box>
   );
 };
