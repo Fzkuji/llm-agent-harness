@@ -50,6 +50,7 @@ SPEC: dict[str, Any] = {
                 "enum": [
                     "open", "navigate", "click", "type",
                     "extract", "screenshot", "close", "list",
+                    "upload", "wait", "eval", "html",
                 ],
                 "description": "What to do.",
             },
@@ -63,7 +64,7 @@ SPEC: dict[str, Any] = {
             },
             "selector": {
                 "type": "string",
-                "description": "CSS selector. Required for ``click`` / ``type``, optional for ``extract`` (defaults to whole body).",
+                "description": "CSS selector. Required for ``click`` / ``type`` / ``upload``, optional for ``extract`` / ``html`` / ``wait``.",
             },
             "text": {
                 "type": "string",
@@ -75,7 +76,16 @@ SPEC: dict[str, Any] = {
             },
             "path": {
                 "type": "string",
-                "description": "Output path for ``screenshot``. Required for that action.",
+                "description": "For ``screenshot``: output PNG path. For ``upload``: file path on disk to attach to the matching <input type=file>.",
+            },
+            "code": {
+                "type": "string",
+                "description": "JavaScript expression for ``eval``. Result is JSON-stringified, capped at 2KB.",
+            },
+            "state": {
+                "type": "string",
+                "enum": ["attached", "detached", "visible", "hidden", "load", "domcontentloaded", "networkidle"],
+                "description": "For ``wait``: with a selector, the element state to wait for (visible/hidden/attached/detached). Without a selector, a page load state (load/domcontentloaded/networkidle). Default 'visible' / 'networkidle'.",
             },
             "headless": {
                 "type": "boolean",
@@ -227,6 +237,103 @@ def _screenshot(session_id: str, path: str) -> str:
         return f"Error taking screenshot: {type(e).__name__}: {e}"
 
 
+def _upload(session_id: str, selector: str, path: str) -> str:
+    sess = _require_session(session_id)
+    if isinstance(sess, str):
+        return sess
+    if not selector:
+        return "Error: `selector` is required for upload (target the <input type=file>)."
+    if not path:
+        return "Error: `path` is required for upload."
+    import os
+    if not os.path.isabs(path):
+        path = os.path.abspath(path)
+    if not os.path.isfile(path):
+        return f"Error: file not found: {path}"
+    try:
+        sess["page"].set_input_files(selector, path)
+        return f"Uploaded `{path}` → `{selector}`."
+    except Exception as e:
+        return f"Error uploading: {type(e).__name__}: {e}"
+
+
+def _wait(
+    session_id: str,
+    selector: str | None,
+    state: str | None,
+    timeout_ms: int,
+) -> str:
+    sess = _require_session(session_id)
+    if isinstance(sess, str):
+        return sess
+    page = sess["page"]
+    try:
+        if selector:
+            # Element-state wait. Default to "visible" if user didn't say.
+            element_state = state or "visible"
+            if element_state not in ("attached", "detached", "visible", "hidden"):
+                return (
+                    f"Error: with a selector, `state` must be attached / detached / "
+                    f"visible / hidden (got {element_state!r})."
+                )
+            page.wait_for_selector(selector, state=element_state, timeout=timeout_ms)
+            return f"Element `{selector}` reached state `{element_state}`."
+        # Page-state wait.
+        page_state = state or "networkidle"
+        if page_state not in ("load", "domcontentloaded", "networkidle"):
+            return (
+                f"Error: without a selector, `state` must be load / domcontentloaded / "
+                f"networkidle (got {page_state!r})."
+            )
+        page.wait_for_load_state(page_state, timeout=timeout_ms)
+        return f"Page reached state `{page_state}`."
+    except Exception as e:
+        return f"Error waiting: {type(e).__name__}: {e}"
+
+
+def _eval_js(session_id: str, code: str) -> str:
+    sess = _require_session(session_id)
+    if isinstance(sess, str):
+        return sess
+    if not code:
+        return "Error: `code` is required for eval."
+    try:
+        result = sess["page"].evaluate(code)
+        # Stringify and cap so a giant DOM dump can't flood the agent.
+        if isinstance(result, (dict, list)):
+            import json as _json
+            text = _json.dumps(result, default=str, ensure_ascii=False)
+        else:
+            text = str(result)
+        if len(text) > 2000:
+            text = text[:2000] + f"\n\n[truncated, {len(text) - 2000} more chars]"
+        return text
+    except Exception as e:
+        return f"Error evaluating: {type(e).__name__}: {e}"
+
+
+def _html(session_id: str, selector: str | None) -> str:
+    sess = _require_session(session_id)
+    if isinstance(sess, str):
+        return sess
+    page = sess["page"]
+    try:
+        if selector:
+            el = page.locator(selector)
+            count = el.count()
+            if count == 0:
+                return f"(no elements matched `{selector}`)"
+            html = el.first.inner_html()
+        else:
+            html = page.content()
+        # Cap at 5KB — enough for the model to skim structure / find ids.
+        if len(html) > 5000:
+            html = html[:5000] + f"\n\n[truncated, {len(html) - 5000} more chars]"
+        return html
+    except Exception as e:
+        return f"Error fetching HTML: {type(e).__name__}: {e}"
+
+
 def _close(session_id: str) -> str:
     sess = _sessions.pop(session_id, None)
     if sess is None:
@@ -272,6 +379,8 @@ def execute(
     text: str | None = None,
     submit: bool = False,
     path: str | None = None,
+    code: str | None = None,
+    state: str | None = None,
     headless: bool = True,
     timeout_ms: int = 30_000,
     **kw: Any,
@@ -286,6 +395,8 @@ def execute(
     selector = selector or read_string_param(kw, "selector", "sel")
     text = text if text is not None else read_string_param(kw, "text", "value")
     path = path or read_string_param(kw, "path", "file")
+    code = code if code is not None else read_string_param(kw, "code", "js", "expression")
+    state = state or read_string_param(kw, "state")
 
     if action == "open":
         return _open(headless=headless, timeout_ms=timeout_ms)
@@ -299,6 +410,14 @@ def execute(
         return _extract(session_id or "", selector or None)
     if action == "screenshot":
         return _screenshot(session_id or "", path or "")
+    if action == "upload":
+        return _upload(session_id or "", selector or "", path or "")
+    if action == "wait":
+        return _wait(session_id or "", selector or None, state, timeout_ms)
+    if action == "eval":
+        return _eval_js(session_id or "", code or "")
+    if action == "html":
+        return _html(session_id or "", selector or None)
     if action == "close":
         return _close(session_id or "")
     if action == "list":
