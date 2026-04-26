@@ -56,6 +56,9 @@ SPEC: dict[str, Any] = {
                     "tabs", "new_tab", "switch_tab",
                     "download", "cookies",
                     "save_login",
+                    "frame_eval", "frames",
+                    "console", "block",
+                    "viewport",
                 ],
                 "description": "What to do.",
             },
@@ -111,6 +114,14 @@ SPEC: dict[str, Any] = {
             "storage_state": {
                 "type": "string",
                 "description": "For ``open``: path to a saved storage_state JSON. If omitted but ``url`` is given, the tool auto-loads ``~/.openprogram/browser-states/<host>.json`` if it exists.",
+            },
+            "width": {
+                "type": "integer",
+                "description": "For ``viewport``: pixel width.",
+            },
+            "height": {
+                "type": "integer",
+                "description": "For ``viewport``: pixel height.",
             },
             "headless": {
                 "type": "boolean",
@@ -507,6 +518,124 @@ def _open(
         return msg
     except Exception as e:
         return f"Error opening browser: {type(e).__name__}: {e}"
+
+
+def _frames(session_id: str) -> str:
+    """List the iframe tree of the active page."""
+    sess = _require_session(session_id)
+    if isinstance(sess, str):
+        return sess
+    page = sess["page"]
+    try:
+        lines: list[str] = []
+        for f in page.frames:
+            indent = "  " * (len(f.url.split("/")) - 3 if f.parent_frame else 0)
+            tag = "main" if f == page.main_frame else f.name or "(no name)"
+            lines.append(f"{indent}- {tag}  {f.url}")
+        return "\n".join(lines) or "(no frames)"
+    except Exception as e:
+        return f"Error listing frames: {type(e).__name__}: {e}"
+
+
+def _frame_eval(session_id: str, selector: str, code: str) -> str:
+    """Run JS inside a specific iframe identified by name or URL substring."""
+    sess = _require_session(session_id)
+    if isinstance(sess, str):
+        return sess
+    if not selector:
+        return "Error: `selector` is required for frame_eval (frame name or URL substring)."
+    if not code:
+        return "Error: `code` is required for frame_eval."
+    page = sess["page"]
+    try:
+        frame = next(
+            (f for f in page.frames
+             if f.name == selector or selector in (f.url or "")),
+            None,
+        )
+        if frame is None:
+            return f"(no frame matching `{selector}`)"
+        result = frame.evaluate(code)
+        text = str(result)
+        if len(text) > 2000:
+            text = text[:2000] + f"\n\n[truncated, {len(text) - 2000} more chars]"
+        return text
+    except Exception as e:
+        return f"Error in frame_eval: {type(e).__name__}: {e}"
+
+
+_console_buffers: dict[str, list[dict]] = {}
+
+
+def _console_subscribe(sess: dict, session_id: str) -> None:
+    """Lazily attach a console listener to the active page."""
+    if sess.get("_console_attached"):
+        return
+    page = sess["page"]
+    buf: list[dict] = []
+    _console_buffers[session_id] = buf
+
+    def _handler(msg) -> None:
+        try:
+            buf.append({
+                "type": msg.type,
+                "text": msg.text[:500],
+            })
+            if len(buf) > 200:
+                del buf[: len(buf) - 200]
+        except Exception:
+            pass
+
+    page.on("console", _handler)
+    sess["_console_attached"] = True
+
+
+def _console(session_id: str) -> str:
+    """Return any console.log/warn/error captured since session start."""
+    sess = _require_session(session_id)
+    if isinstance(sess, str):
+        return sess
+    _console_subscribe(sess, session_id)
+    buf = _console_buffers.get(session_id) or []
+    if not buf:
+        return "(no console output captured yet)"
+    lines = [f"  [{m.get('type','log')}] {m.get('text','')}" for m in buf[-50:]]
+    return "Console (last 50):\n" + "\n".join(lines)
+
+
+def _block(session_id: str, selector: str) -> str:
+    """Block requests by URL pattern. `selector` is the URL glob.
+
+    Useful for cutting off ads, analytics, or heavy resources before
+    a navigation. Routing applies to all subsequent requests on the
+    page; pass an empty selector or "*" to clear all blocks.
+    """
+    sess = _require_session(session_id)
+    if isinstance(sess, str):
+        return sess
+    page = sess["page"]
+    try:
+        if not selector or selector == "*":
+            page.unroute("**/*")
+            return "Cleared all request blocks."
+        page.route(selector, lambda route: route.abort())
+        return f"Blocking requests matching `{selector}`."
+    except Exception as e:
+        return f"Error setting block route: {type(e).__name__}: {e}"
+
+
+def _viewport(session_id: str, width: int, height: int) -> str:
+    """Resize the active page's viewport (mobile emulation, etc.)."""
+    sess = _require_session(session_id)
+    if isinstance(sess, str):
+        return sess
+    if not (width and height):
+        return "Error: width and height required (e.g. width=375 height=812 for iPhone X)."
+    try:
+        sess["page"].set_viewport_size({"width": int(width), "height": int(height)})
+        return f"Viewport set to {width}x{height}."
+    except Exception as e:
+        return f"Error setting viewport: {type(e).__name__}: {e}"
 
 
 def _save_login(session_id: str, name: str | None = None) -> str:
@@ -958,6 +1087,8 @@ def execute(
     engine: str = "auto",
     storage_state: str | None = None,
     name: str | None = None,
+    width: int | None = None,
+    height: int | None = None,
     timeout_ms: int = 30_000,
     **kw: Any,
 ) -> str:
@@ -999,6 +1130,18 @@ def execute(
     if action == "save_login":
         nm = name or read_string_param(kw, "name", "host", "label")
         return _save_login(session_id or "", nm)
+    if action == "frames":
+        return _frames(session_id or "")
+    if action == "frame_eval":
+        return _frame_eval(session_id or "", selector or "", code or "")
+    if action == "console":
+        return _console(session_id or "")
+    if action == "block":
+        return _block(session_id or "", selector or "")
+    if action == "viewport":
+        w = width if width is not None else int(read_string_param(kw, "width") or 0)
+        h = height if height is not None else int(read_string_param(kw, "height") or 0)
+        return _viewport(session_id or "", w, h)
     if action == "navigate":
         return _navigate(session_id or "", url or "")
     if action == "click":

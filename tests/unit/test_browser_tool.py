@@ -55,17 +55,19 @@ class _FakeContext:
     def __init__(self): self.page = _FakePage()
     def new_page(self): return self.page
     def close(self): self.closed = True
+    def add_init_script(self, *_a, **_kw): pass
+    def storage_state(self, *, path): open(path, "w").write("{}")
 
 
 class _FakeBrowser:
     def __init__(self): self.ctx = _FakeContext()
-    def new_context(self): return self.ctx
+    def new_context(self, **_kw): return self.ctx
     def close(self): self.closed = True
 
 
 class _FakeChromium:
     def __init__(self): self.browser = _FakeBrowser()
-    def launch(self, *, headless): return self.browser
+    def launch(self, **_kw): return self.browser
 
 
 class _FakePlaywright:
@@ -81,8 +83,20 @@ class _FakeSyncPlaywrightCM:
 @pytest.fixture
 def fake_playwright(monkeypatch):
     """Inject a fake ``sync_playwright`` for the tool to use, and pretend
-    Playwright is importable so ``check_playwright`` returns True."""
+    Playwright is importable so ``check_playwright`` returns True.
+
+    Also disables the auto-bootstrap path (sidecar Chrome via CDP) so
+    these unit tests exercise the launch-new-browser branch even when
+    `engine="auto"` is the default — that branch is what the fake
+    chromium fixture is built to exercise.
+    """
     monkeypatch.setattr(tool, "check_playwright", lambda: True)
+
+    # Disable bootstrap auto-detection: pretend no sidecar is running.
+    from openprogram.tools.browser import _chrome_bootstrap as boot
+    monkeypatch.setattr(boot, "cdp_url_if_available", lambda: None)
+    monkeypatch.setattr(boot, "launch_sidecar_chrome",
+                        lambda port=9222, timeout_s=30.0: False)
 
     # browser.py imports sync_playwright lazily inside _open. Patch the
     # symbol at the stdlib module location since there's no static
@@ -182,3 +196,128 @@ def test_install_hint_when_playwright_missing(monkeypatch):
     monkeypatch.setattr(tool, "check_playwright", lambda: False)
     out = tool.execute(action="open")
     assert "pip install playwright" in out
+
+
+# ---------------------------------------------------------------------------
+# SPEC schema sanity (no fixture needed)
+# ---------------------------------------------------------------------------
+
+
+def test_spec_lists_all_verbs():
+    expected = {
+        "open", "navigate", "click", "type", "extract", "screenshot",
+        "close", "list", "upload", "wait", "eval", "html",
+        "hover", "select", "press", "accessibility", "screenshot_b64",
+        "tabs", "new_tab", "switch_tab", "download", "cookies",
+        "save_login", "frame_eval", "frames", "console", "block",
+        "viewport",
+    }
+    enum = set(tool.SPEC["parameters"]["properties"]["action"]["enum"])
+    assert enum == expected, (
+        f"missing: {expected - enum}, extra: {enum - expected}"
+    )
+
+
+def test_spec_engine_includes_auto():
+    engines = set(tool.SPEC["parameters"]["properties"]["engine"]["enum"])
+    assert "auto" in engines
+    assert {"chromium", "patchright", "camoufox"} <= engines
+
+
+def test_unknown_action_clear_error():
+    out = tool.execute(action="totally-not-a-thing")
+    assert "unknown action" in out.lower()
+
+
+# ---------------------------------------------------------------------------
+# Bootstrap helpers — pure file/socket level, no browser launched
+# ---------------------------------------------------------------------------
+
+
+def test_bootstrap_chrome_binary_returns_path_or_none():
+    import os as _os
+    from openprogram.tools.browser._chrome_bootstrap import chrome_binary
+    result = chrome_binary()
+    assert result is None or _os.path.isfile(result)
+
+
+def test_bootstrap_real_user_data_dir_is_platform_specific():
+    from openprogram.tools.browser._chrome_bootstrap import real_user_data_dir
+    p = real_user_data_dir()
+    assert "Chrome" in p or "chromium" in p.lower()
+
+
+def test_bootstrap_sidecar_dir_under_dot_openprogram():
+    from openprogram.tools.browser._chrome_bootstrap import sidecar_dir
+    p = sidecar_dir()
+    assert ".openprogram" in str(p)
+    assert "chrome-profile" in p.name
+
+
+def test_bootstrap_port_file_under_dot_openprogram():
+    from openprogram.tools.browser._chrome_bootstrap import port_file
+    p = port_file()
+    assert ".openprogram" in str(p)
+    assert "browser-cdp-port" in p.name
+
+
+def test_bootstrap_is_port_listening_negative():
+    from openprogram.tools.browser._chrome_bootstrap import is_port_listening
+    assert not is_port_listening(1)
+
+
+def test_bootstrap_is_port_listening_positive():
+    """Bind a throwaway TCP socket and confirm detection."""
+    import socket
+    from openprogram.tools.browser._chrome_bootstrap import is_port_listening
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.bind(("127.0.0.1", 0))
+        sock.listen(1)
+        port = sock.getsockname()[1]
+        assert is_port_listening(port)
+    finally:
+        sock.close()
+
+
+def test_bootstrap_read_last_used_profile_default(tmp_path):
+    from openprogram.tools.browser._chrome_bootstrap import read_last_used_profile
+    assert read_last_used_profile(str(tmp_path)) == "Default"
+
+
+def test_bootstrap_read_last_used_profile_from_local_state(tmp_path):
+    import json
+    from openprogram.tools.browser._chrome_bootstrap import read_last_used_profile
+    (tmp_path / "Local State").write_text(
+        json.dumps({"profile": {"last_used": "Profile 5"}})
+    )
+    assert read_last_used_profile(str(tmp_path)) == "Profile 5"
+
+
+def test_bootstrap_read_last_used_profile_falls_back_on_bad_json(tmp_path):
+    from openprogram.tools.browser._chrome_bootstrap import read_last_used_profile
+    (tmp_path / "Local State").write_text("{ this is not valid json")
+    assert read_last_used_profile(str(tmp_path)) == "Default"
+
+
+def test_bootstrap_cdp_url_if_available_returns_none(monkeypatch, tmp_path):
+    from openprogram.tools.browser import _chrome_bootstrap as boot
+    monkeypatch.setattr(boot, "port_file", lambda: tmp_path / "browser-cdp-port")
+    monkeypatch.setattr(boot, "is_port_listening", lambda port, **kw: False)
+    assert boot.cdp_url_if_available() is None
+
+
+def test_bootstrap_cdp_url_if_available_finds_running_port(monkeypatch, tmp_path):
+    from openprogram.tools.browser import _chrome_bootstrap as boot
+    pf = tmp_path / "browser-cdp-port"
+    pf.write_text("9234")
+    monkeypatch.setattr(boot, "port_file", lambda: pf)
+    monkeypatch.setattr(boot, "is_port_listening", lambda port, **kw: port == 9234)
+    assert boot.cdp_url_if_available() == "http://localhost:9234"
+
+
+def test_bootstrap_lock_path_under_dot_openprogram():
+    from openprogram.tools.browser._chrome_bootstrap import _bootstrap_lock_path
+    p = _bootstrap_lock_path()
+    assert ".openprogram" in str(p)
+    assert "browser-cdp.lock" in p.name

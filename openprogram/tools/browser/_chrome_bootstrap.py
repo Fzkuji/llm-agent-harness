@@ -87,7 +87,15 @@ def read_last_used_profile(user_data_dir: str) -> str:
 
 
 def ensure_sidecar_profile() -> bool:
-    """Copy real profile to sidecar if sidecar missing. Returns True if ready."""
+    """Copy real profile to sidecar if sidecar missing. Returns True if ready.
+
+    Skips the high-volume cache directories (Cache / Code Cache /
+    GPUCache / ServiceWorker/CacheStorage / Crashpad / GraphiteDawnCache
+    / GrShaderCache). They're regenerated on first browse and
+    contribute the bulk of a Chrome profile's size — a 3-4GB profile
+    typically shrinks to ~300-700MB after these are skipped, and the
+    first launch takes seconds instead of minutes.
+    """
     sidecar = sidecar_dir()
     if (sidecar / "Default").exists():
         return True
@@ -97,11 +105,33 @@ def ensure_sidecar_profile() -> bool:
     if not src_default.exists():
         return False
     sidecar.mkdir(parents=True, exist_ok=True)
-    # `cp -R` is faster than shutil.copytree for huge profiles on macOS.
-    subprocess.run(
-        ["cp", "-R", str(src_default), str(sidecar / "Default")],
-        check=False,
-    )
+
+    # rsync with --exclude is dramatically faster than cp -R for big
+    # profiles AND lets us drop cache dirs in one pass. Falls back to
+    # cp -R when rsync isn't available.
+    excludes = [
+        "Cache", "Code Cache", "GPUCache", "GraphiteDawnCache",
+        "GrShaderCache", "Service Worker/CacheStorage",
+        "Service Worker/ScriptCache", "DawnGraphiteCache",
+        "Application Cache", "ShaderCache", "Crashpad",
+        "Crash Reports", "Storage/ext/*/def/Cache",
+        "*-journal", "lockfile", "SingletonCookie",
+        "SingletonLock", "SingletonSocket",
+    ]
+    rsync = shutil.which("rsync")
+    if rsync:
+        cmd = [rsync, "-a", "--delete"]
+        for ex in excludes:
+            cmd.extend(["--exclude", ex])
+        cmd.extend([str(src_default) + "/", str(sidecar / "Default") + "/"])
+        # rsync needs the destination to exist.
+        (sidecar / "Default").mkdir(parents=True, exist_ok=True)
+        subprocess.run(cmd, check=False)
+    else:
+        subprocess.run(
+            ["cp", "-R", str(src_default), str(sidecar / "Default")],
+            check=False,
+        )
     if src_local_state.exists():
         subprocess.run(
             ["cp", str(src_local_state), str(sidecar / "Local State")],
@@ -110,47 +140,90 @@ def ensure_sidecar_profile() -> bool:
     return True
 
 
+def _bootstrap_lock_path() -> Path:
+    return Path.home() / ".openprogram" / "browser-cdp.lock"
+
+
+def _acquire_bootstrap_lock(timeout_s: float = 60.0):
+    """File-lock so two simultaneous bootstrap calls don't race.
+
+    Returns an open file object that the caller MUST keep alive (close
+    releases the lock). Blocks up to timeout_s for another bootstrap to
+    finish, then proceeds (the second caller will likely find the port
+    already up and short-circuit).
+    """
+    import fcntl
+    lock_path = _bootstrap_lock_path()
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fp = open(lock_path, "w")
+    deadline = time.time() + timeout_s
+    while True:
+        try:
+            fcntl.flock(fp.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return fp
+        except OSError:
+            if time.time() >= deadline:
+                # Give up gracefully — fall through without the lock.
+                return fp
+            time.sleep(0.2)
+
+
 def launch_sidecar_chrome(port: int = DEFAULT_PORT, timeout_s: float = 30.0) -> bool:
     """Start the sidecar Chrome and wait for the CDP port to come up.
 
-    Idempotent — if the port is already listening we return True without
-    touching anything. Returns False on failure.
+    Idempotent + concurrency-safe — if the port is already listening we
+    return True without touching anything. If two callers race, only one
+    actually launches; the other waits behind a flock and discovers the
+    port live. Returns False on failure.
     """
     if is_port_listening(port):
         port_file().parent.mkdir(parents=True, exist_ok=True)
         port_file().write_text(str(port))
         return True
-    chrome = chrome_binary()
-    if chrome is None:
-        return False
-    if not ensure_sidecar_profile():
-        return False
-    sidecar = str(sidecar_dir())
-    profile_dir = read_last_used_profile(sidecar)
-    args = [
-        chrome,
-        f"--remote-debugging-port={port}",
-        f"--user-data-dir={sidecar}",
-        f"--profile-directory={profile_dir}",
-        "--no-first-run",
-        "--no-default-browser-check",
-    ]
-    # Detach so the child outlives our Python process — agents come and
-    # go but the sidecar stays.
-    subprocess.Popen(
-        args,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
-    deadline = time.time() + timeout_s
-    while time.time() < deadline:
+    lock = _acquire_bootstrap_lock()
+    try:
+        # Re-check inside the lock — the other caller may have finished.
         if is_port_listening(port):
             port_file().parent.mkdir(parents=True, exist_ok=True)
             port_file().write_text(str(port))
             return True
-        time.sleep(0.25)
-    return False
+
+        chrome = chrome_binary()
+        if chrome is None:
+            return False
+        if not ensure_sidecar_profile():
+            return False
+        sidecar = str(sidecar_dir())
+        profile_dir = read_last_used_profile(sidecar)
+        args = [
+            chrome,
+            f"--remote-debugging-port={port}",
+            f"--user-data-dir={sidecar}",
+            f"--profile-directory={profile_dir}",
+            "--no-first-run",
+            "--no-default-browser-check",
+        ]
+        # Detach so the child outlives our Python process — agents come
+        # and go but the sidecar stays.
+        subprocess.Popen(
+            args,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        deadline = time.time() + timeout_s
+        while time.time() < deadline:
+            if is_port_listening(port):
+                port_file().parent.mkdir(parents=True, exist_ok=True)
+                port_file().write_text(str(port))
+                return True
+            time.sleep(0.25)
+        return False
+    finally:
+        try:
+            lock.close()
+        except Exception:
+            pass
 
 
 def cdp_url_if_available() -> Optional[str]:
