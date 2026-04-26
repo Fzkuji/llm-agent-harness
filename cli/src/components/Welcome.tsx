@@ -60,12 +60,13 @@ const Column: React.FC<{
     <Box flexDirection="column" width={width} paddingX={1}>
       {/* Count + label flush-left with the items below — uniform vertical
           alignment is easier to scan than centered headers over ragged
-          lists. Count colored, label dim. */}
+          lists. Count in primary orange, label in bold white so the
+          section header reads distinct from the dim-gray items. */}
       <Box>
         <Text bold color={colors.primary}>
           {spec.count}
         </Text>
-        <Text color={colors.muted}>{`  ${spec.label}`}</Text>
+        <Text bold color={colors.text}>{`  ${spec.label}`}</Text>
       </Box>
       {rows.map(([a, b], i) => (
         <Box key={i}>
@@ -217,7 +218,7 @@ export const Welcome: React.FC<WelcomeProps> = ({ stats }) => {
   if (mode === 'none') {
     return (
       <Box paddingX={1} marginBottom={0}>
-        <Text color={colors.primary} bold>
+        <Text color={colors.error} bold>
           OpenProgram
         </Text>
         <Text color={colors.border}> · </Text>
@@ -240,7 +241,7 @@ export const Welcome: React.FC<WelcomeProps> = ({ stats }) => {
     >
       {/* Title row */}
       <Box justifyContent="space-between">
-        <Text bold color={colors.primary}>
+        <Text bold color={colors.error}>
           OpenProgram
         </Text>
         <Text color={colors.muted}>
