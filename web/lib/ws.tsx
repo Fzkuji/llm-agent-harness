@@ -217,6 +217,29 @@ export function WSProvider({ children }: { children: ReactNode }) {
                 .getState()
                 .setTree(td.conv_id, td.tree as never);
             }
+          } else if (d.type === "context_stats") {
+            const cs = msg.data as {
+              conv_id?: string;
+              chat?: {
+                input_tokens?: number;
+                output_tokens?: number;
+                cache_read?: number;
+              };
+              context_window?: number | null;
+            };
+            if (cs.conv_id) {
+              useConvStore.getState().setContextStats(
+                cs.conv_id,
+                cs.chat
+                  ? {
+                      input: cs.chat.input_tokens,
+                      output: cs.chat.output_tokens,
+                      cache_read: cs.chat.cache_read,
+                    }
+                  : null,
+                cs.context_window ?? undefined,
+              );
+            }
           }
           break;
         }

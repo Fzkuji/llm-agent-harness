@@ -78,6 +78,16 @@ interface ConvState {
   trees: Record<string, TreeNode>;
   setTree: (convId: string, tree: TreeNode) => void;
 
+  /** Per-conversation token usage from the latest context_stats event. */
+  tokens: Record<string, { input?: number; output?: number; cache_read?: number }>;
+  /** Per-conversation context window size (model-dependent). */
+  contextWindow: Record<string, number>;
+  setContextStats: (
+    convId: string,
+    chat: { input?: number; output?: number; cache_read?: number } | null,
+    contextWindow?: number | null,
+  ) => void;
+
   setWsStatus: (s: ConvState["wsStatus"]) => void;
   setConversations: (list: ConvSummary[]) => void;
   upsertConversation: (c: ConvSummary) => void;
@@ -107,6 +117,27 @@ export const useConvStore = create<ConvState>((set) => ({
   trees: {},
   setTree: (convId, tree) =>
     set((s) => ({ trees: { ...s.trees, [convId]: tree } })),
+
+  tokens: {},
+  contextWindow: {},
+  setContextStats: (convId, chat, ctxWindow) =>
+    set((s) => {
+      const next: Partial<ConvState> = {};
+      if (chat) {
+        next.tokens = {
+          ...s.tokens,
+          [convId]: {
+            input: chat.input,
+            output: chat.output,
+            cache_read: chat.cache_read,
+          },
+        };
+      }
+      if (typeof ctxWindow === "number" && ctxWindow > 0) {
+        next.contextWindow = { ...s.contextWindow, [convId]: ctxWindow };
+      }
+      return next;
+    }),
 
   setWsStatus: (s) => set({ wsStatus: s }),
 

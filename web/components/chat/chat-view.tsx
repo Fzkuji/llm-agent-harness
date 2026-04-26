@@ -133,6 +133,7 @@ export function ChatView({ convId }: ChatViewProps) {
       >
         <div className="flex items-center gap-2">
           <ModelBadge />
+          <ContextBadge convId={convId} />
           <StatusDot status={wsStatus} />
         </div>
         <div className="flex items-center gap-1">
@@ -417,6 +418,49 @@ function ModelBadge() {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Per-conversation token / context-window indicator.
+ *
+ * Subscribes to ``tokens[convId]`` + ``contextWindow[convId]`` so when
+ * the user switches branches the badge flips to that branch's own
+ * usage. Server tags every ``context_stats`` event with conv_id, so the
+ * store stays partitioned cleanly. Hidden when no usage yet.
+ */
+function ContextBadge({ convId }: { convId: string | null }) {
+  const tokens = useConvStore(
+    (s) => (convId ? s.tokens[convId] : undefined),
+  );
+  const window = useConvStore(
+    (s) => (convId ? s.contextWindow[convId] : undefined),
+  );
+  if (!tokens || !tokens.input) return null;
+  const fmt = (n: number) =>
+    n >= 10000 ? `${(n / 1000).toFixed(1)}k` : `${n}`;
+  const pct = window ? Math.round((tokens.input / window) * 100) : null;
+  const color =
+    pct === null
+      ? "var(--text-muted)"
+      : pct > 85
+      ? "var(--accent-red)"
+      : pct > 65
+      ? "var(--accent-yellow)"
+      : "var(--text-muted)";
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px]"
+      style={{ background: "var(--bg-tertiary)", color }}
+      title={
+        window
+          ? `${tokens.input.toLocaleString()} / ${window.toLocaleString()} tokens (${pct}%)`
+          : `${tokens.input.toLocaleString()} tokens`
+      }
+    >
+      {fmt(tokens.input)}
+      {window ? `/${fmt(window)} (${pct}%)` : ""}
+    </span>
   );
 }
 
