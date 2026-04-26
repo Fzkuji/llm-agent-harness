@@ -55,6 +55,7 @@ SPEC: dict[str, Any] = {
                     "accessibility", "screenshot_b64",
                     "tabs", "new_tab", "switch_tab",
                     "download", "cookies",
+                    "save_login",
                 ],
                 "description": "What to do.",
             },
@@ -103,6 +104,14 @@ SPEC: dict[str, Any] = {
                 "type": "integer",
                 "description": "For ``switch_tab``: zero-based index returned by ``tabs`` / ``new_tab``.",
             },
+            "name": {
+                "type": "string",
+                "description": "For ``save_login``: optional host or label to file the saved state under. Defaults to the host of the URL the session was opened with.",
+            },
+            "storage_state": {
+                "type": "string",
+                "description": "For ``open``: path to a saved storage_state JSON. If omitted but ``url`` is given, the tool auto-loads ``~/.openprogram/browser-states/<host>.json`` if it exists.",
+            },
             "headless": {
                 "type": "boolean",
                 "description": "For ``open``: start browser in headless mode (default true).",
@@ -129,6 +138,38 @@ SPEC: dict[str, Any] = {
 # Per-process session table. Value shape: dict with playwright, browser, page.
 # Kept minimal — we don't persist across process exits.
 _sessions: dict[str, dict[str, Any]] = {}
+
+
+def _state_dir() -> str:
+    """Where saved login states live.
+
+    One JSON per host (cookies + localStorage). Created lazily.
+    """
+    import os
+    from pathlib import Path
+    p = Path.home() / ".openprogram" / "browser-states"
+    p.mkdir(parents=True, exist_ok=True)
+    return str(p)
+
+
+def _state_path_for(name_or_url: str) -> str:
+    """Map a host or arbitrary name to the on-disk JSON path."""
+    import os
+    from urllib.parse import urlparse
+    name = name_or_url
+    if "://" in name_or_url:
+        try:
+            name = urlparse(name_or_url).hostname or name_or_url
+        except Exception:
+            pass
+    # Sanitize for filesystem.
+    safe = "".join(c if c.isalnum() or c in "-._" else "_" for c in name)
+    return os.path.join(_state_dir(), f"{safe}.json")
+
+
+def _has_saved_login(name_or_url: str) -> bool:
+    import os
+    return os.path.isfile(_state_path_for(name_or_url))
 
 
 def check_playwright() -> bool:
@@ -259,12 +300,46 @@ def _open(
     timeout_ms: int = 30_000,
     stealth: bool = True,
     engine: str = "chromium",
+    url: str | None = None,
+    storage_state: str | None = None,
 ) -> str:
+    """Open a browser session, optionally pre-loading a saved login.
+
+    UX flow:
+      - If `url` is given AND we already have a saved login for that
+        host, load the state and run headless — the agent gets a
+        logged-in session with no manual step.
+      - If `url` is given but we don't have a saved login, force
+        headless=False so the user can log in manually, then prompts
+        them to call `save_login` with the returned session id.
+      - If `storage_state` is given explicitly, that path overrides the
+        host-based lookup.
+    """
     if not check_playwright():
         return _install_hint()
     pw, kind, name_or_err = _start_engine(engine)
     if pw is None:
         return name_or_err  # error string from _start_engine
+
+    # Decide which storage_state file to load (if any).
+    state_path: str | None = None
+    auto_login_needed = False
+    if storage_state:
+        import os
+        state_path = (
+            os.path.expanduser(storage_state)
+            if not os.path.isabs(storage_state)
+            else storage_state
+        )
+        if not os.path.isfile(state_path):
+            return f"Error: storage_state file not found: {state_path}"
+    elif url and _has_saved_login(url):
+        state_path = _state_path_for(url)
+    elif url:
+        # No saved login for this host — flip to headed so the user can log in.
+        if headless:
+            headless = False
+            auto_login_needed = True
     try:
         if name_or_err == "camoufox":
             # Camoufox manages its own context; everything below is
@@ -295,15 +370,19 @@ def _open(
             "--disable-features=IsolateOrigins,site-per-process",
         ] if stealth else []
         browser = kind.launch(headless=headless, args=launch_args)
-        context = browser.new_context(
-            user_agent=(
+        context_kwargs: dict[str, Any] = {
+            "viewport": {"width": 1280, "height": 800},
+            "locale": "en-US",
+        }
+        if stealth:
+            context_kwargs["user_agent"] = (
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
                 "Chrome/130.0.0.0 Safari/537.36"
-            ) if stealth else None,
-            viewport={"width": 1280, "height": 800},
-            locale="en-US",
-        )
+            )
+        if state_path:
+            context_kwargs["storage_state"] = state_path
+        context = browser.new_context(**context_kwargs)
         if stealth and name_or_err == "chromium":
             # patchright already does deep patches; layering ours on top can
             # actually re-introduce detectable inconsistencies, so only
@@ -311,6 +390,11 @@ def _open(
             context.add_init_script(f"({_STEALTH_INIT_SCRIPT})()")
         page = context.new_page()
         page.set_default_timeout(timeout_ms)
+        if url:
+            try:
+                page.goto(url)
+            except Exception:
+                pass  # leave navigation issues to be reported by `navigate`
         session_id = "br_" + uuid.uuid4().hex[:10]
         _sessions[session_id] = {
             "engine": name_or_err,
@@ -321,14 +405,51 @@ def _open(
             "pages": [page],
             "active": 0,
             "default_timeout": timeout_ms,
+            "login_url": url,
         }
-        return (
+        msg = (
             f"Opened browser session `{session_id}` "
             f"(engine={name_or_err}, headless={headless}, "
             f"stealth={stealth}, timeout={timeout_ms}ms)."
         )
+        if state_path:
+            msg += f"\n  Loaded saved login from {state_path}."
+        if auto_login_needed:
+            msg += (
+                "\n\n  No saved login for this host yet. The browser opened "
+                "in headed mode at the URL.\n"
+                "  1. Log in manually in the window.\n"
+                "  2. Then call save_login (session_id=" + session_id + ").\n"
+                "  Future `open(url=...)` calls will pick up the saved state automatically."
+            )
+        return msg
     except Exception as e:
         return f"Error opening browser: {type(e).__name__}: {e}"
+
+
+def _save_login(session_id: str, name: str | None = None) -> str:
+    """Snapshot the session's storage_state for later headless reuse.
+
+    Default `name` is the host of the URL the session was opened at.
+    """
+    sess = _require_session(session_id)
+    if isinstance(sess, str):
+        return sess
+    target = name or sess.get("login_url") or ""
+    if not target:
+        return (
+            "Error: pass `name` (host or url) — couldn't infer one from the session."
+        )
+    path = _state_path_for(target)
+    try:
+        sess["context"].storage_state(path=path)
+        return (
+            f"Saved login for `{target}` → {path}\n"
+            f"  Future open(url='https://{target.lstrip('https://')}/...') "
+            f"calls will load this automatically and run headless."
+        )
+    except Exception as e:
+        return f"Error saving login: {type(e).__name__}: {e}"
 
 
 def _navigate(session_id: str, url: str) -> str:
@@ -735,6 +856,8 @@ def execute(
     headless: bool = True,
     stealth: bool = True,
     engine: str = "chromium",
+    storage_state: str | None = None,
+    name: str | None = None,
     timeout_ms: int = 30_000,
     **kw: Any,
 ) -> str:
@@ -762,12 +885,18 @@ def execute(
 
     if action == "open":
         eng = engine or read_string_param(kw, "engine", "backend") or "chromium"
+        ss = storage_state or read_string_param(kw, "storage_state", "state")
         return _open(
             headless=headless,
             timeout_ms=timeout_ms,
             stealth=stealth,
             engine=eng,
+            url=url,
+            storage_state=ss,
         )
+    if action == "save_login":
+        nm = name or read_string_param(kw, "name", "host", "label")
+        return _save_login(session_id or "", nm)
     if action == "navigate":
         return _navigate(session_id or "", url or "")
     if action == "click":
