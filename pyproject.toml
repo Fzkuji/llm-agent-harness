@@ -90,6 +90,12 @@ channels = [
 browser = [
     "playwright>=1.45.0",
 ]
+# `agent_browser` tool — LLM-friendly ariaSnapshot + ref-id interface.
+# Pure Python (subprocess wrapper); the npm package itself is the
+# install step. After `pip install`, also run:
+#   npm install -g agent-browser
+#   agent-browser install
+agent-browser = []
 # Stealth-patched browser backends for sites with bot protection
 # (Cloudflare Turnstile, DataDome, etc.). After install also run
 # `patchright install chromium` and/or `camoufox fetch`.

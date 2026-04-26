@@ -59,6 +59,8 @@ playwright install chromium               #   one-time chromium binary fetch (~1
 pip install "openprogram[browser-stealth]" #  + patchright + camoufox for Cloudflare-protected sites
 patchright install chromium               #   stealth-patched chromium binary
 camoufox fetch                            #   stealth-patched firefox binary (alternative engine)
+npm install -g agent-browser              #   LLM-friendly ariaSnapshot+refid wrapper for the agent_browser tool
+agent-browser install                     #   one-time chromium fetch for agent-browser
 ```
 
 ```python

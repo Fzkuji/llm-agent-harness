@@ -32,6 +32,7 @@ from ._helpers import is_available as _is_available
 # module. Same concern isn't there for other submodule names.
 _builtin_list = list
 
+from .agent_browser import TOOL as AGENT_BROWSER
 from .apply_patch import TOOL as APPLY_PATCH
 from .bash import TOOL as BASH
 from .browser import TOOL as BROWSER
@@ -82,6 +83,7 @@ ALL_TOOLS: dict[str, dict[str, Any]] = {
     "canvas": CANVAS,
     "cron": CRON,
     "browser": BROWSER,
+    "agent_browser": AGENT_BROWSER,
 }
 
 # Default tool set (à la Claude Code): dedicated file ops for safe common
