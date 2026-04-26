@@ -62,9 +62,14 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
   const [stats, setStats] = useState<StatsEnvelope['data'] | undefined>(undefined);
   const [tick, setTick] = useState(0);
   const [slashMode, setSlashMode] = useState(false);
-  const [tokens, setTokens] = useState<{ input?: number; output?: number }>({});
+  // Per-conversation token + context-window tracking. We key by conv_id
+  // so switching branches (resume / new / load_conversation) flips the
+  // BottomBar indicator to that branch's own usage.
+  const [tokensByConv, setTokensByConv] = useState<
+    Record<string, { input?: number; output?: number }>
+  >({});
+  const [windowByConv, setWindowByConv] = useState<Record<string, number>>({});
   const [history, setHistory] = useState<string[]>(() => loadHistory());
-  const [contextWindow, setContextWindow] = useState<number | undefined>(undefined);
   const [conversationTitle, setConversationTitle] = useState<string | undefined>(undefined);
   const [bellEnabled, setBellEnabled] = useState(true);
   const [modelsList, setModelsList] = useState<string[]>([]);
@@ -239,15 +244,24 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
           const cs = d as {
             chat?: { input_tokens?: number; output_tokens?: number };
             context_window?: number | null;
+            conv_id?: string;
           };
-          if (cs.chat) {
-            setTokens({
-              input: cs.chat.input_tokens,
-              output: cs.chat.output_tokens,
-            });
+          // Server tags every context_stats with the conv_id it
+          // belongs to. Stash by id so switching branches flips the
+          // displayed numbers without losing the others.
+          const cid = cs.conv_id ?? conversationId;
+          if (cid && cs.chat) {
+            setTokensByConv((m) => ({
+              ...m,
+              [cid]: { input: cs.chat!.input_tokens, output: cs.chat!.output_tokens },
+            }));
           }
-          if (typeof cs.context_window === 'number' && cs.context_window > 0) {
-            setContextWindow(cs.context_window);
+          if (
+            cid
+            && typeof cs.context_window === 'number'
+            && cs.context_window > 0
+          ) {
+            setWindowByConv((m) => ({ ...m, [cid]: cs.context_window as number }));
           }
         }
       } else if (ev.type === 'stats') {
@@ -659,12 +673,12 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
         conversationTitle={conversationTitle}
         busy={!!activity}
         slashMode={slashMode}
-        tokens={tokens}
+        tokens={conversationId ? tokensByConv[conversationId] : undefined}
         toolsOn={toolsOn}
         permissionMode={permissionMode}
         thinkingEffort={thinkingEffort}
         connState={connState}
-        contextWindow={contextWindow}
+        contextWindow={conversationId ? windowByConv[conversationId] : undefined}
       />
     </Box>
   );

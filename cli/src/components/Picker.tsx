@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { colors } from '../theme/colors.js';
+import { usePanelWidth } from '../utils/useTerminalWidth.js';
 
 export interface PickerItem<V> {
   /** Display name in the list. */
@@ -72,6 +73,11 @@ export function Picker<V>({ title, items, onSelect, onCancel, maxVisible = 10 }:
   if (end - start < maxVisible) start = Math.max(0, end - maxVisible);
   const visible = filtered.slice(start, end);
 
+  // Width: track the panel cap so Picker doesn't burst on wide
+  // terminals or break on narrow ones.
+  const panelWidth = usePanelWidth();
+  const labelWidth = Math.max(8, Math.min(28, Math.floor(panelWidth / 3)));
+
   return (
     <Box
       flexDirection="column"
@@ -79,6 +85,7 @@ export function Picker<V>({ title, items, onSelect, onCancel, maxVisible = 10 }:
       borderColor={colors.primary}
       paddingX={1}
       marginBottom={1}
+      width={panelWidth}
     >
       <Box justifyContent="space-between">
         <Text bold color={colors.primary}>
@@ -98,7 +105,7 @@ export function Picker<V>({ title, items, onSelect, onCancel, maxVisible = 10 }:
             <Text color={selected ? colors.primary : colors.border}>
               {selected ? '▌ ' : '  '}
             </Text>
-            <Box width={28}>
+            <Box width={labelWidth}>
               <Text color={selected ? colors.primary : colors.text} bold={selected}>
                 {it.label}
               </Text>

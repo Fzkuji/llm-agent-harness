@@ -200,11 +200,13 @@ export const Welcome: React.FC<WelcomeProps> = ({ stats }) => {
   }
 
   // Width per tile. Always 4 columns when cols >= 50; below that fall back
-  // to a 2-col grid (4 rows of 2 tiles).
+  // to a 2-col grid (4 rows of 2 tiles). Clamp to a minimum so a sudden
+  // resize down to ~10 cols doesn't produce negative widths and crash Ink.
   const fourAcross = cols >= 50;
-  const tileWidth = fourAcross
+  const rawTileWidth = fourAcross
     ? Math.floor((width - 4) / 4)
     : Math.floor((width - 4) / 2);
+  const tileWidth = Math.max(8, rawTileWidth);
   const twoSubCols = cols >= 130;
   // The 4 most useful tiles when only one row fits.
   const oneRowSubset = [skills, agentsCol, sessionsCol, tools];

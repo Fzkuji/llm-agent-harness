@@ -142,7 +142,7 @@ export const BottomBar: React.FC<BottomBarProps> = ({
                 : tokens.input / contextWindow > 0.65 ? colors.warning
                 : colors.muted
               }>
-                {Math.round((tokens.input / contextWindow) * 100)}%
+                {formatTokens(tokens.input)}/{formatTokens(contextWindow)} ({Math.round((tokens.input / contextWindow) * 100)}%)
               </Text>
             </>
           ) : null}

@@ -3,6 +3,9 @@ import { useStdout } from 'ink';
 
 /** Hard cap so the panel doesn't stretch into a thin strip on a 200-col window. */
 export const MAX_PANEL_WIDTH = 100;
+/** Floor so a transient resize (e.g. sliding the window narrow) doesn't
+ * propagate negative widths into Ink and crash the layout. */
+export const MIN_PANEL_WIDTH = 24;
 
 /**
  * Returns the current terminal column count and re-renders when the
@@ -26,11 +29,12 @@ export function useTerminalWidth(): number {
 
 /**
  * Width every top-level panel uses so Welcome / input box / bottom bar
- * line up edge-to-edge.
+ * line up edge-to-edge. Clamped to [MIN_PANEL_WIDTH, MAX_PANEL_WIDTH]
+ * so transient resize states never feed negative widths into Ink.
  */
 export function usePanelWidth(): number {
   const cols = useTerminalWidth();
-  return Math.min(cols, MAX_PANEL_WIDTH);
+  return Math.max(MIN_PANEL_WIDTH, Math.min(cols, MAX_PANEL_WIDTH));
 }
 
 /** Returns the current terminal row count, re-renders on resize. */
