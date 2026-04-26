@@ -94,9 +94,12 @@ def run_ink_tui(*, agent=None, conv_id: str | None = None, rt=None) -> None:
         os.dup2(log_fd, 2)
         os.close(log_fd)
 
+    # Don't wait for the ws server to listen before spawning Node — Node
+    # takes ~340ms to load its bundle (React + Ink + marked + ws), in
+    # parallel with the server's ~240ms boot. BackendClient retries with
+    # exponential backoff so the first connect attempt may fail and that's
+    # fine.
     start_web(port=port, open_browser=False)
-    if not _wait_until_listening(port):
-        raise RuntimeError(f"webui server did not come up on port {port}")
 
     ws_url = f"ws://127.0.0.1:{port}/ws"
     env = os.environ.copy()

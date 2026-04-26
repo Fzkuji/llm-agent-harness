@@ -1,29 +1,42 @@
-import { marked } from 'marked';
-import { markedTerminal } from 'marked-terminal';
+/**
+ * Lazy-loaded markdown renderer. The marked + marked-terminal packages
+ * are heavy (a few hundred ms of import work because of their internal
+ * regex compilation and language tables) — and totally cold at startup.
+ * Defer the import until the first assistant reply actually needs
+ * formatting, so `openprogram` boots into the input box faster.
+ */
 
-let configured = false;
+type MarkedFn = (text: string) => string;
+let _renderer: MarkedFn | null = null;
 
-const ensureConfigured = (): void => {
-  if (configured) return;
-  // The terminal renderer takes over heading/list/code/link handling.
-  // No options needed for the defaults we want (cyan headings, dim quotes,
-  // colored code fences). Cast keeps types happy across renderer versions.
-  marked.use(markedTerminal() as Parameters<typeof marked.use>[0]);
-  configured = true;
+const buildRenderer = (): MarkedFn => {
+  // require() rather than import() because esbuild bundles both into
+  // the same chunk anyway, and require is synchronous (the first call
+  // pays the loading cost on demand instead of awaiting). createRequire
+  // is set up by our esbuild banner.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { marked } = require('marked');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { markedTerminal } = require('marked-terminal');
+  marked.use(markedTerminal());
+  return (text: string) => {
+    try {
+      const out = marked.parse(text) as string;
+      return out.replace(/\n+$/, '');
+    } catch {
+      return text;
+    }
+  };
 };
 
 /**
  * Convert a markdown string into ANSI text for terminal display.
  *
- * Falls back to the raw input if marked throws — we never want a bad
- * fence to swallow the assistant's reply.
+ * The first call lazily loads marked + marked-terminal; subsequent calls
+ * reuse the cached renderer. Falls back to the raw input on any parse
+ * error so a bad fence can't swallow the assistant's reply.
  */
 export const renderMarkdown = (text: string): string => {
-  ensureConfigured();
-  try {
-    const out = marked.parse(text) as string;
-    return out.replace(/\n+$/, '');
-  } catch {
-    return text;
-  }
+  if (!_renderer) _renderer = buildRenderer();
+  return _renderer(text);
 };
