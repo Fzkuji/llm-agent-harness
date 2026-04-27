@@ -1,7 +1,7 @@
-import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useState, useCallback, useMemo, useEffect } from 'react';
 import { ColorTheme, getTheme, ThemeName, ThemeSetting } from './themes.js';
 import { loadThemeSetting, saveThemeSetting } from './persistence.js';
-import { getSystemThemeName } from './systemTheme.js';
+import { getSystemThemeName, subscribeSystemTheme } from './systemTheme.js';
 
 interface ThemeContextShape {
   /** Saved preference. May be 'auto'. */
@@ -38,6 +38,14 @@ const resolve = (setting: ThemeSetting): ThemeName =>
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [themeSetting, setThemeSettingState] = useState<ThemeSetting>(() => loadThemeSetting());
   const [previewSetting, setPreviewSetting] = useState<ThemeSetting | null>(null);
+  // Bumps when the cached system theme changes (e.g. OSC 11 reply lands).
+  // Used so React re-resolves `auto` without us threading state through.
+  const [, setSystemTick] = useState(0);
+
+  useEffect(
+    () => subscribeSystemTheme(() => setSystemTick((n) => n + 1)),
+    [],
+  );
 
   // Preview wins while the picker is highlighting an option. Confirm or
   // cancel through the explicit save/cancel callbacks.

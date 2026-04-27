@@ -1,29 +1,46 @@
 import type { ThemeName } from './themes.js';
 
 /**
- * Resolve the terminal's effective background to a concrete light/dark theme.
+ * Module-level cache of the terminal's effective light/dark setting, plus
+ * a subscriber list so the React tree can re-resolve `auto` when an async
+ * OSC 11 query updates the cache after first paint.
  *
- * Heuristic via $COLORFGBG (xterm convention: "fg;bg" or "fg;default;bg").
- * The bg field is the 0..15 ANSI palette index. 0..6 + 8 are dark, 7 + 9..15
- * are light. iTerm2, Terminal.app, GNOME Terminal, and most modern emulators
- * set this. When unset, default to `dark` so we don't flash white-on-white.
+ * Detection priority:
+ *   1. OSC 11 reply (most accurate; parsed by oscQuery.ts and pushed via
+ *      setCachedSystemTheme)
+ *   2. $COLORFGBG (synchronous initial guess)
+ *   3. fallback to 'dark'
  *
- * Claude Code goes further with an OSC 11 round-trip to get the exact bg
- * color from terminals that don't export COLORFGBG. We skip that for now —
- * the env var covers the common case and stays synchronous.
+ * Most modern terminals answer OSC 11 in <50ms, so we kick the query off
+ * at startup and live with `dark` for that brief window.
  */
+
+let cached: ThemeName = detectFromColorFgBg() ?? 'dark';
+const subscribers = new Set<(name: ThemeName) => void>();
+
 export function getSystemThemeName(): ThemeName {
+  return cached;
+}
+
+export function setCachedSystemTheme(name: ThemeName): void {
+  if (cached === name) return;
+  cached = name;
+  for (const cb of subscribers) cb(name);
+}
+
+export function subscribeSystemTheme(cb: (name: ThemeName) => void): () => void {
+  subscribers.add(cb);
+  return () => { subscribers.delete(cb); };
+}
+
+function detectFromColorFgBg(): ThemeName | undefined {
   const colorFgBg = process.env.COLORFGBG;
-  if (!colorFgBg) return 'dark';
-  // Parse the trailing field as the bg index.
+  if (!colorFgBg) return undefined;
   const parts = colorFgBg.split(';');
   const bg = parts[parts.length - 1];
-  if (!bg) return 'dark';
-  // "default" → assume dark (most terminals default to dark).
-  if (bg === 'default') return 'dark';
+  if (!bg || bg === 'default') return undefined;
   const n = Number.parseInt(bg, 10);
-  if (Number.isNaN(n)) return 'dark';
-  // ANSI palette 7 (light gray) and 9..15 (bright variants) are bright.
-  if (n === 7 || (n >= 9 && n <= 15)) return 'light';
-  return 'dark';
+  if (Number.isNaN(n) || n < 0 || n > 15) return undefined;
+  // ANSI palette 0–6 + 8 are dark; 7 + 9–15 are light.
+  return n <= 6 || n === 8 ? 'dark' : 'light';
 }

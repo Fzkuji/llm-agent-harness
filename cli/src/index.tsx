@@ -3,6 +3,8 @@ import { render } from 'ink';
 import { REPL } from './screens/REPL.js';
 import { BackendClient } from './ws/client.js';
 import { ThemeProvider } from './theme/ThemeProvider.js';
+import { queryTerminalBg } from './theme/oscQuery.js';
+import { setCachedSystemTheme } from './theme/systemTheme.js';
 
 function parseArgs(argv: string[]): { ws: string } {
   let ws = process.env.OPENPROGRAM_WS ?? 'ws://127.0.0.1:8765/ws';
@@ -18,6 +20,16 @@ function parseArgs(argv: string[]): { ws: string } {
 const { ws } = parseArgs(process.argv.slice(2));
 const client = new BackendClient(ws);
 client.connect();
+
+// Fire OSC 11 (background-color query) BEFORE Ink renders so we have the
+// real terminal bg in hand before stdin gets handed to Ink's input layer.
+// Most terminals reply in <50ms; we cap at 200ms and proceed with whatever
+// we have. The result lands via setCachedSystemTheme, and ThemeProvider's
+// subscriber bumps state so any 'auto' resolution flips to the right
+// palette as soon as the answer arrives.
+queryTerminalBg(200)
+  .then((bg) => { if (bg) setCachedSystemTheme(bg); })
+  .catch(() => { /* fall back to COLORFGBG / dark */ });
 
 // We deliberately do NOT enter the alternate screen buffer. altscreen
 // gives a clean canvas at startup but loses native scrollback — once
