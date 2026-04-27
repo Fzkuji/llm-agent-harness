@@ -21,57 +21,31 @@ const { ws } = parseArgs(process.argv.slice(2));
 const client = new BackendClient(ws);
 client.connect();
 
-// Fire OSC 11 (background-color query) BEFORE Ink renders so we have the
-// real terminal bg in hand before stdin gets handed to Ink's input layer.
-// Most terminals reply in <50ms; we cap at 200ms and proceed with whatever
-// we have. The result lands via setCachedSystemTheme, and ThemeProvider's
-// subscriber bumps state so any 'auto' resolution flips to the right
-// palette as soon as the answer arrives.
+// Startup screen reset. We intentionally do NOT use altscreen
+// (\e[?1049h) — Apple's Terminal preserves the pre-switch cursor
+// position across the switch and Ink ends up rendering its first frame
+// from a row that isn't (1,1), leaving the top of the screen blank.
+// Different versions of Terminal/iTerm2 also merge primary + altscreen
+// scrollback in surprising ways. Stay in the primary buffer and just:
+//   \e[H    cursor home
+//   \e[2J   erase the visible viewport
+//   \e[3J   erase scrollback (xterm extension; Terminal.app, iTerm2,
+//           VSCode, Ghostty, kitty, GNOME Terminal, Windows Terminal)
+// After this the terminal is genuinely empty, cursor at (1,1), and
+// Ink can render top-down from there. The trade-off vs. altscreen:
+// when openprogram exits, the chat content stays on screen instead
+// of being replaced by the original shell view — but the launch
+// experience is reliable across emulators.
+process.stdout.write('\x1b[H\x1b[2J\x1b[3J');
+
+// OSC 11 (background-color query) for the auto theme. The reply lands
+// via setCachedSystemTheme whenever it arrives; ThemeProvider's
+// subscriber bumps state and flips 'auto' from dark to light in place.
 queryTerminalBg(200)
   .then((bg) => { if (bg) setCachedSystemTheme(bg); })
   .catch(() => { /* fall back to COLORFGBG / dark */ });
 
-// Vim / less / htop / tmux startup pattern.
-//
-// Terminal.app and iTerm2 (with default profile) MERGE the primary-buffer
-// scrollback into the altscreen view — so just entering altscreen (\e[?1049h)
-// still lets the user mouse-wheel back to whatever was on screen before
-// `openprogram` ran. To get the "fresh-canvas" feel users expect from
-// vim-style apps, we first wipe the primary buffer:
-//   \e[H    cursor home (so \e[3J operates from a known anchor)
-//   \e[2J   erase visible viewport
-//   \e[3J   erase scrollback (xterm extension; honored by Terminal.app,
-//           iTerm2, GNOME Terminal, kitty, Alacritty, Windows Terminal)
-// Then we switch to altscreen. On exit we drop back to the (now-empty)
-// primary buffer, which leaves the user's shell prompt intact below.
-const ENTER_ALT = '\x1b[?1049h';
-const EXIT_ALT = '\x1b[?1049l';
-const CLEAR_PRIMARY = '\x1b[H\x1b[2J\x1b[3J';
-// After \e[?1049h, terminals disagree on the cursor's starting position
-// inside altscreen — xterm puts it at (1,1), but Terminal.app preserves
-// the pre-switch position. If the shell prompt was at the bottom of the
-// terminal, Ink ends up rendering its first frame from that bottom row,
-// leaving the top of the screen blank. Force cursor home AFTER entering
-// altscreen so Ink writes from row 1 in every emulator. Then clear the
-// altscreen view too in case anything (including the OSC 11 reply
-// echo on terminals that don't suppress it) printed in the meantime.
-process.stdout.write(CLEAR_PRIMARY + ENTER_ALT + '\x1b[2J\x1b[H');
-
-let _altRestored = false;
-const restoreScreen = (): void => {
-  if (_altRestored) return;
-  _altRestored = true;
-  try { process.stdout.write(EXIT_ALT); } catch { /* nothing to do on a closed pipe */ }
-};
-process.on('exit', restoreScreen);
-process.on('uncaughtException', (err) => {
-  restoreScreen();
-  // Re-throw so Node still surfaces the error and exits non-zero.
-  throw err;
-});
-
-// On resize, repaint the visible viewport. `\e[3J` (clear scrollback) is
-// meaningless inside altscreen so we drop it. Ink + Static (keyed on
+// On resize, repaint by clearing the viewport. Ink + Static (keyed on
 // resizeNonce in REPL.tsx) re-mounts and re-prints every committed turn
 // at the new width.
 let _lastCols = process.stdout.columns ?? 0;
@@ -82,7 +56,7 @@ process.stdout.on('resize', () => {
   if (cols !== _lastCols || rows !== _lastRows) {
     _lastCols = cols;
     _lastRows = rows;
-    process.stdout.write('\x1b[2J\x1b[H');
+    process.stdout.write('\x1b[2J\x1b[3J\x1b[H');
   }
 });
 
@@ -98,6 +72,5 @@ const { waitUntilExit } = render(
 
 waitUntilExit().then(() => {
   client.close();
-  restoreScreen();
   process.exit(0);
 });
