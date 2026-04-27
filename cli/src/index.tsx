@@ -47,7 +47,15 @@ queryTerminalBg(200)
 const ENTER_ALT = '\x1b[?1049h';
 const EXIT_ALT = '\x1b[?1049l';
 const CLEAR_PRIMARY = '\x1b[H\x1b[2J\x1b[3J';
-process.stdout.write(CLEAR_PRIMARY + ENTER_ALT);
+// After \e[?1049h, terminals disagree on the cursor's starting position
+// inside altscreen — xterm puts it at (1,1), but Terminal.app preserves
+// the pre-switch position. If the shell prompt was at the bottom of the
+// terminal, Ink ends up rendering its first frame from that bottom row,
+// leaving the top of the screen blank. Force cursor home AFTER entering
+// altscreen so Ink writes from row 1 in every emulator. Then clear the
+// altscreen view too in case anything (including the OSC 11 reply
+// echo on terminals that don't suppress it) printed in the meantime.
+process.stdout.write(CLEAR_PRIMARY + ENTER_ALT + '\x1b[2J\x1b[H');
 
 let _altRestored = false;
 const restoreScreen = (): void => {
