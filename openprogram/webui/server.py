@@ -56,9 +56,107 @@ _ws_connections: list[Any] = []
 _ws_lock = threading.Lock()
 _loop: Optional[asyncio.AbstractEventLoop] = None
 
-# Conversation storage (in-memory)
+# Conversation storage (in-memory). The conv dict still owns
+# runtime / root_context / function_trees / metadata, but the
+# ``messages`` array is now a derived view of SessionDB's active
+# branch — see _get_messages / _invalidate_messages below.
 _conversations: dict[str, dict] = {}
 _conversations_lock = threading.Lock()
+
+# Active-branch message cache (conv_id → list[dict]). Populated on
+# demand by _get_messages, invalidated whenever advance_head /
+# set_head / a fresh dispatcher turn writes to SessionDB.
+#
+# Why a cache: WS bootstrap + every chat-history broadcast reads the
+# branch list multiple times. With a thousand-message session,
+# walking the parent_id CTE every time costs ~5ms; cached it's free.
+# Why bounded LRU: webui keeps tens to hundreds of conversations
+# warm; a single un-bounded dict would creep into RAM. 64 sessions
+# × ~1MB serialized chat = ~64MB — comfortable on any modern host.
+import collections as _collections   # noqa: E402
+
+_msg_cache_lock = threading.Lock()
+_MSG_CACHE_CAP = 64
+_msg_cache: "_collections.OrderedDict[str, list[dict]]" = _collections.OrderedDict()
+
+
+def _get_messages(conv_id: str) -> list[dict]:
+    """Return the active-branch messages for a conversation.
+
+    Reads from cache when warm, falls back to SessionDB.get_branch on
+    miss. The cache contains COPIES — callers that mutate the list
+    won't accidentally invalidate the cache, but they must call
+    _invalidate_messages(conv_id) afterwards if they wrote anything
+    that should be visible.
+
+    Returns ``[]`` for unknown conv_ids — same as the dict-based
+    reader's behavior, so existing call sites don't need null-guards.
+    """
+    with _msg_cache_lock:
+        if conv_id in _msg_cache:
+            _msg_cache.move_to_end(conv_id)
+            return list(_msg_cache[conv_id])
+    # Cache miss — load from DB. Out of the lock so concurrent
+    # different-conv reads don't serialize.
+    try:
+        from openprogram.agent.session_db import default_db
+        msgs = default_db().get_branch(conv_id)
+    except Exception:
+        msgs = []
+    with _msg_cache_lock:
+        _msg_cache[conv_id] = msgs
+        _msg_cache.move_to_end(conv_id)
+        while len(_msg_cache) > _MSG_CACHE_CAP:
+            _msg_cache.popitem(last=False)
+        return list(msgs)
+
+
+def _invalidate_messages(conv_id: str) -> None:
+    """Drop ``conv_id``'s cached branch list. Call after any write
+    that should be visible to the next reader: append_message,
+    set_head, retry/edit, deepest_leaf jumps."""
+    with _msg_cache_lock:
+        _msg_cache.pop(conv_id, None)
+
+
+def _hydrate_messages_from_db(conv_id: str) -> list[dict]:
+    """Force-refresh and return the active branch. Used by paths that
+    just wrote to SessionDB and need the next read to be fresh."""
+    _invalidate_messages(conv_id)
+    return _get_messages(conv_id)
+
+
+def _set_active_head(conv_id: str, head_id: Optional[str]) -> None:
+    """Switch the conversation's active branch leaf.
+
+    Used by retry / edit / sibling-checkout / deepest-leaf jump UIs.
+    Updates SessionDB.sessions.head_id (so cross-process readers and
+    the dispatcher's next get_branch see the new head) and the
+    in-memory ``conv["head_id"]`` mirror, then invalidates the
+    messages cache so the next reader walks the new branch.
+    """
+    try:
+        from openprogram.agent.session_db import default_db
+        default_db().set_head(conv_id, head_id)
+    except Exception as e:
+        _log(f"_set_active_head: SessionDB write failed for {conv_id}: {e}")
+    with _conversations_lock:
+        conv = _conversations.get(conv_id)
+        if conv is not None:
+            conv["head_id"] = head_id
+    _invalidate_messages(conv_id)
+
+
+def _deepest_leaf_db(conv_id: str, root_id: str) -> Optional[str]:
+    """SessionDB-backed deepest_leaf — finds the tip of the subtree
+    under ``root_id`` so sibling-checkout lands on the latest reply,
+    not the fork point. Mirrors openprogram.contextgit.deepest_leaf
+    but reads from SQL instead of an in-memory message list."""
+    try:
+        from openprogram.agent.session_db import default_db
+        return default_db().get_deepest_leaf(conv_id, root_id)
+    except Exception:
+        return None
 
 # Global default providers (used when creating new conversations)
 # (Provider state moved to openprogram.webui._runtime_management)
@@ -534,6 +632,19 @@ def _get_or_create_conversation(conv_id: str = None,
     with _conversations_lock:
         if conv_id not in _conversations:
             resolved_agent = agent_id or _default_agent_id()
+            # Hydrate the active branch from SessionDB so a webui
+            # restart / fresh worker process sees the same messages
+            # the dispatcher and channels worker have been writing.
+            # Empty list for brand-new conversations.
+            try:
+                from openprogram.agent.session_db import default_db
+                _db = default_db()
+                _hydrated = _db.get_branch(conv_id) or []
+                _sess = _db.get_session(conv_id)
+                _hydrated_head = _sess.get("head_id") if _sess else None
+            except Exception:
+                _hydrated = []
+                _hydrated_head = None
             _conversations[conv_id] = {
                 "id": conv_id,
                 "agent_id": resolved_agent,
@@ -541,10 +652,10 @@ def _get_or_create_conversation(conv_id: str = None,
                 "root_context": Context(name="chat_session", status="idle", start_time=time.time()),
                 "runtime": None,          # created lazily on first message
                 "provider_name": None,
-                "messages": [],
+                "messages": _hydrated,
                 "function_trees": [],
                 "created_at": time.time(),
-                "head_id": None,
+                "head_id": _hydrated_head,
                 "run_active": False,
             }
         return _conversations[conv_id]
@@ -561,14 +672,53 @@ def _is_run_active(conv_id: str) -> bool:
         return conv_id in _running_tasks
 
 
-# _append_msg moved to openprogram.contextgit.dag.advance_head so the
-# DAG logic lives with the rest of ContextGit. Retained as a thin alias
-# for readability in existing call sites.
+# DAG helpers live in openprogram.contextgit. We keep ``advance_head``
+# as the in-memory mutation primitive but wrap it in ``_append_msg``
+# below so every webui write also flows into SessionDB. That makes the
+# dispatcher / channels worker / TUI see writes from the webui WS
+# handlers without waiting for the next ``_save_conversation``.
 from openprogram.contextgit import (  # noqa: E402
-    advance_head as _append_msg,
+    advance_head as _raw_advance_head,
     head_or_tip as _head_or_tip,
     linear_history as _linear_history,
 )
+
+
+def _append_msg(conv: dict, msg: dict) -> None:
+    """Append ``msg`` to ``conv``: in-memory mirror + SessionDB.
+
+    Single source of truth path for non-dispatcher webui writes (run /
+    create / error / system messages). Dispatcher already writes
+    user+assistant rows itself; this helper covers everything else.
+
+    Order matters:
+      1. ``_raw_advance_head`` mutates ``conv["messages"]`` and
+         ``conv["head_id"]`` so existing readers see it immediately.
+      2. SessionDB.append_message persists for cross-process readers.
+      3. SessionDB.set_head bumps the active leaf — without this,
+         a fresh ``_get_messages`` cache miss would walk back to the
+         old head and miss the just-appended row.
+      4. Cache invalidation is last so step 3 is visible.
+
+    Failures in steps 2-4 are logged but non-fatal; the in-memory
+    mirror is still consistent and the next ``_save_conversation``
+    will sync the row through ``save_messages`` (idempotent).
+    """
+    _raw_advance_head(conv, msg)
+    cid = conv.get("id")
+    msg_id = msg.get("id")
+    if not cid or not msg_id:
+        return
+    try:
+        from openprogram.agent.session_db import default_db
+        db = default_db()
+        if db.get_session(cid) is None:
+            db.create_session(cid, conv.get("agent_id") or _default_agent_id())
+        db.append_message(cid, msg)
+        db.set_head(cid, msg_id)
+    except Exception as e:
+        _log(f"_append_msg: SessionDB write failed for {cid}/{msg_id}: {e}")
+    _invalidate_messages(cid)
 
 
 # Thinking-effort picker configs + runtime apply helpers live in
@@ -1900,6 +2050,11 @@ async def _handle_ws_command(ws, cmd: dict):
                     continue
             new_messages.append(m)
         conv["messages"] = new_messages
+        # Sync the SessionDB head and invalidate the messages cache so
+        # the next get_branch / dispatcher turn sees the truncated view.
+        # Old messages stay in SessionDB (append-only log, Claude Code
+        # style) — they're just not on the active branch any more.
+        _set_active_head(conv_id, new_messages[-1]["id"] if new_messages else None)
 
         # Remove old function_trees for this function
         conv["function_trees"] = [
@@ -1980,7 +2135,15 @@ async def _handle_ws_command(ws, cmd: dict):
 
                 # Restore target attempt's subsequent messages
                 restored = attempts[attempt_idx].get("subsequent_messages", [])
-                conv["messages"] = messages[:msg_idx + 1] + restored
+                new_msgs_for_attempt = messages[:msg_idx + 1] + restored
+                conv["messages"] = new_msgs_for_attempt
+                # Sync SessionDB head so subsequent dispatcher turns
+                # branch off the active attempt's tail, not whatever
+                # was there before.
+                _set_active_head(
+                    conv_id,
+                    new_msgs_for_attempt[-1]["id"] if new_msgs_for_attempt else None,
+                )
 
                 # Update function_trees to match selected attempt's tree
                 selected_tree = attempts[attempt_idx].get("tree")
@@ -2188,32 +2351,35 @@ async def _handle_ws_command(ws, cmd: dict):
                     "source": conv.get("source"),
                     "peer_display": conv.get("peer_display"),
                 })
+        # Channel-bound sessions and any local sessions persisted to
+        # SessionDB. The in-memory `_conversations` snapshot above
+        # holds the live runtime state; SessionDB holds the durable
+        # snapshot. Dedup by id; fill in source/peer_display on
+        # in-memory rows that didn't carry them.
+        seen_ids = {row["id"] for row in conv_list if row.get("id")}
         try:
-            from openprogram.agents import manager as _A
-            from openprogram.agents.manager import sessions_dir
-            for agent in _A.list_all():
-                sroot = sessions_dir(agent.id)
-                if not sroot.exists():
+            from openprogram.agent.session_db import default_db
+            for srow in default_db().list_sessions(limit=10_000):
+                sid = srow["id"]
+                if sid in seen_ids:
+                    for row in conv_list:
+                        if row.get("id") == sid:
+                            if not row.get("source") and srow.get("source"):
+                                row["source"] = srow["source"]
+                            if not row.get("peer_display") and srow.get("peer_display"):
+                                row["peer_display"] = srow["peer_display"]
+                            break
                     continue
-                for entry in sroot.iterdir():
-                    if not entry.is_dir():
-                        continue
-                    meta_p = entry / "meta.json"
-                    if not meta_p.exists():
-                        continue
-                    try:
-                        meta = json.loads(meta_p.read_text(encoding="utf-8"))
-                    except Exception:
-                        continue
-                    conv_list.append({
-                        "id": entry.name,
-                        "title": meta.get("title") or entry.name,
-                        "created_at": meta.get("created_at") or 0,
-                        "has_session": False,
-                        "agent_id": agent.id,
-                        "source": meta.get("channel"),
-                        "peer_display": meta.get("peer_display"),
-                    })
+                seen_ids.add(sid)
+                conv_list.append({
+                    "id": sid,
+                    "title": srow.get("title") or sid,
+                    "created_at": srow.get("created_at") or 0,
+                    "has_session": False,
+                    "agent_id": srow.get("agent_id"),
+                    "source": srow.get("source"),
+                    "peer_display": srow.get("peer_display"),
+                })
         except Exception:
             pass
         conv_list.sort(key=lambda c: c.get("created_at") or 0)
