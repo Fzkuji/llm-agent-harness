@@ -2721,13 +2721,35 @@ async def _handle_ws_command(ws, cmd: dict):
                 current_worker_pid, spawn_detached,
             )
             session_id = cmd.get("session_id") or ""
-            owner = _p.resolve_agent_for_conv(session_id)
-            if owner is None:
+            if not session_id:
                 await ws.send_text(json.dumps({
                     "type": "error",
-                    "data": {"message": f"no session {session_id!r}"},
+                    "data": {"message": "session_id required"},
                 }, default=str))
             else:
+                # If the caller's session doesn't exist yet, lazily
+                # create an empty SessionDB row owned by the default
+                # agent. This lets the TUI bind a brand-new chat to a
+                # channel without forcing the user to send a dummy
+                # message first.
+                owner = _p.resolve_agent_for_conv(session_id)
+                if owner is None:
+                    owner = _default_agent_id()
+                    try:
+                        from openprogram.agent.session_db import default_db
+                        db = default_db()
+                        if db.get_session(session_id) is None:
+                            db.create_session(
+                                session_id, owner,
+                                title="New conversation",
+                                source="tui",
+                            )
+                    except Exception:
+                        # Session creation is best-effort; the
+                        # session_aliases.attach below also stamps
+                        # meta and would surface the underlying error
+                        # if it really mattered.
+                        pass
                 row = _sa.attach(
                     channel=cmd.get("channel") or "",
                     account_id=cmd.get("account_id") or "default",

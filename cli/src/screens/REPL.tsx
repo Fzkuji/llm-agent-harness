@@ -36,6 +36,23 @@ const tsToDate = (ts?: number): string => {
   return d.toLocaleDateString();
 };
 
+/**
+ * Generate a 10-char hex id for a freshly minted local conversation.
+ * Mirrors the server's ``"local_" + uuid().hex[:10]`` shape from
+ * webui/server.py:_get_or_create_conversation, so a TUI-side mint
+ * matches what the server would have generated.
+ */
+const randomLocalId = (): string => {
+  // Math.random() gives 52 bits — enough entropy for the 10-char
+  // hex slice. crypto.randomUUID isn't available in older Node
+  // ESM workers without a preamble.
+  let out = '';
+  while (out.length < 10) {
+    out += Math.floor(Math.random() * 0x100000000).toString(16);
+  }
+  return out.slice(0, 10);
+};
+
 const renderModel = (m: AgentInfo['model']): string | undefined => {
   if (!m) return undefined;
   if (typeof m === 'string') return m;
@@ -426,36 +443,29 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
           setQrStatus(undefined);
           setChosenAccount(data.account_id);
           client.send({ action: 'list_channel_accounts' });
-          // Login + bind are one logical step, not two. If the user
-          // is already in a chat, default to "yes, bind everything to
-          // here" so the workflow ends in one keypress instead of
-          // making them re-pick a binding mode.
-          if (conversationId) {
-            client.send({
-              action: 'attach_session',
-              session_id: conversationId,
-              channel: data.channel ?? chosenChannel,
-              account_id: data.account_id ?? chosenAccount,
-              peer_kind: 'direct',
-              peer_id: '*',
-            } as never);
-            pushSystem(
-              `✅ Logged in to ${data.channel ?? '?'}:${data.account_id ?? '?'} ` +
-              `and bound this conversation to receive every inbound message.\n` +
-              `Switch later via /channel.`,
-            );
-            setPickerKind(null);
-            setChosenChannel(undefined);
-            setChosenAccount(undefined);
-          } else {
-            // No active conversation yet — fall back to the picker so
-            // the user can decide once they have one.
-            pushSystem(
-              `✅ Logged in to ${data.channel ?? '?'}:${data.account_id ?? '?'}. ` +
-              `Send a message first, then use /channel to bind.`,
-            );
-            setPickerKind('channel_action');
+          // Login + bind = one logical step. Lazy-create a TUI
+          // conversation if needed (server attach_session will
+          // back it with an empty SessionDB row).
+          const targetConvId = conversationId ?? `local_${randomLocalId()}`;
+          if (!conversationId) {
+            setConversationId(targetConvId);
           }
+          client.send({
+            action: 'attach_session',
+            session_id: targetConvId,
+            channel: data.channel ?? chosenChannel,
+            account_id: data.account_id ?? chosenAccount,
+            peer_kind: 'direct',
+            peer_id: '*',
+          } as never);
+          pushSystem(
+            `✅ Logged in to ${data.channel ?? '?'}:${data.account_id ?? '?'} ` +
+            `and bound this conversation to receive every inbound message.\n` +
+            `Switch later via /channel.`,
+          );
+          setPickerKind(null);
+          setChosenChannel(undefined);
+          setChosenAccount(undefined);
         } else if (phase === 'expired') {
           pushSystem('QR code expired. Try /channel again.');
           setQrAscii(undefined);
@@ -891,21 +901,17 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
             return;
           }
           // Existing account: bind the current TUI conversation as a
-          // catch-all in one keypress. Same default the wechat
-          // QR-login `done` envelope picks. To change a binding mode
-          // (per-peer / list / delete) the user runs /bindings.
+          // catch-all in one keypress. If the user hasn't sent any
+          // messages yet, mint a fresh conv id and set it active —
+          // server-side attach_session will lazy-create the empty
+          // SessionDB row.
+          const targetConvId = conversationId ?? `local_${randomLocalId()}`;
           if (!conversationId) {
-            pushSystem(
-              'No active conversation. Send a message first, ' +
-              'then /channel will bind to it.',
-            );
-            setPickerKind(null);
-            setChosenChannel(undefined);
-            return;
+            setConversationId(targetConvId);
           }
           client.send({
             action: 'attach_session',
-            session_id: conversationId,
+            session_id: targetConvId,
             channel: chosenChannel,
             account_id: it.value,
             peer_kind: 'direct',
@@ -962,16 +968,19 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
             return;
           }
           if (it.value === '__catchall__') {
-            if (!conversationId) {
-              pushSystem('Send a message first so there is a conversation to bind.');
-              return;
-            }
             // Catch-all = attach with peer_id="*". The bindings/route
             // logic falls through to alias.lookup which matches any
             // peer for this (channel, account) when peer_id == "*".
+            // Lazy-create the TUI conversation if there isn't one
+            // yet — server-side attach_session backs it with an
+            // empty SessionDB row.
+            const targetConvId = conversationId ?? `local_${randomLocalId()}`;
+            if (!conversationId) {
+              setConversationId(targetConvId);
+            }
             client.send({
               action: 'attach_session',
-              session_id: conversationId,
+              session_id: targetConvId,
               channel: chosenChannel,
               account_id: chosenAccount,
               peer_kind: 'direct',
@@ -987,10 +996,6 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
             return;
           }
           if (it.value === '__peer__') {
-            if (!conversationId) {
-              pushSystem('Send a message first so there is a conversation to bind.');
-              return;
-            }
             setPickerKind('channel_peer_input');
             return;
           }
@@ -1009,13 +1014,13 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
             pushSystem('peer id required.');
             return;
           }
+          const targetConvId = conversationId ?? `local_${randomLocalId()}`;
           if (!conversationId) {
-            pushSystem('No active conversation.');
-            return;
+            setConversationId(targetConvId);
           }
           client.send({
             action: 'attach_session',
-            session_id: conversationId,
+            session_id: targetConvId,
             channel: chosenChannel,
             account_id: chosenAccount,
             peer_kind: 'direct',
@@ -1087,13 +1092,17 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
             token: t,
           });
           // Same one-step semantics as wechat QR done: token saved
-          // → bind the current TUI conversation as catch-all so the
-          // user goes from "I want to add a telegram bot" to
-          // "messages flow into my chat" in one keystroke.
-          if (conversationId && registerForm.channel && registerForm.accountId) {
+          // → bind the current TUI conversation as catch-all. Mint a
+          // conv id if there isn't one yet so the user doesn't need
+          // to send a dummy message first.
+          if (registerForm.channel && registerForm.accountId) {
+            const targetConvId = conversationId ?? `local_${randomLocalId()}`;
+            if (!conversationId) {
+              setConversationId(targetConvId);
+            }
             client.send({
               action: 'attach_session',
-              session_id: conversationId,
+              session_id: targetConvId,
               channel: registerForm.channel,
               account_id: registerForm.accountId,
               peer_kind: 'direct',
@@ -1102,11 +1111,6 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
             pushSystem(
               `✅ Registered ${registerForm.channel}:${registerForm.accountId} ` +
               `and bound this conversation to receive inbound messages.`,
-            );
-          } else {
-            pushSystem(
-              `✅ Registered ${registerForm.channel}:${registerForm.accountId}. ` +
-              `Open a chat and run /channel to bind.`,
             );
           }
           setPickerKind(null);
