@@ -28,7 +28,8 @@
  * <UIProviders> which wraps Shell with those.
  */
 import React, { type ReactNode } from 'react';
-import { AlternateScreen, Box, useTerminalSize } from '@openprogram/ink';
+import { AlternateScreen, Box, useInput, useTerminalSize } from '@openprogram/ink';
+import { ModalProvider, useModal } from './ModalProvider.js';
 
 export interface ShellProps {
   children: ReactNode;
@@ -37,6 +38,25 @@ export interface ShellProps {
    * play nicely. Off keeps the keyboard-only path bulletproof. */
   mouseTracking?: boolean;
 }
+
+/**
+ * Listens for esc and pops the top-of-stack modal. Lives inside the
+ * ModalProvider so a fresh handler runs whenever the stack changes
+ * (no stale closures over an empty stack).
+ *
+ * We deliberately do NOT swallow esc when the stack is empty — the
+ * legacy PromptInput / pickers still consume their own esc for
+ * inline cancel actions.
+ */
+const ModalEscHandler: React.FC = () => {
+  const modal = useModal();
+  useInput((_input, key) => {
+    if (key.escape && modal.stack.length > 0) {
+      modal.pop();
+    }
+  });
+  return null;
+};
 
 const ShellInner: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { columns, rows } = useTerminalSize();
@@ -53,6 +73,9 @@ const ShellInner: React.FC<{ children: ReactNode }> = ({ children }) => {
 
 export const Shell: React.FC<ShellProps> = ({ children, mouseTracking = false }) => (
   <AlternateScreen mouseTracking={mouseTracking}>
-    <ShellInner>{children}</ShellInner>
+    <ModalProvider>
+      <ModalEscHandler />
+      <ShellInner>{children}</ShellInner>
+    </ModalProvider>
   </AlternateScreen>
 );

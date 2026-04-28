@@ -21,6 +21,19 @@ export { ScrollView } from './ScrollView.js';
 export type { ScrollViewProps } from './ScrollView.js';
 
 export {
+  ModalProvider,
+  ModalHost,
+  useModal,
+  useCurrentModal,
+} from './ModalProvider.js';
+export type {
+  ModalApi,
+  ModalEntry,
+  ModalProviderProps,
+  CurrentModalApi,
+} from './ModalProvider.js';
+
+export {
   useTerminalSize,
   useBreakpoint,
   useResponsive,

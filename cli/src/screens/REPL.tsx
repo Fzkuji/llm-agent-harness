@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { writeFileSync } from 'fs';
 import { join } from 'path';
 import { Box, Text, useApp, useInput } from '@openprogram/ink';
-import { Shell, ScrollView } from '../ui/index.js';
+import { Shell, ScrollView, ModalHost } from '../ui/index.js';
 import { BackendClient, WsEnvelope, StatsEnvelope, ConnectionState } from '../ws/client.js';
 import { BottomBar } from '../components/BottomBar.js';
 import { Messages } from '../components/Messages.js';
@@ -1203,6 +1203,11 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
           elapsed={elapsed}
         />
       ) : null}
+      {/* New-kit modals win over the legacy pickerKind switch. As
+          screens migrate to ModalProvider.push(), they show here.
+          Legacy pickerNode (channel / resume / etc.) renders below
+          when no modal is open and no kit modal is mounted. */}
+      <ModalHost />
       {pickerNode ? (
         pickerNode
       ) : (
