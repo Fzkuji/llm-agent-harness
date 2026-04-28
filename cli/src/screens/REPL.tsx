@@ -422,15 +422,40 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
         } else if (phase === 'confirmed') {
           setQrStatus('Confirmed. Saving credentials…');
         } else if (phase === 'done') {
-          pushSystem(`✅ Logged in to ${data.channel ?? '?'}:${data.account_id ?? '?'}.`);
           setQrAscii(undefined);
           setQrStatus(undefined);
           setChosenAccount(data.account_id);
-          // Refresh account list, then drop into the binding picker
-          // so the user can immediately attach the new account to the
-          // current conversation.
           client.send({ action: 'list_channel_accounts' });
-          setPickerKind('channel_action');
+          // Login + bind are one logical step, not two. If the user
+          // is already in a chat, default to "yes, bind everything to
+          // here" so the workflow ends in one keypress instead of
+          // making them re-pick a binding mode.
+          if (conversationId) {
+            client.send({
+              action: 'attach_session',
+              session_id: conversationId,
+              channel: data.channel ?? chosenChannel,
+              account_id: data.account_id ?? chosenAccount,
+              peer_kind: 'direct',
+              peer_id: '*',
+            } as never);
+            pushSystem(
+              `✅ Logged in to ${data.channel ?? '?'}:${data.account_id ?? '?'} ` +
+              `and bound this conversation to receive every inbound message.\n` +
+              `Switch later via /channel.`,
+            );
+            setPickerKind(null);
+            setChosenChannel(undefined);
+            setChosenAccount(undefined);
+          } else {
+            // No active conversation yet — fall back to the picker so
+            // the user can decide once they have one.
+            pushSystem(
+              `✅ Logged in to ${data.channel ?? '?'}:${data.account_id ?? '?'}. ` +
+              `Send a message first, then use /channel to bind.`,
+            );
+            setPickerKind('channel_action');
+          }
         } else if (phase === 'expired') {
           pushSystem('QR code expired. Try /channel again.');
           setQrAscii(undefined);

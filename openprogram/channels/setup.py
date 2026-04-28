@@ -225,18 +225,24 @@ def _pick_agent() -> Optional[str]:
 
 
 def _add_binding(channel: str, account_id: str, agent_id: str) -> bool:
-    SKIP = "Skip — I'll bind specific peers later from the TUI"
+    SKIP = "Skip — bind to a specific TUI chat later via /channel"
     CATCHALL = (f"Catch-all: every message on {channel}:{account_id} "
                 f"goes to {agent_id}")
     PER_PEER = "Per-peer: only specified peers route here"
 
-    pick = _choose_one("Routing rule for inbound messages?",
-                       [CATCHALL, PER_PEER, SKIP], default=CATCHALL)
+    pick = _choose_one(
+        "Routing rule for inbound messages?\n"
+        "  (TIP: to route messages into a specific TUI conversation rather "
+        "than just an agent, run `openprogram` and use /channel — that "
+        "gives you the live attach-current-chat option this CLI can't.)",
+        [CATCHALL, PER_PEER, SKIP], default=CATCHALL)
     if pick is None:
         return False
     if pick == SKIP:
-        print(f"\n[setup] no binding added. Use the TUI's /channel command "
-              f"or `openprogram channels bindings add` later.")
+        print(f"\n[setup] no binding added.")
+        print(f"[setup] open the TUI (`openprogram`) and use /channel to "
+              f"attach a specific chat, or run "
+              f"`openprogram channels bindings add` for an agent-level rule.")
         return True
     if pick == CATCHALL:
         try:
