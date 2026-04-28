@@ -74,6 +74,15 @@ class TurnRequest:
     # shaped dict with role/content/timestamp/id at minimum. Passing
     # None means "load history from SessionDB via get_branch".
     history_override: Optional[list[dict]] = None
+    # Caller-supplied id for the user message. When omitted dispatcher
+    # mints one. Useful for webui where the WS handler pre-emits a
+    # ``chat_ack`` envelope tied to a frontend-known msg_id.
+    user_msg_id: Optional[str] = None
+    # When True, the caller has already persisted the user message
+    # under ``user_msg_id`` and advanced head — dispatcher should
+    # NOT re-write it. Used by webui where the WS handler appends
+    # the user msg before kicking off the agent thread.
+    user_already_persisted: bool = False
 
 
 @dataclass
@@ -166,7 +175,7 @@ def process_user_turn(
     """
     started_at = time.time()
     on_event = on_event or _noop
-    user_msg_id = uuid.uuid4().hex[:12]
+    user_msg_id = req.user_msg_id or uuid.uuid4().hex[:12]
     assistant_msg_id = user_msg_id + "_a"
 
     # Lazy imports — dispatcher is imported by webui at startup; the
@@ -225,24 +234,39 @@ def process_user_turn(
         "peer_display": req.peer_display,
         "peer_id": req.peer_id,
     }
-    db.append_message(req.conv_id, user_msg)
-    # Advance head to the user message. Crucial for branching: if the
-    # caller passed parent_id pointing at an older message, we're now
-    # on a NEW leaf and head must reflect that — otherwise the next
-    # get_branch call would still walk down the old branch.
-    db.set_head(req.conv_id, user_msg_id)
-    on_event({
-        "type": "chat_ack",
-        "data": {"conv_id": req.conv_id, "msg_id": user_msg_id},
-    })
+    if not req.user_already_persisted:
+        db.append_message(req.conv_id, user_msg)
+        # Advance head to the user message. Crucial for branching: if
+        # the caller passed parent_id pointing at an older message,
+        # we're now on a NEW leaf and head must reflect that —
+        # otherwise the next get_branch call would still walk down
+        # the old branch.
+        db.set_head(req.conv_id, user_msg_id)
+        on_event({
+            "type": "chat_ack",
+            "data": {"conv_id": req.conv_id, "msg_id": user_msg_id},
+        })
+    else:
+        # Caller already wrote the user msg + emitted ack (webui
+        # path). Make sure history reflects that — load from DB if
+        # the caller didn't pass a history_override.
+        if req.history_override is None:
+            history = db.get_branch(req.conv_id) or history
 
     # 3. Run the agent loop. Errors below get caught and reported as
     #    a system message so the conversation isn't left in a stuck
     #    "agent is thinking…" state.
     try:
+        # When the caller pre-persisted the user msg, ``history`` was
+        # reloaded above and already includes it — passing it twice
+        # would prepend a duplicate user turn into the LLM context.
+        if req.user_already_persisted:
+            loop_history = history
+        else:
+            loop_history = history + [user_msg]
         final_text, usage, tool_calls = _run_loop_blocking(
             req=req,
-            history=history + [user_msg],
+            history=loop_history,
             on_event=on_event,
             cancel_event=cancel_event,
         )
@@ -340,7 +364,7 @@ def _run_loop_blocking(
     see tests/unit/test_dispatcher_integration.py. None means use
     the default (real provider via stream_simple).
     """
-    from openprogram.agent.agent_loop import agent_loop
+    from openprogram.agent.agent_loop import agent_loop, agent_loop_continue
     from openprogram.agent.types import AgentContext, AgentLoopConfig
 
     # Resolve agent profile → tools, system_prompt, model.
@@ -381,16 +405,24 @@ def _run_loop_blocking(
                 asyncio_loop.call_soon_threadsafe(loop_cancel.set)
             threading.Thread(target=_watch, daemon=True).start()
 
-        # Wrap the prompt as an AgentMessage. agent_loop appends this
-        # to context.messages internally before the first iteration.
-        from openprogram.providers.types import UserMessage, TextContent
-        prompt = UserMessage(
-            content=[TextContent(text=req.user_text)],
-            timestamp=int(time.time() * 1000),
-        )
-
-        ev_stream = agent_loop([prompt], context, config,
-                                loop_cancel, stream_fn)
+        if req.user_already_persisted:
+            # User msg is already the tail of ``context.messages``
+            # (loaded from SessionDB above). agent_loop_continue uses
+            # it as-is without inserting another prompt — no duplicate
+            # user turn in the LLM context.
+            ev_stream = agent_loop_continue(context, config,
+                                              loop_cancel, stream_fn)
+        else:
+            # Channels / TUI / first-time webui call: history excludes
+            # the new user turn. Wrap user_text as a UserMessage prompt;
+            # agent_loop appends it to context.messages internally.
+            from openprogram.providers.types import UserMessage, TextContent
+            prompt = UserMessage(
+                content=[TextContent(text=req.user_text)],
+                timestamp=int(time.time() * 1000),
+            )
+            ev_stream = agent_loop([prompt], context, config,
+                                    loop_cancel, stream_fn)
 
         final_text_parts: list[str] = []
         usage_total: dict[str, int] = {"input_tokens": 0, "output_tokens": 0}

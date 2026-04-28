@@ -825,63 +825,125 @@ def _execute_in_context(conv_id: str, msg_id: str, action: str,
                     chat_content.append({"type": "text", "text": context_text})
                 chat_content.append({"type": "text", "text": query})
 
-                # Set up streaming for CLI providers (enables usage tracking + CLI Output)
-                def _on_chat_stream(event: dict):
-                    with _running_tasks_lock:
-                        ti = _running_tasks.get(conv_id)
-                        if ti and "stream_events" in ti:
-                            ti["stream_events"].append(event)
-                            if len(ti["stream_events"]) > 200:
-                                ti["stream_events"] = ti["stream_events"][-200:]
-                    _broadcast_chat_response(conv_id, msg_id, {
-                        "type": "stream_event",
-                        "event": event,
-                        "function": "_chat",
-                    })
-                runtime.on_stream = _on_chat_stream
+                # Resolve opt-in tools — pass names through, dispatcher
+                # picks AgentTools from the unified registry.
+                resolved_tools_override = None
+                if tools_flag:
+                    if isinstance(tools_flag, list):
+                        resolved_tools_override = list(tools_flag)
+                    else:
+                        try:
+                            from openprogram.tools import DEFAULT_TOOLS
+                            resolved_tools_override = list(DEFAULT_TOOLS)
+                        except Exception as e:
+                            _log(f"[exec] tools load failed: {e}; continuing without tools")
+
+                # Hand the turn to the unified dispatcher. The user
+                # message is already persisted by the WS handler that
+                # spawned us, so we set user_already_persisted=True and
+                # pass the same msg_id frontend used for chat_ack.
+                #
+                # The dispatcher emits chat_response envelopes that we
+                # forward to the existing _broadcast_chat_response so
+                # the WS contract stays unchanged.
+                from openprogram.agent.dispatcher import (
+                    TurnRequest as _TurnRequest,
+                    process_user_turn as _process_user_turn,
+                )
+
                 _register_active_runtime(conv_id, runtime)
 
-                # Resolve opt-in tools. True -> DEFAULT_TOOLS; list -> subset.
-                exec_tools = None
-                if tools_flag:
-                    try:
-                        from openprogram.tools import get_many, DEFAULT_TOOLS
-                        if isinstance(tools_flag, list):
-                            exec_tools = get_many(tools_flag)
-                        else:
-                            exec_tools = get_many(DEFAULT_TOOLS)
-                    except Exception as e:
-                        _log(f"[exec] tools load failed: {e}; continuing without tools")
-                        exec_tools = None
+                tool_calls_collected: list[dict] = []
+
+                def _on_dispatcher_event(env: dict) -> None:
+                    et = env.get("type")
+                    if et != "chat_response":
+                        return
+                    payload = env.get("data") or {}
+                    # Track stream events on the running_tasks entry
+                    # so the existing reconnect/replay logic works.
+                    if payload.get("type") == "stream_event":
+                        evt = payload.get("event") or {}
+                        with _running_tasks_lock:
+                            ti = _running_tasks.get(conv_id)
+                            if ti and "stream_events" in ti:
+                                ti["stream_events"].append(evt)
+                                if len(ti["stream_events"]) > 200:
+                                    ti["stream_events"] = ti["stream_events"][-200:]
+                        if evt.get("type") == "tool_result":
+                            tool_calls_collected.append({
+                                "tool": evt.get("tool"),
+                                "result": evt.get("result"),
+                                "is_error": evt.get("is_error"),
+                            })
+                        # Fan out to WS clients with the same envelope
+                        # shape the legacy on_stream hook used.
+                        _broadcast_chat_response(conv_id, msg_id, {
+                            "type": "stream_event",
+                            "event": evt,
+                            "function": "_chat",
+                        })
+                    elif payload.get("type") in ("result", "error"):
+                        # Final-result / error envelopes arrive last;
+                        # we surface them after our own context_stats
+                        # broadcast below, so swallow here.
+                        pass
+
+                req_obj = _TurnRequest(
+                    conv_id=conv_id,
+                    user_text=query,
+                    agent_id=_agent_id,
+                    source="web",
+                    permission_mode="bypass",
+                    tools_override=resolved_tools_override,
+                    thinking_effort=thinking_effort,
+                    user_msg_id=msg_id,
+                    user_already_persisted=True,
+                )
 
                 try:
-                    if exec_tools is not None:
-                        result = runtime.exec(content=chat_content, tools=exec_tools)
-                    else:
-                        result = runtime.exec(content=chat_content)
+                    turn_result = _process_user_turn(
+                        req_obj, on_event=_on_dispatcher_event,
+                    )
                 finally:
-                    runtime.on_stream = None
                     with _running_tasks_lock:
                         _running_tasks.pop(conv_id, None)
                     _unregister_active_runtime(conv_id)
+
+                if turn_result.failed:
+                    _broadcast_chat_response(conv_id, msg_id, {
+                        "type": "error",
+                        "content": turn_result.error or "(unknown error)",
+                    })
+                    return
+
+                result = turn_result.final_text
                 _log(f"[exec] query completed, result length: {len(str(result))}")
 
-                # Store assistant reply, including structured blocks so the
-                # thinking/tool folds survive a conversation reload.
-                blocks = list(getattr(runtime, "last_blocks", None) or [])
-                _append_msg(conv, {
-                    "role": "assistant",
-                    "id": msg_id + "_reply",
-                    "parent_id": msg_id,  # child of the user turn we just ran
-                    "content": str(result),
-                    "blocks": blocks,
-                    "timestamp": time.time(),
-                })
+                # Dispatcher persisted the assistant message itself
+                # (with id=msg_id+'_a'). Hydrate the in-memory mirror
+                # from SessionDB so subsequent webui readers
+                # (load_conversation, retry, etc.) see it.
+                _hydrate_messages_from_db(conv_id)
+                with _conversations_lock:
+                    refreshed = _conversations.get(conv_id)
+                    if refreshed is not None:
+                        try:
+                            from openprogram.agent.session_db import default_db
+                            refreshed["messages"] = default_db().get_branch(conv_id) or []
+                            sess = default_db().get_session(conv_id)
+                            if sess:
+                                refreshed["head_id"] = sess.get("head_id")
+                        except Exception:
+                            pass
 
+                # Blocks: dispatcher emits structured stream events;
+                # webui consumers can rebuild blocks from those. For
+                # the immediate "result" envelope we just send text.
                 _broadcast_chat_response(conv_id, msg_id, {
                     "type": "result",
                     "content": str(result),
-                    "blocks": blocks,
+                    "tool_calls": tool_calls_collected,
                 })
                 _broadcast_context_stats(conv_id, msg_id, chat_runtime=runtime)
 

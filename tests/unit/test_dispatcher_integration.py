@@ -380,6 +380,72 @@ def test_history_override_skips_session_db_walk(
     assert any("from override" in c for c in contents)
 
 
+def test_user_already_persisted_skips_duplicate_user_msg(
+    tmp_db: SessionDB, captured, collector,
+) -> None:
+    """webui pre-appends the user message before kicking off the
+    dispatcher in a worker thread (so the WS chat_ack fires first).
+    With user_already_persisted=True, dispatcher must NOT write a
+    second user row, and agent_loop_continue should be used so the
+    LLM context doesn't double the user turn."""
+    # Pre-seed SessionDB: caller already wrote user msg + advanced head
+    tmp_db.create_session("c1", "main", title="t")
+    tmp_db.append_message("c1", {
+        "id": "uExt", "role": "user", "content": "hello",
+        "timestamp": 1.0, "parent_id": None,
+    })
+    tmp_db.set_head("c1", "uExt")
+
+    seen_messages: list = []
+
+    async def _capturing(model, ctx, opts):
+        seen_messages.append(list(ctx.messages))
+        yield EventStart(partial=_build_partial(""))
+        yield EventDone(reason="stop", message=_build_final("ack"))
+
+    orig = D._run_loop_blocking
+
+    def _w(*, req, history, on_event, cancel_event, stream_fn=None):
+        return orig(req=req, history=history, on_event=on_event,
+                    cancel_event=cancel_event, stream_fn=_capturing)
+
+    with patch.object(D, "_run_loop_blocking", _w):
+        result = D.process_user_turn(
+            D.TurnRequest(
+                conv_id="c1", user_text="hello",
+                agent_id="main", source="web",
+                user_msg_id="uExt",
+                user_already_persisted=True,
+            ),
+            on_event=collector,
+        )
+
+    # SessionDB still has exactly ONE user msg (no duplicate)
+    msgs = tmp_db.get_messages("c1")
+    user_rows = [m for m in msgs if m["role"] == "user"]
+    assert len(user_rows) == 1
+    assert user_rows[0]["id"] == "uExt"
+    # Plus an assistant reply added by dispatcher
+    assistant_rows = [m for m in msgs if m["role"] == "assistant"]
+    assert len(assistant_rows) == 1
+
+    # context.messages seen by the LLM should have exactly 1 user
+    # entry — not duplicated.
+    assert seen_messages
+    user_count = 0
+    for m in seen_messages[0]:
+        if hasattr(m, "role") and m.role == "user":
+            user_count += 1
+    assert user_count == 1, f"expected 1 user msg in LLM context, got {user_count}"
+
+    # No chat_ack emitted (caller is responsible for that)
+    acks = [e for e in captured if e.get("type") == "chat_ack"]
+    assert len(acks) == 0
+
+    assert result.user_msg_id == "uExt"
+    assert result.failed is False
+
+
 def test_provider_error_persists_as_system_message(
     tmp_db: SessionDB, captured, collector,
 ) -> None:
