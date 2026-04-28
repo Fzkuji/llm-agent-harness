@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, AlternateScreen } from '@openprogram/ink';
+import { render } from '@openprogram/ink';
 import { REPL } from './screens/REPL.js';
 import { BackendClient } from './ws/client.js';
 import { ThemeProvider } from './theme/ThemeProvider.js';
@@ -31,22 +31,15 @@ queryTerminalBg(200)
 process.on('SIGINT', () => process.exit(0));
 process.on('SIGTERM', () => process.exit(0));
 
-// <AlternateScreen> tells hermes-ink to enter the terminal alt buffer
-// and run as a fullscreen app. Resize / theme / state changes all go
-// through hermes-ink's Frame model + cell-diff log-update — full
-// frames written atomically inside BSU/ESU brackets, no ghost stacks
-// from stale eraseLines accounting.
-//
-// hermes-ink's render() resolves to an Instance once mounted (async,
-// unlike stock Ink's sync return), so we await it before subscribing
-// to waitUntilExit.
+// Render under AlternateScreen (provided by <Shell> inside REPL).
+// The TUI runs in a constrained viewport — content stays inside its
+// flex tree, ScrollView handles overflow internally. On exit alt-
+// screen is restored and the user's prior terminal state comes back.
 async function main(): Promise<void> {
   const instance = await render(
-    <AlternateScreen>
-      <ThemeProvider>
-        <REPL client={client} />
-      </ThemeProvider>
-    </AlternateScreen>,
+    <ThemeProvider>
+      <REPL client={client} />
+    </ThemeProvider>,
     { exitOnCtrlC: false },
   );
 

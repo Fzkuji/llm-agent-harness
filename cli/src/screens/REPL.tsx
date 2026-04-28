@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { writeFileSync } from 'fs';
 import { join } from 'path';
 import { Box, Text, useApp, useInput } from '@openprogram/ink';
+import { Shell, ScrollView } from '../ui/index.js';
 import { BackendClient, WsEnvelope, StatsEnvelope, ConnectionState } from '../ws/client.js';
 import { BottomBar } from '../components/BottomBar.js';
 import { Messages } from '../components/Messages.js';
@@ -1037,21 +1038,13 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
   } else if (pickerKind === 'channel_qr_wait') {
     // Read-only "picker" — no input, just renders the QR + status
     // until the qr_login envelope handler advances us out.
-    //
-    // Layout choices to keep this from blowing past short terminals:
-    //   - Half-block QR rendering (server-side _qr_to_ascii) gives
-    //     ~half the row count of plain print_ascii.
-    //   - paddingY={0}, no extra blank lines inside the box.
-    //   - Hint text uses one line each, not multi-line wraps.
-    //   - We DON'T render committed transcript above this picker —
-    //     see Messages prop below — so the QR has the full vertical
-    //     viewport.
     pickerNode = (
       <Box flexDirection="column" borderStyle="single" paddingX={1} paddingY={0}>
         <Text bold>Scan to log in to {chosenChannel}</Text>
+        <Text color="ansi:blackBright">Open WeChat on your phone → tap [+] → "Scan QR"</Text>
         {qrAscii ? <Text>{qrAscii}</Text> : <Text color="ansi:blackBright">Loading QR…</Text>}
         <Text color="ansi:cyan">{qrStatus ?? ''}</Text>
-        <Text color="ansi:blackBright">(esc to cancel · phone: WeChat → [+] → Scan QR)</Text>
+        <Text color="ansi:blackBright">(esc to cancel)</Text>
       </Box>
     );
   } else if (pickerKind === 'register_account_id') {
@@ -1180,21 +1173,25 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
     );
   }
 
-  // Layout — main-buffer (no alt-screen). Each render appends at the
-  // terminal cursor; old renders scroll into terminal scrollback
-  // where the user's native ⌘↑ / wheel picks them up. No ScrollBox,
-  // no overflow tricks, no flex-shrink — content takes natural
-  // height. Welcome shows on a fresh empty session only; once the
-  // transcript has anything in it (resume, first reply), Welcome
-  // disappears so it doesn't re-print every render and cycle into
-  // scrollback redundantly.
+  // Layout — Shell wraps AlternateScreen so we run in a constrained
+  // viewport (rows × cols), not main-buffer flow. ScrollView
+  // (overflow:scroll, sticky-bottom) takes the flexible middle
+  // area; spinner / picker / PromptInput / BottomBar stack at the
+  // bottom in fixed-height rows.
+  //
+  // resize handling: AlternateScreen + Shell propagate the new
+  // (rows, cols) through TerminalSizeContext, every flex sibling
+  // re-lays out automatically — no manual resize listener, no
+  // residual content drift.
   return (
-    <Box flexDirection="column">
-      <Messages
-        committed={committed}
-        streaming={streaming}
-        welcome={pickerNode ? undefined : (stats ?? undefined)}
-      />
+    <Shell mouseTracking={false}>
+      <ScrollView stickyBottom>
+        <Messages
+          committed={committed}
+          streaming={streaming}
+          welcome={pickerNode ? undefined : (stats ?? undefined)}
+        />
+      </ScrollView>
       {activity ? (
         <Spinner
           verb={activity.verb}
@@ -1232,6 +1229,6 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
           contextWindow={conversationId ? windowByConv[conversationId] : undefined}
           exitPending={exitPending}
         />
-    </Box>
+    </Shell>
   );
 };
