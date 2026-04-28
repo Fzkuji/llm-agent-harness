@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { writeFileSync } from 'fs';
 import { join } from 'path';
 import { Box, Text, useApp, useInput } from '@openprogram/ink';
-import { Shell, ScrollView, ModalHost } from '../ui/index.js';
+import { Shell, ScrollView, ModalHost, ToastHost } from '../ui/index.js';
 import { BackendClient, WsEnvelope, StatsEnvelope, ConnectionState } from '../ws/client.js';
 import { BottomBar } from '../components/BottomBar.js';
 import { Messages } from '../components/Messages.js';
@@ -1208,6 +1208,9 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
           Legacy pickerNode (channel / resume / etc.) renders below
           when no modal is open and no kit modal is mounted. */}
       <ModalHost />
+      {/* Toasts overlay any open modal — shown above PromptInput so
+          they don't get clipped by the bottom-anchored chrome. */}
+      <ToastHost />
       {pickerNode ? (
         pickerNode
       ) : (

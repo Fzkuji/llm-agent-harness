@@ -30,6 +30,7 @@
 import React, { type ReactNode } from 'react';
 import { AlternateScreen, Box, useInput, useTerminalSize } from '@openprogram/ink';
 import { ModalProvider, useModal } from './ModalProvider.js';
+import { ToastProvider } from './ToastProvider.js';
 
 export interface ShellProps {
   children: ReactNode;
@@ -73,9 +74,11 @@ const ShellInner: React.FC<{ children: ReactNode }> = ({ children }) => {
 
 export const Shell: React.FC<ShellProps> = ({ children, mouseTracking = false }) => (
   <AlternateScreen mouseTracking={mouseTracking}>
-    <ModalProvider>
-      <ModalEscHandler />
-      <ShellInner>{children}</ShellInner>
-    </ModalProvider>
+    <ToastProvider>
+      <ModalProvider>
+        <ModalEscHandler />
+        <ShellInner>{children}</ShellInner>
+      </ModalProvider>
+    </ToastProvider>
   </AlternateScreen>
 );
