@@ -1037,13 +1037,21 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
   } else if (pickerKind === 'channel_qr_wait') {
     // Read-only "picker" — no input, just renders the QR + status
     // until the qr_login envelope handler advances us out.
+    //
+    // Layout choices to keep this from blowing past short terminals:
+    //   - Half-block QR rendering (server-side _qr_to_ascii) gives
+    //     ~half the row count of plain print_ascii.
+    //   - paddingY={0}, no extra blank lines inside the box.
+    //   - Hint text uses one line each, not multi-line wraps.
+    //   - We DON'T render committed transcript above this picker —
+    //     see Messages prop below — so the QR has the full vertical
+    //     viewport.
     pickerNode = (
       <Box flexDirection="column" borderStyle="single" paddingX={1} paddingY={0}>
         <Text bold>Scan to log in to {chosenChannel}</Text>
-        <Text color="ansi:blackBright">Open WeChat on your phone → tap [+] → "Scan QR"</Text>
         {qrAscii ? <Text>{qrAscii}</Text> : <Text color="ansi:blackBright">Loading QR…</Text>}
         <Text color="ansi:cyan">{qrStatus ?? ''}</Text>
-        <Text color="ansi:blackBright">(esc to cancel)</Text>
+        <Text color="ansi:blackBright">(esc to cancel · phone: WeChat → [+] → Scan QR)</Text>
       </Box>
     );
   } else if (pickerKind === 'register_account_id') {
