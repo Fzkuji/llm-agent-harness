@@ -88,7 +88,10 @@ def dispatch_inbound(
             agent, channel, account_id, peer,
         )
         session_key = _apply_reset_policy(agent, base_key)
-    meta, messages = _load_or_init_session(
+    # Make sure SessionDB has a row for this session_key with the
+    # full peer/account metadata before dispatcher takes over (its
+    # default create only sets a subset of fields).
+    meta, _ = _load_or_init_session(
         agent_id=agent_id,
         session_key=session_key,
         channel=channel,
@@ -97,59 +100,82 @@ def dispatch_inbound(
         user_display=user_display or str(peer_id),
     )
 
-    from openprogram.agents.context_engine import default_engine as _engine
+    # Hand the rest of the turn — agent run, message append, FTS
+    # indexing — to the unified dispatcher. Channels run headless,
+    # so we use ``permission_mode="auto"`` and rely on per-tool
+    # ``unsafe_in=[channel]`` flags to hide risky tools (bash, etc.)
+    # from this transport.
+    from openprogram.agent.dispatcher import (
+        TurnRequest,
+        process_user_turn,
+    )
 
-    user_msg_id = uuid.uuid4().hex[:12]
+    captured_user_id: list[str] = []
+    captured_assistant_id: list[str] = []
+
+    def _on_event(env: dict) -> None:
+        # Forward streaming events to any connected webui clients so
+        # an attached TUI sees the channel reply in real time.
+        try:
+            import sys
+            srv = sys.modules.get("openprogram.webui.server")
+            if srv is not None:
+                srv._broadcast(json.dumps(env, default=str))
+        except Exception:
+            pass
+        if env.get("type") == "chat_ack":
+            data = env.get("data") or {}
+            if data.get("msg_id"):
+                captured_user_id.append(str(data["msg_id"]))
+
+    req = TurnRequest(
+        conv_id=session_key,
+        user_text=user_text,
+        agent_id=agent_id,
+        source=channel,
+        peer_display=user_display or str(peer_id),
+        peer_id=str(peer_id),
+        permission_mode="auto",
+    )
+    try:
+        result = process_user_turn(req, on_event=_on_event)
+    except Exception as e:  # noqa: BLE001
+        return f"[error] {type(e).__name__}: {e}"
+
+    reply_text = (result.final_text or "").strip() or "(empty reply)"
+    user_msg_id = result.user_msg_id
+    assistant_msg_id = result.assistant_msg_id
+
+    # Build user/reply message dicts for the channel_turn broadcast —
+    # the TUI consumer (cli_ink) renders both on receipt without
+    # needing a /resume refresh.
     user_msg = {
         "role": "user",
         "id": user_msg_id,
-        "parent_id": messages[-1]["id"] if messages else None,
         "content": user_text,
         "timestamp": time.time(),
         "source": channel,
-        # Display name stamped per-message so a session shared between
-        # you (web) and alice (wechat) renders distinct [User (WeChat:
-        # alice)] vs [User (web, you)] lines.
         "peer_display": user_display or str(peer_id),
         "peer_id": str(peer_id),
     }
-    _engine.ingest(messages, user_msg)
-
-    # Assemble the prompt through the engine: it owns budget, history
-    # rendering, and system-prompt composition. We take the user's
-    # fresh turn out of the engine's "history" slice so the ingested
-    # copy isn't double-rendered.
-    assembled = _engine.assemble(agent, meta, messages[:-1])
-    exec_content: list[dict] = []
-    if assembled.system_prompt_addition:
-        exec_content.append({
-            "type": "text", "text": assembled.system_prompt_addition,
-        })
-    exec_content.extend(assembled.messages)
-    exec_content.append({"type": "text", "text": user_text})
-
-    try:
-        rt = _runtimes.get_runtime_for(agent)
-        reply = rt.exec(content=exec_content)
-        reply_text = str(reply or "").strip() or "(empty reply)"
-    except Exception as e:  # noqa: BLE001
-        reply_text = f"[error] {type(e).__name__}: {e}"
-
     reply_msg = {
         "role": "assistant",
-        "id": user_msg_id + "_reply",
-        "parent_id": user_msg_id,
+        "id": assistant_msg_id,
         "content": reply_text,
         "timestamp": time.time(),
         "source": channel,
     }
-    _engine.ingest(messages, reply_msg)
-    _engine.after_turn(agent, meta, messages)
+    _broadcast_channel_turn(agent_id, session_key, user_msg, reply_msg)
 
-    meta["head_id"] = messages[-1]["id"]
-    meta["_last_touched"] = time.time()
-    _save_session(agent_id, session_key, meta, messages)
-    _poke_live_webui(agent_id, session_key, meta, messages)
+    # Refresh the meta dict from the just-updated DB row and broadcast
+    # the per-session "updated" envelope so any open webui sidebars
+    # bump this conversation to the top.
+    from openprogram.agent.session_db import default_db
+    refreshed = default_db().get_session(session_key)
+    if refreshed is not None:
+        refreshed.setdefault("_last_touched", time.time())
+        _poke_live_webui(agent_id, session_key, refreshed,
+                         default_db().get_messages(session_key))
     return reply_text
 
 
@@ -178,52 +204,97 @@ def _load_or_init_session(
     peer: dict[str, Any],
     user_display: str,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    folder = _session_path(agent_id, session_key)
-    folder.mkdir(parents=True, exist_ok=True)
-    meta_p = _meta_path(agent_id, session_key)
-    msgs_p = _messages_path(agent_id, session_key)
+    """Load (or create) the SQLite-backed session row + replay its
+    message log. Channels used to write meta.json + messages.json
+    files; SessionDB now owns both. We still mkdir the legacy folder
+    so any sub-paths (e.g. `trees/` for webui context-tree dumps)
+    keep working without churn."""
+    from openprogram.agent.session_db import default_db
+    db = default_db()
 
-    meta: dict[str, Any] = {}
-    messages: list[dict[str, Any]] = []
-    if meta_p.exists():
-        try:
-            meta = json.loads(meta_p.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            meta = {}
-    if msgs_p.exists():
-        try:
-            messages = json.loads(msgs_p.read_text(encoding="utf-8")) or []
-        except (OSError, json.JSONDecodeError):
-            messages = []
+    _session_path(agent_id, session_key).mkdir(parents=True, exist_ok=True)
 
-    if not meta:
-        meta = {
+    sess = db.get_session(session_key)
+    if sess is None:
+        meta: dict[str, Any] = {
             "id": session_key,
             "agent_id": agent_id,
             "title": _default_title(channel, user_display),
             "created_at": time.time(),
             "channel": channel,
+            "source": channel,
             "account_id": account_id,
             "peer": dict(peer),
+            "peer_kind": peer.get("kind"),
+            "peer_id": peer.get("id"),
             "peer_display": user_display,
             "_titled": True,
         }
-    else:
-        # Keep display fresh in case the user's handle changed.
-        if user_display and meta.get("peer_display") != user_display:
-            meta["peer_display"] = user_display
-            meta["title"] = _default_title(channel, user_display)
+        db.create_session(
+            session_key, agent_id,
+            title=meta["title"],
+            created_at=meta["created_at"],
+            channel=channel,
+            source=channel,
+            account_id=account_id,
+            peer_kind=peer.get("kind"),
+            peer_id=peer.get("id"),
+            peer_display=user_display,
+            peer=dict(peer),  # full peer dict goes to extra_meta
+            _titled=True,
+        )
+        return meta, []
 
+    meta = dict(sess)
+    # Refresh peer display if the upstream handle changed.
+    if user_display and meta.get("peer_display") != user_display:
+        meta["peer_display"] = user_display
+        meta["title"] = _default_title(channel, user_display)
+        db.update_session(
+            session_key,
+            peer_display=user_display,
+            title=meta["title"],
+        )
+    # Backfill peer dict from columns when missing from extra_meta
+    # (older rows).
+    if "peer" not in meta and meta.get("peer_id"):
+        meta["peer"] = {"kind": meta.get("peer_kind") or "direct",
+                        "id": meta["peer_id"]}
+    messages = db.get_messages(session_key)
     return meta, messages
 
 
 def _save_session(agent_id: str, session_key: str,
                   meta: dict[str, Any],
-                  messages: list[dict[str, Any]]) -> None:
-    folder = _session_path(agent_id, session_key)
-    folder.mkdir(parents=True, exist_ok=True)
-    _atomic_write_json(_meta_path(agent_id, session_key), meta)
-    _atomic_write_json(_messages_path(agent_id, session_key), messages)
+                  messages: list[dict[str, Any]],
+                  *, new_messages: list[dict[str, Any]] | None = None) -> None:
+    """Persist meta updates and append any new messages.
+
+    `new_messages` lets the caller skip re-writing the entire history
+    on every turn (the old JSON-file path had no choice). Pass the
+    just-ingested rows; if omitted we fall back to inferring "what's
+    new" by id-diff against the DB, which is slower but still correct."""
+    from openprogram.agent.session_db import default_db
+    db = default_db()
+
+    # Always touch the legacy dir so other code that drops sub-paths
+    # there (webui's `trees/`) stays happy.
+    _session_path(agent_id, session_key).mkdir(parents=True, exist_ok=True)
+
+    db.update_session(
+        session_key,
+        agent_id=agent_id,
+        title=meta.get("title"),
+        head_id=meta.get("head_id"),
+        peer_display=meta.get("peer_display"),
+        provider_name=meta.get("provider_name"),
+        model=meta.get("model"),
+    )
+    if new_messages is None:
+        existing_ids = {m["id"] for m in db.get_messages(session_key)}
+        new_messages = [m for m in messages if m.get("id") not in existing_ids]
+    if new_messages:
+        db.append_messages(session_key, new_messages)
 
 
 def _atomic_write_json(path: Path, payload: Any) -> None:
@@ -332,6 +403,45 @@ def _default_title(channel: str, user_display: str) -> str:
 # ---------------------------------------------------------------------------
 # Live Web UI push (best-effort)
 # ---------------------------------------------------------------------------
+
+def _broadcast_channel_turn(agent_id: str, session_key: str,
+                            user_msg: dict[str, Any],
+                            reply_msg: dict[str, Any]) -> None:
+    """Push the just-completed channel turn (user message + assistant
+    reply) to every connected WS client. The TUI watches for this event
+    and appends both messages to its transcript when the conv_id matches
+    the currently-viewed session — so a wechat user typing "hello"
+    shows up live in an attached `openprogram` TUI without a /resume
+    refresh. session_key is also the conv_id the TUI uses (same
+    `default_direct_<peer>` layout), no translation needed.
+    """
+    try:
+        import sys
+        srv = sys.modules.get("openprogram.webui.server")
+        if srv is None:
+            return
+        payload = {
+            "type": "channel_turn",
+            "data": {
+                "conv_id": session_key,
+                "agent_id": agent_id,
+                "user": {
+                    "id": user_msg.get("id"),
+                    "text": user_msg.get("content"),
+                    "peer_display": user_msg.get("peer_display"),
+                    "source": user_msg.get("source"),
+                },
+                "assistant": {
+                    "id": reply_msg.get("id"),
+                    "text": reply_msg.get("content"),
+                    "source": reply_msg.get("source"),
+                },
+            },
+        }
+        srv._broadcast(json.dumps(payload, default=str))
+    except Exception:
+        pass
+
 
 def _poke_live_webui(agent_id: str, session_key: str,
                      meta: dict[str, Any],
