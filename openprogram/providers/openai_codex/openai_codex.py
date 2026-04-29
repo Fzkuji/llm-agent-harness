@@ -39,6 +39,52 @@ def _is_retryable_error(status: int, error_text: str) -> bool:
     return bool(re.search(r"rate.?limit|overloaded|service.?unavailable|upstream.?connect|connection.?refused", error_text, re.IGNORECASE))
 
 
+def _resolve_codex_bearer_token(opts_api_key: str | None) -> str:
+    """Resolve the bearer token codex requests need to authorize.
+
+    Codex (ChatGPT subscription) auth has three valid sources:
+
+      1. Explicit ``api_key`` passed in opts — caller-supplied,
+         always wins.
+      2. The provider's env var (handled by ``get_env_api_key``) —
+         covers users on a bare API key with no OAuth flow.
+      3. AuthManager's OAuth credential pool — covers users who ran
+         ``codex login`` (or the OpenProgram OAuth wizard) so the
+         pool has an ``OAuthPayload.access_token`` ready.
+
+    Returns ``""`` when nothing yields a usable token, so the caller
+    can raise the same "No API key for provider" error as before.
+    Pre-fix: only sources 1 and 2 were checked, so OAuth users —
+    despite a populated ``~/.openprogram/auth/openai-codex/default.json``
+    — got the error the moment a stream started.
+    """
+    if opts_api_key:
+        return opts_api_key
+
+    from openprogram.providers.env_api_keys import get_env_api_key
+    env_key = get_env_api_key("openai-codex")
+    if env_key:
+        return env_key
+
+    # Try the OAuth pool. acquire_sync auto-refreshes if the token is
+    # within the skew window, so we never serve a stale access_token.
+    try:
+        from openprogram.auth.manager import get_manager
+        cred = get_manager().acquire_sync("openai-codex")
+        payload = getattr(cred, "payload", None)
+        token = getattr(payload, "access_token", None)
+        if token:
+            return token
+    except Exception:
+        # AuthManager raises when no provider config is registered or
+        # no credentials exist. Both are recoverable — fall through to
+        # the empty-string return so the caller's check fires the same
+        # actionable error message.
+        pass
+
+    return ""
+
+
 def stream_openai_codex_responses(
     model: "Model",
     context: "Context",
@@ -54,7 +100,6 @@ def stream_openai_codex_responses(
         except ImportError:
             raise ImportError("httpx is required: pip install httpx")
 
-        from openprogram.providers.env_api_keys import get_env_api_key
         from openprogram.providers.types import AssistantMessage, Usage
 
         output = AssistantMessage(
@@ -68,7 +113,9 @@ def stream_openai_codex_responses(
         )
 
         try:
-            api_key = opts.get("api_key") or get_env_api_key(model.provider) or ""
+            api_key = _resolve_codex_bearer_token(opts.get("api_key"))
+            if not api_key:
+                raise ValueError(f"No API key for provider: {model.provider}")
             base_url = getattr(model, "base_url", None) or _DEFAULT_CODEX_BASE_URL
             messages = convert_responses_messages(model, context, _CODEX_TOOL_CALL_PROVIDERS, include_system_prompt=False)
             request_body = _build_request_body(model, context, opts, messages)
@@ -147,8 +194,8 @@ def stream_simple_openai_codex_responses(
     options: "SimpleStreamOptions | None" = None,
 ) -> EventStream:
     """Simple interface for OpenAI Codex Responses streaming."""
-    from openprogram.providers.env_api_keys import get_env_api_key
-    api_key = (getattr(options, "api_key", None) if options else None) or get_env_api_key(model.provider)
+    explicit_key = getattr(options, "api_key", None) if options else None
+    api_key = _resolve_codex_bearer_token(explicit_key)
     if not api_key:
         raise ValueError(f"No API key for provider: {model.provider}")
 

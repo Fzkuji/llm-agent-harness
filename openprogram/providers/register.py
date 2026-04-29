@@ -70,6 +70,14 @@ def register_builtins() -> None:
             _StreamFnProvider(stream_openai_codex_responses, stream_simple_openai_codex_responses),
             source_id="builtin",
         )
+        # Side-effect import: registers the OAuth refresh fn with
+        # AuthManager so codex's stream funcs can acquire/refresh the
+        # ChatGPT OAuth access_token. Without this import,
+        # register_codex_auth() never runs and acquiring credentials
+        # via AuthManager raises ProviderConfigMissing — manifesting
+        # as "No API key for provider: openai-codex" the moment a
+        # channel-routed turn fires.
+        from openprogram.providers.openai_codex import auth_adapter as _codex_auth  # noqa: F401
     except ImportError:
         pass
 
