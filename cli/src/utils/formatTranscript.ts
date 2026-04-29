@@ -123,68 +123,106 @@ export function formatTurnText(turn: Turn): string {
   return formatSystemTurn(turn);
 }
 
-const fmtCount = (n?: number): string => (typeof n === 'number' ? String(n) : '—');
+// ──────────────────────────────────────────────────────────────────
+// Welcome banner — modeled on Claude Code's CondensedLogo:
+//   left:  small fixed logo block
+//   right: name+version, model line, tagline
+// We add a single row of "category counts" because OpenProgram users
+// want to see "what's loaded right now" without /status. Lists of
+// individual items go away — they were the source of the squeezed,
+// 30-line welcome the user complained about.
+// ──────────────────────────────────────────────────────────────────
 
-interface WelcomeColumn {
-  count: string;
-  label: string;
-  items: string[];
-}
+const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, '');
 
-const buildColumns = (stats: WelcomeStats): WelcomeColumn[] => {
-  const pickCount = (explicit?: number, listLen?: number): number | undefined => {
-    if (typeof explicit === 'number') return explicit;
-    if (typeof listLen === 'number') return listLen;
-    return undefined;
-  };
+const visualLength = (s: string): number => stripAnsi(s).length;
 
-  return [
-    {
-      count: fmtCount(pickCount(stats.programs_count, stats.top_programs?.length)),
-      label: 'programs',
-      items: (stats.top_programs ?? []).map((p) => p.name ?? '?').slice(0, 4),
-    },
-    {
-      count: fmtCount(pickCount(stats.agents_count, stats.top_agents?.length)),
-      label: 'agents',
-      items: (stats.top_agents ?? []).map((a) => a.name ?? a.id ?? '?').slice(0, 4),
-    },
-    {
-      count: fmtCount(pickCount(stats.conversations_count, stats.top_sessions?.length)),
-      label: 'sessions',
-      items: (stats.top_sessions ?? []).map((s) => s.title ?? s.id ?? '?').slice(0, 4),
-    },
-    {
-      count: fmtCount(pickCount(stats.tools_count, stats.top_tools?.length)),
-      label: 'tools',
-      items: (stats.top_tools ?? []).slice(0, 4),
-    },
-  ];
+const padRight = (s: string, width: number): string => {
+  const visible = visualLength(s);
+  if (visible >= width) return s;
+  return s + ' '.repeat(width - visible);
 };
 
 /**
- * Welcome banner for the inline REPL. Printed once at startup the
- * first time stats arrive. Lives in main-buffer / scrollback after
- * that — never reflows.
+ * Two-line ASCII logo. Sized to align with the four-line text block
+ * on the right (logo + blank top/bottom = 4 rows). Tweak only with
+ * monospace fonts in mind.
+ */
+const LOGO_LINES = [
+  '   ▗▄▖   ',
+  '  ▐▌ ▐▌  ',
+  '  ▐▌ ▐▌  ',
+  '   ▝▀▘   ',
+];
+
+interface WelcomeCounts {
+  programs?: number;
+  agents?: number;
+  sessions?: number;
+  tools?: number;
+  channels?: number;
+}
+
+const collectCounts = (stats: WelcomeStats): WelcomeCounts => {
+  const pick = (n?: number, fallback?: number): number | undefined => {
+    if (typeof n === 'number') return n;
+    if (typeof fallback === 'number') return fallback;
+    return undefined;
+  };
+  return {
+    programs: pick(stats.programs_count, stats.top_programs?.length),
+    agents: pick(stats.agents_count, stats.top_agents?.length),
+    sessions: pick(stats.conversations_count, stats.top_sessions?.length),
+    tools: pick(stats.tools_count, stats.top_tools?.length),
+    channels: pick(stats.channels_count, stats.top_channels?.length),
+  };
+};
+
+const formatCountsLine = (c: WelcomeCounts): string => {
+  const parts: string[] = [];
+  const push = (n: number | undefined, label: string): void => {
+    if (typeof n !== 'number') return;
+    parts.push(`${BOLD}${FG_ORANGE}${n}${RESET} ${FG_GRAY}${label}${RESET}`);
+  };
+  push(c.programs, 'programs');
+  push(c.agents, 'agents');
+  push(c.sessions, 'sessions');
+  push(c.tools, 'tools');
+  push(c.channels, 'channels');
+  return parts.join(`${FG_GRAY} · ${RESET}`);
+};
+
+/**
+ * Compact welcome banner for the inline REPL. Six lines total: top
+ * blank, two logo+name rows, model row, counts row, hint row,
+ * bottom blank. Designed to land in scrollback once and stay there
+ * — no reflow, no resize sensitivity, no stats list to outgrow the
+ * viewport.
+ *
+ * The function only takes stats (a plain object) and returns an
+ * ANSI string. Callers feed it into ``emitToScrollback`` / a plain
+ * ``console.log``. Trivial to swap visuals later — none of this is
+ * tied to ink components.
  */
 export function formatWelcomeText(stats: WelcomeStats): string {
-  const cols = buildColumns(stats);
   const agent = stats.agent;
-  const out: string[] = [];
+  const counts = collectCounts(stats);
 
-  out.push(`${BOLD}${FG_ORANGE}OpenProgram${RESET} ${DIM}· ${agent?.name ?? '—'} · ${agent?.model ?? '—'}${RESET}`);
-  out.push('');
+  const right: string[] = [
+    `${BOLD}${FG_ORANGE}OpenProgram${RESET}`,
+    `${FG_GRAY}${agent?.name ?? '—'} · ${agent?.model ?? '—'}${RESET}`,
+    formatCountsLine(counts),
+    `${DIM}Type a message and press enter, or type / to browse commands.${RESET}`,
+  ];
 
-  for (const c of cols) {
-    out.push(`${BOLD}${FG_ORANGE}${c.count}${RESET} ${BOLD}${c.label}${RESET}`);
-    for (const item of c.items) {
-      out.push(`  ${FG_GRAY}${truncate(item, 60)}${RESET}`);
-    }
-    if (c.items.length === 0) out.push(`  ${FG_GRAY}(empty)${RESET}`);
-    out.push('');
+  const logoWidth = LOGO_LINES[0]?.length ?? 8;
+  const out: string[] = [''];
+  for (let i = 0; i < LOGO_LINES.length; i++) {
+    const left = LOGO_LINES[i] ?? '';
+    const text = right[i] ?? '';
+    const styledLeft = `${FG_ORANGE}${padRight(left, logoWidth)}${RESET}`;
+    out.push(`${styledLeft}  ${text}`);
   }
-
-  out.push(`${DIM}Type a message and press enter, or type / to browse commands.${RESET}`);
   out.push('');
-  return out.join('\n');
+  return out.join('\n') + '\n';
 }
