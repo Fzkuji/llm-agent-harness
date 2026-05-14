@@ -622,12 +622,12 @@ const ThinkingEffortPill = React.forwardRef<
   );
   const maxIndex = Math.max(0, options.length - 1);
   // Lightning size scales linearly with effort: from 10px at the
-  // `off` end to 22px at `xhigh`. A single bolt rides on the thumb
+  // `off` end to 18px at `xhigh`. A single bolt rides on the thumb
   // — its position tells "where on the scale" and its size tells
   // "how much effort" at a glance.
   const lightningSize =
     maxIndex > 0
-      ? Math.round(10 + (valueIndex / maxIndex) * 12)
+      ? Math.round(10 + (valueIndex / maxIndex) * 8)
       : 10;
   // Effort-level tint for the COLLAPSED pill. Ramps from a faint
   // bright-white wash at `off` (just barely lifting off the panel
