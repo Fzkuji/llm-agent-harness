@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+from contextvars import ContextVar
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Optional
@@ -488,6 +489,17 @@ def search_across_sessions(db_path: str | Path, query: str, *, limit: int = 50) 
             (query, limit),
         ).fetchall()
     return [(r["session_id"], r["node_id"]) for r in rows]
+
+
+# The GraphStore the dispatcher installed for this turn. Deep code
+# (Runtime.exec, ask_user) reads it to write to the SQLite DAG without
+# threading a parameter through every layer. Default None = standalone
+# (no persistence). Use Python's ContextVar API directly:
+#   ``token = _store.set(store)`` to install, ``_store.reset(token)``
+#   to tear down, ``_store.get()`` to read.
+_store: ContextVar[Optional["GraphStore"]] = ContextVar(
+    "_store", default=None,
+)
 
 
 __all__ = [

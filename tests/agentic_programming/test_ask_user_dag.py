@@ -1,5 +1,5 @@
-"""ask_user records a user-role Call in the DAG when a Runtime store
-is attached.
+"""ask_user records a user-role Call in the DAG when ``_store`` is
+installed.
 
 DAG modeling:
   role = user            (callee — the human producing the answer)
@@ -8,8 +8,8 @@ DAG modeling:
   called_by = enclosing  (the @agentic_function or LLM that asked)
   metadata.status        "awaiting" → "answered" / "unanswered"
 
-When no Runtime / store is attached, ask_user still works via the
-global handler / TTY — DAG persistence is purely additive.
+When no store is installed, ask_user still works via the global
+handler / TTY — DAG persistence is purely additive.
 """
 
 from __future__ import annotations
@@ -19,28 +19,25 @@ from contextlib import contextmanager
 
 import pytest
 
-from openprogram.agentic_programming.runtime import Runtime
-from openprogram.agentic_programming.function import (
-    _current_runtime, _current_function_frame,
-)
-from openprogram.context.storage import GraphStore, init_db
+from openprogram.agentic_programming.function import _call_id
+from openprogram.context.storage import GraphStore, init_db, _store as _store_var
 from openprogram.programs.functions.buildin.ask_user import (
     ask_user, set_ask_user,
 )
 
 
 @pytest.fixture
-def store(tmp_path: Path) -> GraphStore:
+def store(tmp_path: Path):
+    """GraphStore installed into ``_store`` for the test's duration."""
     db = tmp_path / "x.sqlite"
     init_db(db)
     s = GraphStore(db, "s1")
     s.create_session_row()
-    return s
-
-
-@pytest.fixture
-def rt() -> Runtime:
-    return Runtime(call=lambda *a, **kw: "", model="dummy")
+    token = _store_var.set(s)
+    try:
+        yield s
+    finally:
+        _store_var.reset(token)
 
 
 @contextmanager
@@ -58,36 +55,26 @@ def _install_handler(handler):
 
 
 @contextmanager
-def _install_runtime(rt):
-    token = _current_runtime.set(rt)
-    try:
-        yield
-    finally:
-        _current_runtime.reset(token)
-
-
-@contextmanager
 def _install_frame(pending_id):
-    token = _current_function_frame.set(pending_id)
+    token = _call_id.set(pending_id)
     try:
         yield
     finally:
-        _current_function_frame.reset(token)
+        _call_id.reset(token)
 
 
 # ── No store: still works, no DAG write ─────────────────────────────
 
 
-def test_ask_user_without_store_works_via_handler(rt):
-    """No store attached → handler still answers, nothing written."""
-    with _install_runtime(rt), _install_handler(lambda q: "no-store answer"):
+def test_ask_user_without_store_works_via_handler():
+    """No store installed → handler still answers, nothing written."""
+    with _install_handler(lambda q: "no-store answer"):
         ans = ask_user("how are you?")
     assert ans == "no-store answer"
-    assert rt.head_id is None      # no DAG write
 
 
-def test_ask_user_no_runtime_at_all(rt):
-    """Truly standalone: no runtime in ContextVar, just global handler."""
+def test_ask_user_no_store_at_all():
+    """Truly standalone: no store in ContextVar, just global handler."""
     with _install_handler(lambda q: "standalone answer"):
         ans = ask_user("hi")
     assert ans == "standalone answer"
@@ -96,11 +83,10 @@ def test_ask_user_no_runtime_at_all(rt):
 # ── With store: full lifecycle ──────────────────────────────────────
 
 
-def test_ask_user_records_user_call_with_question_and_answer(rt, store):
-    """Attached store + handler: a user-role Call lands with
+def test_ask_user_records_user_call_with_question_and_answer(store):
+    """Installed store + handler: a user-role Call lands with
     input.question = the question, output = the answer."""
-    rt.attach_store(store)
-    with _install_runtime(rt), _install_handler(lambda q: f"answered: {q}"):
+    with _install_handler(lambda q: f"answered: {q}"):
         ans = ask_user("weather?")
     assert ans == "answered: weather?"
 
@@ -114,22 +100,19 @@ def test_ask_user_records_user_call_with_question_and_answer(rt, store):
     assert n.metadata.get("status") == "answered"
 
 
-def test_ask_user_called_by_set_to_frame_when_inside_function(rt, store):
+def test_ask_user_called_by_set_to_frame_when_inside_function(store):
     """Inside an @agentic_function frame, the placeholder Call's
     called_by points at the enclosing function's pending id."""
-    rt.attach_store(store)
-    with _install_runtime(rt), _install_handler(lambda q: "ok"), \
-            _install_frame("plan_pending_id"):
+    with _install_handler(lambda q: "ok"), _install_frame("plan_pending_id"):
         ask_user("clarify?")
     g = store.load()
     n = next(x for x in g if x.is_user())
     assert n.called_by == "plan_pending_id"
 
 
-def test_ask_user_called_by_empty_when_top_level(rt, store):
+def test_ask_user_called_by_empty_when_top_level(store):
     """Outside any @agentic_function frame → called_by is empty."""
-    rt.attach_store(store)
-    with _install_runtime(rt), _install_handler(lambda q: "yes"):
+    with _install_handler(lambda q: "yes"):
         ask_user("global question")
     g = store.load()
     n = next(x for x in g if x.is_user())
@@ -139,10 +122,9 @@ def test_ask_user_called_by_empty_when_top_level(rt, store):
 # ── Status transitions ────────────────────────────────────────────
 
 
-def test_ask_user_status_awaiting_then_answered(rt, store):
+def test_ask_user_status_awaiting_then_answered(store):
     """During the handler call, the node has status='awaiting'; after
     the handler returns, status flips to 'answered'."""
-    rt.attach_store(store)
     snapshot_during: list = []
 
     def _slow_handler(q):
@@ -155,7 +137,7 @@ def test_ask_user_status_awaiting_then_answered(rt, store):
                 )
         return "final answer"
 
-    with _install_runtime(rt), _install_handler(_slow_handler):
+    with _install_handler(_slow_handler):
         ask_user("anything?")
 
     # Mid-handler: input had the question, output None, status awaiting
@@ -172,11 +154,10 @@ def test_ask_user_status_awaiting_then_answered(rt, store):
     assert n.metadata.get("status") == "answered"
 
 
-def test_ask_user_unanswered_when_handler_returns_none(rt, store):
+def test_ask_user_unanswered_when_handler_returns_none(store):
     """status='unanswered' covers the no-answer outcome (handler
     returned None / empty)."""
-    rt.attach_store(store)
-    with _install_runtime(rt), _install_handler(lambda q: None):
+    with _install_handler(lambda q: None):
         ans = ask_user("noanswer?")
     assert ans is None
     g = store.load()
@@ -187,18 +168,17 @@ def test_ask_user_unanswered_when_handler_returns_none(rt, store):
 # ── Distinguishes from spontaneous user message ────────────────────
 
 
-def test_ask_user_call_has_input_not_none_unlike_spontaneous_msg(rt, store):
+def test_ask_user_call_has_input_not_none_unlike_spontaneous_msg(store):
     """A spontaneous user message has input=None; an ask_user response
     has input={"question": ...}. That difference is the DAG-level
     distinction between the two kinds of user Call."""
-    rt.attach_store(store)
+    from openprogram.context.nodes import Call, ROLE_USER
 
     # Spontaneous: dispatcher writes this with no input
-    from openprogram.context.nodes import Call, ROLE_USER
-    rt.append_node(Call(role=ROLE_USER, output="hi", input=None))
+    store.append(Call(role=ROLE_USER, output="hi", input=None))
 
     # Provoked by ask_user
-    with _install_runtime(rt), _install_handler(lambda q: "yes"):
+    with _install_handler(lambda q: "yes"):
         ask_user("really?")
 
     g = store.load()

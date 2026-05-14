@@ -139,14 +139,6 @@ class Runtime:
         # prompt_cache_key (Codex) so repeat prefixes hit the cache.
         self.session_id = f"op-{_uuid.uuid4().hex[:16]}"
 
-        # DAG write target. dispatcher (or any caller managing a real
-        # session) installs these at turn entry so every exec/agentic
-        # function in the call chain appends nodes to the same DAG.
-        # When None, the runtime is "standalone" — no persistence, no
-        # node tracking. @agentic_function and exec stay functional.
-        self.store = None        # GraphStore | None
-        self.head_id = None      # str | None — last appended node id
-
         # Resolve "provider:model_id" form against the pi-ai model registry.
         self.api_model = None
         if call is None and isinstance(model, str) and ":" in model:
@@ -215,110 +207,38 @@ class Runtime:
             return True
         return type(self)._call is not Runtime._call
 
-    # --- DAG node tracking ---
-
-    def attach_store(self, store, *, head_id=None) -> None:
-        """Install a GraphStore as this runtime's DAG write target.
-
-        Called by the dispatcher at turn entry. After this call, every
-        ``append_node()`` (from runtime.exec or @agentic_function
-        wrappers) persists to ``store`` and advances ``head_id``.
-
-        Args:
-            store: a GraphStore (or anything with ``append(node)``).
-            head_id: the last existing node id in the DAG (so the first
-                     node appended this turn gets the right predecessor).
-                     Pass session.head_id from SessionDB.
-        """
-        self.store = store
-        self.head_id = head_id
-
-    def detach_store(self) -> str | None:
-        """Release the DAG store. Returns the final head_id so the
-        dispatcher can persist it back to the session row.
-        """
-        final_head = self.head_id
-        self.store = None
-        self.head_id = None
-        return final_head
-
-    def append_node(self, node) -> None:
-        """Append a node to the attached DAG and advance head_id.
-
-        ``store.append()`` assigns ``node.seq``. We track the most
-        recently appended id so subsequent @agentic_function entries
-        / exit-time code Calls can use it as their ``called_by``.
-
-        No-op when no store is attached — @agentic_function /
-        runtime.exec also work in standalone scripts without persistence.
-        """
-        if self.store is None:
-            return
-        self.store.append(node)
-        self.head_id = node.id
-
-    def update_node(self, node_id, **fields) -> None:
-        """Update fields on an already-appended node. Used by the
-        @agentic_function exit path to fill in ``output`` / ``status``
-        on the placeholder code Call that was appended at entry.
-
-        No-op when no store is attached, or when persistence fails —
-        DAG bookkeeping must never break the user's function call.
-        """
-        if self.store is None:
-            return
-        try:
-            self.store.update(node_id, **fields)
-        except Exception:
-            pass
-
     def _render_history_messages(self, content) -> Optional[list]:
         """Build the provider message list for an in-progress exec()
         from the DAG.
 
-        Source-of-truth resolution:
-          1. ``openprogram.context.active.current()`` — set by the
-             dispatcher at turn entry; this is the canonical path.
-          2. ``self.store`` — legacy: ``runtime.attach_store`` set by
-             the dispatcher in parallel with active. Same data, but
-             routed via the Runtime instance.
-          3. ``None`` — no DAG state available; fall back to the
-             tree-Context render path.
+        Source of truth: the ``_store`` ContextVar set by the dispatcher
+        at turn entry (``openprogram.context.storage._store``). When no
+        store is installed (standalone scripts, tests without the
+        dispatcher), returns ``None`` so the caller falls back to the
+        tree-Context render path.
 
-        Active context is preferred because it keeps an in-memory
-        graph alongside the store (so we don't reload from SQLite
-        on every exec), and because its frame stack is the new home
-        for ``@agentic_function`` bookkeeping.
-
-        Algorithm (regardless of source):
-          1. Take the graph snapshot + current frame.
-          2. Resolve frame_entry_seq + render_range from the frame.
+        Algorithm:
+          1. Load the DAG snapshot from the store.
+          2. Read the enclosing ``@agentic_function`` call id from
+             ``_call_id`` ContextVar; pull its node from the graph to
+             get seq + render_range.
           3. Compute reads → render pi-ai messages.
           4. Append a fresh UserMessage built from ``content``.
         """
-        from openprogram.context import active as _ac
+        from openprogram.context.storage import _store
 
-        active = _ac.current()
-        if active is not None:
-            graph = active.graph
-            frame = _ac.current_frame()
-            frame_node_id = frame.pending_call_id if frame else None
-        elif self.store is not None:
-            try:
-                from openprogram.agentic_programming.function import (
-                    _current_function_frame,
-                )
-                graph = self.store.load()
-                frame_node_id = _current_function_frame.get(None)
-            except Exception:
-                return None
-        else:
+        store = _store.get()
+        if store is None:
             return None
 
         try:
             from openprogram.context.nodes import compute_reads
             from openprogram.context.render import render_dag_messages
             from openprogram.providers.types import UserMessage, TextContent
+            from openprogram.agentic_programming.function import _call_id
+
+            graph = store.load()
+            frame_node_id = _call_id.get()
 
             frame_entry_seq = -1
             render_range = None
@@ -371,47 +291,37 @@ class Runtime:
     ) -> None:
         """Append an llm-role Call after a successful provider call.
 
-        Resolution mirrors ``_render_history_messages``:
-        prefer ``active.current()`` and write via ``active.append_node``;
-        fall back to ``self.append_node`` when no active context is
-        installed (standalone scripts). No-op when neither is wired.
+        Writes to the GraphStore the dispatcher installed in ``_store``;
+        ``called_by`` comes from the enclosing ``@agentic_function``
+        invocation via ``_call_id``. No-op when no store is installed
+        (standalone scripts).
 
         ``reads`` is intentionally left empty for now — the prompt
         contents are still composed by the legacy ``render_context``
         path. Once prompts are DAG-driven this will carry the read ids.
         """
         try:
-            from openprogram.context import active as _ac
+            from openprogram.context.storage import _store
             from openprogram.context.nodes import Call, ROLE_LLM
-            from openprogram.agentic_programming.function import (
-                _current_function_frame,
-            )
+            from openprogram.agentic_programming.function import _call_id
 
-            active = _ac.current()
-            if active is None and self.store is None:
+            store = _store.get()
+            if store is None:
                 return
 
-            active_frame = _ac.current_frame()
-            caller_id = (
-                active_frame.pending_call_id if active_frame is not None
-                else (_current_function_frame.get(None) or "")
-            )
             node = Call(
                 role=ROLE_LLM,
                 name=model or self.model or "",
                 input=({"system": system_prompt} if system_prompt else None),
                 output=reply,
                 reads=[],
-                called_by=caller_id,
+                called_by=_call_id.get() or "",
                 metadata=(
                     {"prompt_text": content_text[:8000]}
                     if content_text else {}
                 ),
             )
-            if active is not None:
-                _ac.append_node(node)
-            else:
-                self.append_node(node)
+            store.append(node)
         except Exception:
             # DAG bookkeeping failure must not break the LLM call.
             pass

@@ -32,13 +32,14 @@ from openprogram.agentic_programming.events import _emit_event
 # Entry-point functions auto-create a runtime; child functions inherit it.
 _current_runtime: ContextVar = ContextVar('_current_runtime', default=None)
 
-# pending_id of the @agentic_function currently being executed in this
-# task. Single-slot ContextVar — Python set/reset gives us stack semantics
-# automatically: each wrapper sets at entry, the saved token is reset at
-# exit which restores the previous (caller's) value. ``runtime.exec``
-# reads this to stamp ModelCall.called_by with the enclosing function.
-_current_function_frame: ContextVar = ContextVar(
-    '_current_function_frame', default=None,
+# DAG call_id of the @agentic_function currently being executed in this
+# task. The decorator sets it at entry; Python's ContextVar set/reset
+# token gives us scope-bound semantics for free, so nested invocations
+# automatically restore the outer caller's id on exit. Downstream code
+# (``Runtime.exec``, ``ask_user``) reads this to stamp the
+# ``called_by`` field on whatever DAG node it appends.
+_call_id: ContextVar[Optional[str]] = ContextVar(
+    '_call_id', default=None,
 )
 
 # Parameter names that receive the runtime injection
@@ -90,13 +91,11 @@ _registry: dict[str, "agentic_function"] = {}
 
 def _append_function_call_entry(
     *,
-    runtime,
     pending_id: str,
     function_name: str,
     arguments: dict,
     expose: str,
     render_range,
-    entry_head,
     started_at,
 ) -> None:
     """Append a placeholder code Call at @agentic_function entry.
@@ -105,18 +104,20 @@ def _append_function_call_entry(
     ``metadata.status='running'``. The matching
     :func:`_update_function_call_exit` fills these in at exit.
 
-    ``render_range`` is stamped into metadata so the runtime's
-    ``compute_reads`` (which reads frame settings off the in-DAG code
-    Call) can apply depth / siblings limits without needing a separate
-    in-memory frame object.
+    ``render_range`` is stamped into metadata so ``compute_reads``
+    (which reads frame settings off the in-DAG code Call) can apply
+    depth / siblings limits without needing a separate in-memory frame.
 
     No-op when:
-      - the active runtime has no DAG store attached (standalone)
+      - no ``_store`` is installed (standalone scripts / tests)
       - ``expose='hidden'`` (caller wants no trace in the DAG)
     """
-    if runtime is None or getattr(runtime, "store", None) is None:
-        return
     if expose == "hidden":
+        return
+
+    from openprogram.context.storage import _store
+    store = _store.get()
+    if store is None:
         return
 
     from openprogram.context.nodes import Call, ROLE_CODE
@@ -134,11 +135,16 @@ def _append_function_call_entry(
         name=function_name,
         input=_sanitize_function_args(arguments or {}),
         output=None,
-        called_by=entry_head or "",
+        # ``called_by`` is the logical caller — the @agentic_function
+        # whose body is the one invoking us. ``_call_id`` is set by
+        # the outer wrapper before we run; reading it now gives us
+        # the right ancestor. Empty string when this is a top-level
+        # call (no enclosing @agentic_function on the call stack).
+        called_by=_call_id.get() or "",
         metadata=meta,
     )
     try:
-        runtime.append_node(node)
+        store.append(node)
     except Exception:
         # DAG persistence failure must never break the user's function call.
         pass
@@ -146,7 +152,6 @@ def _append_function_call_entry(
 
 def _update_function_call_exit(
     *,
-    runtime,
     pending_id: str,
     output,
     error,
@@ -159,9 +164,12 @@ def _update_function_call_exit(
 
     Mirror of :func:`_append_function_call_entry` — same no-op rules.
     """
-    if runtime is None or getattr(runtime, "store", None) is None:
-        return
     if expose == "hidden":
+        return
+
+    from openprogram.context.storage import _store
+    store = _store.get()
+    if store is None:
         return
 
     duration = None
@@ -173,14 +181,17 @@ def _update_function_call_exit(
     else:
         result_payload = output
 
-    runtime.update_node(
-        pending_id,
-        output=result_payload,
-        metadata={
-            "status": status,
-            "duration_seconds": duration,
-        },
-    )
+    try:
+        store.update(
+            pending_id,
+            output=result_payload,
+            metadata={
+                "status": status,
+                "duration_seconds": duration,
+            },
+        )
+    except Exception:
+        pass
 
 
 def _sanitize_function_args(params: dict) -> dict:
@@ -441,42 +452,25 @@ class agentic_function:
             # append now (output=None placeholder) and update on exit.
             import uuid as _uuid
             _pending_call_id = _uuid.uuid4().hex[:12]
-            _rt_for_dag = _current_runtime.get(None)
-            # _rt_for_dag may be a sentinel ``object()`` from buildin
-            # functions whose default ``runtime=`` is a marker (e.g.
-            # ``_MISSING_RUNTIME`` in general_action / wait). Use getattr
-            # so we treat it the same as "no DAG store attached".
-            _entry_head = getattr(_rt_for_dag, "head_id", None)
             # Bind args ahead of the try block so the entry-time DAG
             # write has the real argument values.
             bound = sig.bind(*new_args, **new_kwargs)
             bound.apply_defaults()
             ctx.params = dict(bound.arguments)
+            # Append the placeholder code Call now (its ``called_by``
+            # picks up the enclosing @agentic_function via _call_id).
             _append_function_call_entry(
-                runtime=_rt_for_dag,
                 pending_id=_pending_call_id,
                 function_name=fn.__name__,
                 arguments=ctx.params,
                 expose=expose,
                 render_range=render_range,
-                entry_head=_entry_head,
                 started_at=ctx.start_time,
             )
-            # Push this function onto the frame stack so runtime.exec
-            # called from the body can stamp its ModelCall.called_by.
-            _frame_token = _current_function_frame.set(_pending_call_id)
-            # Mirror the frame into the ContextVar-scoped active
-            # context — readers migrating off ``_current_function_frame``
-            # (ask_user, runtime.exec render path) can already consult
-            # ``active.current_frame()`` without a behavior change here.
-            # No-op when no active context is installed (standalone).
-            from openprogram.context import active as _ac_mod
-            _active_frame = _ac_mod.push_frame(
-                name=fn.__name__,
-                pending_call_id=_pending_call_id,
-                expose=expose,
-                render_range=render_range,
-            )
+            # Then stamp ``_call_id`` so anything further down the call
+            # tree (rt.exec → ModelCall.called_by, ask_user → user
+            # Call.called_by) attributes its writes to this invocation.
+            _call_token = _call_id.set(_pending_call_id)
             try:
                 # Emit node_created inside the try block so any pre-invocation
                 # hook fired by the emit (e.g. pause → stop → CancelledError)
@@ -499,10 +493,9 @@ class agentic_function:
                 ctx.end_time = time.time()
                 _emit_event("node_completed", ctx)
                 # DAG exit: fill in output / status on the placeholder
-                # that was appended at entry. Update is no-op when no
-                # store was attached.
+                # that was appended at entry. No-op when no store is
+                # installed.
                 _update_function_call_exit(
-                    runtime=_rt_for_dag,
                     pending_id=_pending_call_id,
                     output=ctx.output,
                     error=ctx.error,
@@ -511,8 +504,7 @@ class agentic_function:
                     started_at=ctx.start_time,
                     ended_at=ctx.end_time,
                 )
-                _ac_mod.pop_frame(_active_frame)
-                _current_function_frame.reset(_frame_token)
+                _call_id.reset(_call_token)
                 _current_ctx.reset(ctx_token)
                 if runtime_token is not None:
                     _current_runtime.reset(runtime_token)
@@ -568,36 +560,21 @@ class agentic_function:
             # code Call now (output=None); exit handler fills it in.
             import uuid as _uuid
             _pending_call_id = _uuid.uuid4().hex[:12]
-            _rt_for_dag = _current_runtime.get(None)
-            # See sync wrapper above — buildin functions stash a sentinel
-            # ``object()`` in ``_current_runtime`` when the caller omits
-            # ``runtime=``; treat it like an unattached runtime.
-            _entry_head = getattr(_rt_for_dag, "head_id", None)
             bound = sig.bind(*new_args, **new_kwargs)
             bound.apply_defaults()
             ctx.params = dict(bound.arguments)
             _append_function_call_entry(
-                runtime=_rt_for_dag,
                 pending_id=_pending_call_id,
                 function_name=fn.__name__,
                 arguments=ctx.params,
                 expose=expose,
                 render_range=render_range,
-                entry_head=_entry_head,
                 started_at=ctx.start_time,
             )
-            # Push this function onto the frame stack so runtime.exec
-            # called from the body can stamp its ModelCall.called_by.
-            _frame_token = _current_function_frame.set(_pending_call_id)
-            # Mirror the frame into the ContextVar-scoped active
-            # context — see the async wrapper above for the rationale.
-            from openprogram.context import active as _ac_mod
-            _active_frame = _ac_mod.push_frame(
-                name=fn.__name__,
-                pending_call_id=_pending_call_id,
-                expose=expose,
-                render_range=render_range,
-            )
+            # ContextVar set/reset gives us scope-bound semantics for
+            # free — nested invocations restore the outer caller's id
+            # automatically on exit.
+            _call_token = _call_id.set(_pending_call_id)
             try:
                 # Emit node_created inside the try block so any pre-invocation
                 # hook fired by the emit (e.g. pause → stop → CancelledError)
@@ -622,7 +599,6 @@ class agentic_function:
                 _emit_event("node_completed", ctx)
                 # DAG exit: fill in output / status on the placeholder.
                 _update_function_call_exit(
-                    runtime=_rt_for_dag,
                     pending_id=_pending_call_id,
                     output=ctx.output,
                     error=ctx.error,
@@ -631,8 +607,7 @@ class agentic_function:
                     started_at=ctx.start_time,
                     ended_at=ctx.end_time,
                 )
-                _ac_mod.pop_frame(_active_frame)
-                _current_function_frame.reset(_frame_token)
+                _call_id.reset(_call_token)
                 _current_ctx.reset(ctx_token)
                 # Clean up runtime if we created it
                 if runtime_token is not None:

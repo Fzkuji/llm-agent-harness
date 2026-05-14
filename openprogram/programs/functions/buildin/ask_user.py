@@ -77,14 +77,14 @@ def ask_user(question: str) -> Optional[str]:
     （output=None，metadata.status="awaiting"），handler 返回后
     update output。跟用户主动发消息通过 ``input is not None`` 区分。
     """
-    pending_id, runtime = _begin_ask_user_node(question)
+    pending_id = _begin_ask_user_node(question)
 
     # 1. 全局 handler（给 WebUI / 后台服务用）
     with _ask_user_lock:
         handler = _ask_user_handler_global
     if handler is not None:
         answer = handler(question)
-        _finish_ask_user_node(runtime, pending_id, answer)
+        _finish_ask_user_node(pending_id, answer)
         return answer
 
     # 2. 终端输入（交互模式最后兜底）
@@ -93,10 +93,10 @@ def ask_user(question: str) -> Optional[str]:
             answer = input(f"[follow-up] {question}\n> ")
         except EOFError:
             answer = None
-        _finish_ask_user_node(runtime, pending_id, answer)
+        _finish_ask_user_node(pending_id, answer)
         return answer
 
-    _finish_ask_user_node(runtime, pending_id, None)
+    _finish_ask_user_node(pending_id, None)
     return None
 
 
@@ -105,55 +105,48 @@ def ask_user(question: str) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 
-def _begin_ask_user_node(question: str):
+def _begin_ask_user_node(question: str) -> Optional[str]:
     """Append a placeholder user-Call for an in-flight ask_user request.
 
-    Returns ``(pending_id, runtime)``. Both are None when no
-    GraphStore is attached (standalone scripts, tests without
-    dispatcher); finish-side then becomes a no-op too.
+    Returns the new node's id, or ``None`` when no GraphStore is
+    installed in ``_store`` (standalone scripts, tests without
+    dispatcher); the finish-side then becomes a no-op too.
     """
     try:
-        from openprogram.agentic_programming.function import (
-            _current_runtime, _current_function_frame,
-        )
-        from openprogram.context import active as _ac
+        from openprogram.context.storage import _store
         from openprogram.context.nodes import Call, ROLE_USER
+        from openprogram.agentic_programming.function import _call_id
     except Exception:
-        return None, None
+        return None
 
-    runtime = _current_runtime.get(None)
-    if runtime is None or getattr(runtime, "store", None) is None:
-        return None, runtime
+    store = _store.get()
+    if store is None:
+        return None
 
-    # Prefer the dispatcher-managed active context's frame stack;
-    # fall back to the legacy ContextVar if no active context was
-    # installed (standalone scripts, older tests that drive
-    # @agentic_function without the dispatcher wrapper).
-    active_frame = _ac.current_frame()
-    caller_id = (
-        active_frame.pending_call_id if active_frame is not None
-        else (_current_function_frame.get(None) or "")
-    )
     node = Call(
         role=ROLE_USER,
         input={"question": question},
         output=None,
-        called_by=caller_id,
+        called_by=_call_id.get() or "",
         metadata={"status": "awaiting"},
     )
     try:
-        runtime.append_node(node)
-        return node.id, runtime
+        store.append(node)
+        return node.id
     except Exception:
-        return None, runtime
+        return None
 
 
-def _finish_ask_user_node(runtime, pending_id, answer) -> None:
+def _finish_ask_user_node(pending_id: Optional[str], answer) -> None:
     """Fill the placeholder Call's output with the user's answer."""
-    if pending_id is None or runtime is None:
+    if pending_id is None:
         return
     try:
-        runtime.update_node(
+        from openprogram.context.storage import _store
+        store = _store.get()
+        if store is None:
+            return
+        store.update(
             pending_id,
             output=answer,
             metadata={"status": "answered" if answer else "unanswered"},

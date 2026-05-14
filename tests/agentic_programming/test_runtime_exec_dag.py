@@ -14,7 +14,7 @@ import pytest
 
 from openprogram.agentic_programming.function import agentic_function
 from openprogram.agentic_programming.runtime import Runtime
-from openprogram.context.storage import GraphStore, init_db
+from openprogram.context.storage import GraphStore, init_db, _store as _store_var
 
 
 class _FakeRuntime(Runtime):
@@ -36,12 +36,19 @@ class _FakeRuntime(Runtime):
 
 
 @pytest.fixture
-def store(tmp_path: Path) -> GraphStore:
+def store(tmp_path: Path):
+    """Yield a GraphStore installed into the ``_store`` ContextVar for
+    the duration of the test, mirroring what the dispatcher does at
+    turn entry. Resets on teardown."""
     db = tmp_path / "x.sqlite"
     init_db(db)
     s = GraphStore(db, "s1")
     s.create_session_row()
-    return s
+    token = _store_var.set(s)
+    try:
+        yield s
+    finally:
+        _store_var.reset(token)
 
 
 # ── Top-level exec (no enclosing @agentic_function) ────────────────
@@ -49,7 +56,6 @@ def store(tmp_path: Path) -> GraphStore:
 
 def test_exec_without_function_frame_appends_llm_call(store):
     rt = _FakeRuntime(reply="hello back")
-    rt.attach_store(store)
 
     @agentic_function
     def chat(prompt, runtime=None):
@@ -69,7 +75,6 @@ def test_exec_without_function_frame_appends_llm_call(store):
 
 def test_exec_inside_function_stamps_called_by(store):
     rt = _FakeRuntime(reply="reply")
-    rt.attach_store(store)
 
     @agentic_function
     def plan(task, runtime=None):
@@ -88,7 +93,6 @@ def test_exec_inside_function_stamps_called_by(store):
 
 def test_exec_nested_calls_stamp_correct_frame(store):
     rt = _FakeRuntime(reply="r")
-    rt.attach_store(store)
 
     @agentic_function
     def inner(x, runtime=None):
@@ -114,12 +118,12 @@ def test_exec_nested_calls_stamp_correct_frame(store):
     assert callers == sorted([inner_id, outer_id])
 
 
-# ── No DAG side-effects when store isn't attached ─────────────────
+# ── No DAG side-effects when no store is installed ────────────────
 
 
 def test_exec_without_store_writes_nothing():
     rt = _FakeRuntime(reply="x")
-    # No attach_store — standalone mode.
+    # No ``_store.set(...)`` here — standalone mode.
 
     @agentic_function
     def f(runtime=None):
@@ -127,6 +131,3 @@ def test_exec_without_store_writes_nothing():
 
     result = f(runtime=rt)
     assert result == "x"
-    # Nothing to verify on disk because there is no store, but
-    # head_id should also not have been bumped.
-    assert rt.head_id is None

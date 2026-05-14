@@ -1,12 +1,14 @@
 """@agentic_function exit-time FunctionCall persistence.
 
 Verifies:
-  - When Runtime has a GraphStore attached, decorated function exits
-    cause a FunctionCall to be appended.
-  - When no store is attached (default), nothing is written — tree
-    Context behaviour is preserved.
-  - expose='hidden' suppresses the FunctionCall node.
-  - error path produces a node with status=error and result.error.
+  - When ``_store`` is installed, decorated function exits cause a
+    FunctionCall to be appended.
+  - When no store is installed, nothing is written — tree Context
+    behaviour is preserved.
+  - ``expose='hidden'`` suppresses the FunctionCall node.
+  - Error path produces a node with status=error and result.error.
+  - ``called_by`` reflects the logical caller (enclosing
+    @agentic_function), not chronological predecessor.
 """
 
 from __future__ import annotations
@@ -17,17 +19,21 @@ import pytest
 
 from openprogram.agentic_programming.function import agentic_function
 from openprogram.agentic_programming.runtime import Runtime
-from openprogram.context.nodes import FunctionCall
-from openprogram.context.storage import GraphStore, init_db
+from openprogram.context.storage import GraphStore, init_db, _store as _store_var
 
 
 @pytest.fixture
-def store(tmp_path: Path) -> GraphStore:
+def store(tmp_path: Path):
+    """GraphStore installed into ``_store`` for the test's duration."""
     db = tmp_path / "x.sqlite"
     init_db(db)
     s = GraphStore(db, "s1")
     s.create_session_row()
-    return s
+    token = _store_var.set(s)
+    try:
+        yield s
+    finally:
+        _store_var.reset(token)
 
 
 @pytest.fixture
@@ -39,8 +45,6 @@ def runtime() -> Runtime:
 
 
 def test_exit_appends_function_call_node(runtime, store):
-    runtime.attach_store(store)
-
     @agentic_function
     def add(a, b, runtime=None):
         return a + b
@@ -60,25 +64,22 @@ def test_exit_appends_function_call_node(runtime, store):
     assert fc.arguments["runtime"].startswith("<")
 
 
-def test_no_store_attached_means_no_dag_write(runtime):
+def test_no_store_installed_means_no_dag_write(runtime, tmp_path):
+    """Without an installed ``_store``, decorated functions still run
+    but no DAG nodes are written."""
     @agentic_function
     def hello(name, runtime=None):
         return f"hi {name}"
 
-    # No attach_store → standalone mode
+    # No store installed — decorated function runs normally.
     result = hello("world", runtime=runtime)
     assert result == "hi world"
-    # runtime.head_id stays None
-    assert runtime.head_id is None
-    assert runtime.store is None
 
 
 # ── expose semantics ─────────────────────────────────────────────
 
 
 def test_expose_hidden_skips_node(runtime, store):
-    runtime.attach_store(store)
-
     @agentic_function(expose="hidden")
     def secret(x, runtime=None):
         return x * 10
@@ -89,8 +90,6 @@ def test_expose_hidden_skips_node(runtime, store):
 
 
 def test_expose_full_recorded_in_metadata(runtime, store):
-    runtime.attach_store(store)
-
     @agentic_function(expose="full")
     def transparent(x, runtime=None):
         return x
@@ -105,8 +104,6 @@ def test_expose_full_recorded_in_metadata(runtime, store):
 
 
 def test_exception_records_error_node(runtime, store):
-    runtime.attach_store(store)
-
     @agentic_function
     def explode(runtime=None):
         raise RuntimeError("boom")
@@ -122,12 +119,10 @@ def test_exception_records_error_node(runtime, store):
     assert "boom" in fc.result["error"]
 
 
-# ── Nested calls: chain is preserved ─────────────────────────────
+# ── Nested calls: called_by is the logical caller ────────────────
 
 
 def test_nested_agentic_functions_chain_in_dag(runtime, store):
-    runtime.attach_store(store)
-
     @agentic_function
     def inner(x, runtime=None):
         return x + 1
@@ -148,18 +143,15 @@ def test_nested_agentic_functions_chain_in_dag(runtime, store):
     assert names.count("inner") == 2
     assert names.count("outer") == 1
 
-    # outer's FunctionCall called_by is whatever head_id was when
-    # outer was entered — should be empty (no prior nodes).
     outer_fc = next(n for n in fcs if n.function_name == "outer")
+    # Top-level call has no enclosing function
     assert outer_fc.called_by == ""
 
-    # Each inner's called_by is the head right before it started —
-    # the first inner had no prior nodes either (outer hadn't appended
-    # yet), but the second inner sees the first inner's FunctionCall id.
+    # Both inner calls are made from within outer's body → their
+    # logical caller is outer, regardless of chronological order.
     inner_fcs = [n for n in fcs if n.function_name == "inner"]
-    second_inner = inner_fcs[-1]  # appended last among inners
-    first_inner = inner_fcs[0]
-    assert second_inner.called_by == first_inner.id
+    for fc in inner_fcs:
+        assert fc.called_by == outer_fc.id
 
 
 # ── Entry-append / exit-update lifecycle ────────────────────────
@@ -169,7 +161,6 @@ def test_entry_appends_running_node_visible_mid_execution(runtime, store):
     """While the function is running, its placeholder should already be
     in the DAG with output=None / status='running' — observers can see
     in-flight calls."""
-    runtime.attach_store(store)
     seen_during_call: list = []
 
     @agentic_function
@@ -192,8 +183,6 @@ def test_entry_appends_running_node_visible_mid_execution(runtime, store):
 def test_exit_updates_output_in_place(runtime, store):
     """After the function returns, the same node's output gets filled
     (no second node) and status flips to 'success'."""
-    runtime.attach_store(store)
-
     @agentic_function
     def double(x, runtime=None):
         return x * 2
@@ -209,8 +198,6 @@ def test_exit_updates_output_in_place(runtime, store):
 
 
 def test_exception_updates_to_error_in_place(runtime, store):
-    runtime.attach_store(store)
-
     @agentic_function
     def explode(runtime=None):
         raise RuntimeError("boom")
@@ -230,9 +217,9 @@ def test_exception_updates_to_error_in_place(runtime, store):
 # ── Multi-call chronological ordering ────────────────────────────
 
 
-def test_predecessor_chain_chronological(runtime, store):
-    runtime.attach_store(store)
-
+def test_top_level_sibling_calls_have_empty_called_by(runtime, store):
+    """Two sibling top-level calls both have called_by="" because
+    neither has an enclosing @agentic_function on the call stack."""
     @agentic_function
     def one(runtime=None):
         return 1
@@ -251,5 +238,6 @@ def test_predecessor_chain_chronological(runtime, store):
     )
     assert fcs[0].function_name == "one"
     assert fcs[1].function_name == "two"
-    # Second's predecessor points at first.
-    assert fcs[1].called_by == fcs[0].id
+    # Both top-level → neither has a caller
+    assert fcs[0].called_by == ""
+    assert fcs[1].called_by == ""
