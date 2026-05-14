@@ -35,19 +35,11 @@
 }
 .sidebar.collapsed .sidebar-nav-label { display: none; }
 .sidebar.collapsed .sidebar-nav-action { display: none; }
-.sidebar.collapsed .sidebar-favorites { display: none; }
-.sidebar.collapsed .sidebar-conversations { display: none; }
-/* Footer: padding-based positioning — avatar slides from 16px to 5.5px (smooth) */
-.sidebar.collapsed .sidebar-footer {
-  margin-top: auto;
-  border-top-color: transparent;
-}
-.sidebar.collapsed .sidebar-user {
-  gap: 0;
-  /* center 37px avatar (content-box) in 48px: (48 - 37) / 2 = 5.5px */
-  padding: 0 5.5px;
-}
-.sidebar.collapsed .user-info { display: none; }
+/* `.sidebar.collapsed .sidebar-favorites/.sidebar-conversations { display: none }`
+   is now React conditional rendering: sidebar.tsx skips the
+   <SidebarSection /> when `!open`. The other `.sidebar.collapsed
+   .sidebar-footer/.sidebar-user/.user-info` overrides targeted legacy
+   classes that no longer exist (UserMenuFooter is React + module CSS). */
 
 /* React UserMenuFooter (portal-mounted into #userMenuFooterMount).
    The component uses CSS-module-scoped classnames which the legacy
@@ -68,21 +60,10 @@
    in a 48px column: (48 - 28)/2 = 10px). The label fades via
    opacity + width rather than `display: none` so it disappears
    in lockstep with the width transition. */
-/* Anchor footer to the sidebar's bottom-left corner with absolute
-   positioning. This is what eliminates the "avatar pops to middle
-   then slides left" jank: by leaving the flex flow, the footer no
-   longer reflows when conversations / favourites get `display: none`
-   on collapse, and the trigger's left padding stays at a fixed
-   pixel offset from the sidebar's left edge. As the sidebar's width
-   transitions 280 → 48 the avatar sits at x=10 in both states —
-   "left-aligned" when expanded, "centred" when collapsed (28px
-   avatar in a 48px column with 10px on each side). */
-#userMenuFooterMount {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  width: 100%;
-}
+/* `#userMenuFooterMount` was the legacy `<div id="userMenuFooterMount">`
+   placeholder AppShell used to portal the React UserMenuFooter into.
+   AppShell now renders UserMenuFooter directly inside Sidebar, so the
+   element no longer exists in the DOM and this rule is dead. */
 /* Kill the CSS-module footer's 8px horizontal padding so the avatar's
    x = trigger left padding only (10px). 28px avatar in 48px column
    then sits at 10/28/10 — properly centred. */
@@ -109,14 +90,10 @@
   margin: 0;
   pointer-events: none;
 }
-/* Reserve space at the bottom of the sidebar's flex flow for the
-   absolutely-positioned UserMenuFooter. Padding-bottom inside the
-   conv list lives in its scroll content (hidden until scrolling),
-   so the visible last item still sat under the absolute footer.
-   Putting margin-bottom on the last in-flow flex child shrinks the
-   flex item itself, so the visible bottom of the conv list ends
-   above where the absolute footer renders. */
-.sidebar > .sidebar-conversations { margin-bottom: 64px; }
+/* The bottom-margin reservation is gone — the React UserMenuFooter
+   uses `position: relative` + `margin-top: auto` (see
+   `user-menu-footer.module.css`), so it sits inside the flex flow and
+   the conv list doesn't need to leave room below it. */
 
 /* `.sidebar-header / .logo / .logo-img` moved to Tailwind utilities
    inline in `sidebar.tsx` (the collapsed-state `.sidebar.collapsed
@@ -150,60 +127,12 @@
 }
 .sidebar-panel-list::-webkit-scrollbar { display: none; }
 
-/* Hide native scrollbars on every scrollable area inside the sidebar.
-   `scrollbar.js` installs a custom overlay thumb on top. */
-.sidebar-fav-list,
-.sidebar-conv-list,
-.sidebar-conversations,
-.sidebar-favorites {
-  scrollbar-width: none;
-}
-.sidebar-fav-list::-webkit-scrollbar,
-.sidebar-conv-list::-webkit-scrollbar,
-.sidebar-conversations::-webkit-scrollbar,
-.sidebar-favorites::-webkit-scrollbar {
-  display: none;
-}
-
-/* Favorites section */
-.sidebar-favorites {
-  flex-shrink: 0;
-  padding: 16px 0 0;
-}
-.sidebar-favorites:empty,
-.sidebar-favorites.empty {
-  display: none;
-}
-.sidebar-fav-list {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  padding: 0 8px;
-  max-height: calc(32px * 4 + 3px);
-  overflow-y: auto;
-  overflow-x: hidden;
-}
-/* `.fav-item / .fav-icon / .fav-name` rules moved to Tailwind
-   utilities inline in `components/sidebar/favorites-list.tsx`. */
-
-/* Conversations section — Claude: padding-top 16px for group spacing */
-.sidebar-conversations {
-  flex: 1;
-  min-height: 0;
-  padding: 16px 0 0;
-  display: flex;
-  flex-direction: column;
-}
-.sidebar-conv-list {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  padding: 0 8px;
-  flex: 1;
-  min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-}
+/* `.sidebar-favorites / .sidebar-conversations / .sidebar-fav-list /
+   .sidebar-conv-list` outer-container layout + scrollbar-hide moved
+   to Tailwind utilities inline in `<SidebarSection />` (sidebar.tsx).
+   The `.empty` / `:empty` / `.sidebar.collapsed .sidebar-favorites`
+   hide-rules are now React conditional rendering driven by
+   `hasFavorites` + `open`. */
 
 /* Refresh button */
 .refresh-btn {
@@ -238,27 +167,16 @@
   opacity: 1 !important;
 }
 
-/* ===== Sidebar Footer — 1:1 Claude.ai layout ===== */
-/* Claude: button w-full, rounded-none, px-2, gap-12, padding 32px 16px → 64px tall */
-.sidebar-footer {
-  flex-shrink: 0;
-  margin-top: auto;
-  border-top: 1px solid var(--border);
-  cursor: pointer;
-  transition: background 75ms, border-top-color 0.15s ease;
-}
-.sidebar-footer:hover { background: var(--bg-hover); }
-.sidebar-user {
-  display: inline-flex;
-  align-items: center;
-  width: 100%;
-  height: 64px;
-  gap: 12px;
-  padding: 0 16px;
-  transition: gap 0.3s ease, padding 0.3s ease;
-}
-/* Avatar: 36px circle + 0.5px transparent border = 37px total */
-/* Claude: border-0.5 border-transparent group-hover:border-border-200 */
+/* ===== Legacy sidebar footer + avatar popup =====
+   `.sidebar-footer / .sidebar-user / .user-info / .user-name /
+   .user-subtitle / .user-menu / .user-menu-item / .user-menu-icon /
+   .user-menu-sep` are all from the legacy `_sidebar.html` template
+   that AppShell no longer injects. UserMenuFooter is a React
+   component with its own module CSS (`user-menu-footer.module.css`).
+   Rules deleted.
+
+   `.user-avatar` is still used by legacy chat.js for the user
+   message bubble avatar in the chat stream — keep it. */
 .user-avatar {
   box-sizing: content-box;
   width: 36px; height: 36px;
@@ -270,84 +188,5 @@
   font-size: 16px; font-weight: 530;
   flex-shrink: 0;
   transition: border-color 0.15s, opacity 0.15s;
-}
-.sidebar-footer:hover .user-avatar {
-  border-color: var(--border-light);
-  opacity: 0.9;
-}
-.user-info {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  flex: 1;
-  min-width: 0;
-  transition: opacity 0.15s ease-out;
-}
-.user-name {
-  display: block;
-  width: 100%;
-  font-size: 14px;
-  color: var(--text-primary);
-  font-weight: 510;
-  line-height: 20px;
-  text-align: start;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.user-subtitle {
-  display: block;
-  width: 100%;
-  font-size: 12px;
-  color: var(--text-secondary);
-  font-weight: 400;
-  line-height: 16px;
-  text-align: start;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* User Menu Popup */
-.user-menu {
-  display: none;
-  position: absolute;
-  left: 8px;
-  width: calc(var(--sidebar-width) - 16px);
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.32);
-  z-index: 1000;
-  padding: 6px;
-}
-.user-menu.open { display: block; }
-.user-menu-item {
-  padding: 6px 8px;
-  min-height: 32px;
-  font-size: 14px;
-  line-height: 20px;
-  color: var(--text-primary);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border-radius: 8px;
-  transition: background 75ms;
-  box-sizing: border-box;
-}
-a.user-menu-item { text-decoration: none; color: inherit; }
-.user-menu-item:hover { background: var(--bg-hover); color: var(--text-bright); }
-.user-menu-icon {
-  width: 20px; height: 20px;
-  display: flex; align-items: center; justify-content: center;
-  color: var(--text-secondary);
-  flex-shrink: 0;
-}
-.user-menu-item:hover .user-menu-icon { color: var(--text-primary); }
-.user-menu-sep {
-  height: 1px;
-  background: var(--border);
-  margin: 6px 8px;
 }
 
