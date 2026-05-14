@@ -22,16 +22,6 @@ const Slider = React.forwardRef<
   React.ElementRef<typeof SliderPrimitive.Root>,
   SliderProps
 >(({ className, stops, innerTicksOnly, ...props }, ref) => {
-  // Read the current step value so each tick can colour itself to
-  // match the segment it sits on (blue under the filled range, white
-  // on the unfilled track). For discrete sliders we use the `[idx]`
-  // shape; fall back to defaultValue / 0 just in case.
-  const currentValue = Array.isArray(props.value)
-    ? props.value[0] ?? 0
-    : Array.isArray(props.defaultValue)
-      ? props.defaultValue[0] ?? 0
-      : 0;
-
   return (
   <SliderPrimitive.Root
     ref={ref}
@@ -57,13 +47,12 @@ const Slider = React.forwardRef<
     {stops && stops > 1
       ? Array.from({ length: stops }).map((_, i) => {
           if (innerTicksOnly && (i === 0 || i === stops - 1)) return null;
-          // Ticks colour-match the segment they live on:
-          //   i  <  currentValue  →  under the blue range, paint blue.
-          //   i  >= currentValue  →  on the white track, paint bright.
-          // The tick at i === currentValue is covered by the thumb;
-          // grouping it with the unfilled side keeps the colour-flip
-          // happen the instant the thumb passes a stop.
-          const isFilled = i < currentValue;
+          // Ticks are painted in `text-bright` — the same hue as the
+          // unfilled track, so on the empty (`off`) side they melt
+          // into the line and don't appear as "floating dots on
+          // nothing". On the filled blue range they pop as bright
+          // notches that read as discrete stops — which is when the
+          // user actually needs the granularity hint.
           return (
           <span
             key={i}
@@ -76,7 +65,7 @@ const Slider = React.forwardRef<
             className={cn(
               "pointer-events-none absolute top-1/2 size-[6px] rounded-full",
               "-translate-x-1/2 -translate-y-1/2",
-              isFilled ? "bg-[var(--accent-blue)]" : "bg-text-bright",
+              "bg-text-bright",
             )}
             style={{ left: `calc(${i / (stops - 1)} * (100% - 14px) + 7px)` }}
             aria-hidden="true"
