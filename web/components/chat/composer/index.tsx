@@ -796,7 +796,7 @@ const ThinkingEffortPill = React.forwardRef<
                     generous and the ring frames the glyph cleanly. */}
                 <span
                   aria-hidden="true"
-                  className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-bg-hover border-2 border-[color-mix(in_srgb,var(--text-bright)_35%,transparent)] transition-[width,height] duration-150 ease-out"
+                  className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-bg-hover border-[3px] border-[color-mix(in_srgb,var(--text-bright)_40%,transparent)] transition-[width,height] duration-150 ease-out"
                   style={{
                     width: lightningSize + 8,
                     height: lightningSize + 8,
