@@ -304,60 +304,8 @@
   opacity: 0.75;
 }
 
-/* Conversation list — exact Claude.ai values */
-/* Claude: height 32, padding 6px 16px with -translate-x-2, radius 6px, font 12px, gap 1px */
-/* Effective: text at 16px from sidebar left = 8px container + 8px item padding */
-.conv-item {
-  padding: 6px 8px;
-  height: 32px;
-  min-height: 32px;
-  max-height: 32px;
-  box-sizing: border-box;
-  line-height: 20px;
-  cursor: pointer;
-  transition: background 0.3s;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 14px;
-  color: var(--text-primary);
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  position: relative;
-  border-radius: 6px;
-  margin: 0;
-}
-.conv-item .conv-title {
-  flex: 1;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  font-size: 14px;
-  line-height: 20px;
-}
-/* Claude.ai style: fade out right edge only on hover/focus so the delete
-   button doesn't collide with text. */
-.conv-item:hover .conv-title,
-.conv-item:focus-within .conv-title {
-  text-overflow: clip;
-  -webkit-mask-image: linear-gradient(to right, #000 78%, transparent 95%);
-  mask-image: linear-gradient(to right, #000 78%, transparent 95%);
-  -webkit-mask-size: 100% 100%;
-  mask-size: 100% 100%;
-}
-.conv-item .conv-del {
-  display: none; width: 20px; height: 20px;
-  font-size: 12px; border-radius: 4px; color: var(--text-muted);
-  align-items: center; justify-content: center; line-height: 1;
-  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
-}
-.conv-item:hover .conv-del { display: flex; }
-.conv-item .conv-del:hover { background: var(--accent-red); color: #fff; }
-
-
-.conv-item:hover { background: var(--bg-hover); color: var(--text-primary); }
-.conv-item.active { background: var(--bg-hover); color: var(--text-bright); }
+/* `.conv-item / .conv-title / .conv-del` rules moved to Tailwind
+   utilities inline in `components/sidebar/sessions-list.tsx`. */
 .conv-clear-all {
   padding: 6px 16px; font-size: 12px; color: var(--text-muted);
   cursor: pointer; text-align: center;

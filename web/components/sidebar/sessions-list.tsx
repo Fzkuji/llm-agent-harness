@@ -107,37 +107,92 @@ export function SessionsList() {
         const active = c.id === currentId;
         const label = labelFor(c);
         return (
-          <div
+          <ConvItem
             key={c.id}
-            className={"conv-item" + (active ? " active" : "")}
+            label={label}
+            active={active}
             onClick={() => switchTo(c.id)}
-            title={label}
-          >
-            <span className="conv-title">{label}</span>
-            <span
-              className="conv-del"
-              onClick={(e) => del(c.id, e)}
-              title="Delete"
-            >
-              <svg
-                width="10"
-                height="10"
-                viewBox="0 0 10 10"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              >
-                <line x1="2" y1="2" x2="8" y2="8" />
-                <line x1="8" y1="2" x2="2" y2="8" />
-              </svg>
-            </span>
-          </div>
+            onDelete={(e) => del(c.id, e)}
+          />
         );
       })}
       <div className={styles.clearAll} onClick={clearAll}>
         Clear all
       </div>
     </>
+  );
+}
+
+/* Single row in the conversation list. Mirrors the legacy
+   `.conv-item / .conv-title / .conv-del` triplet from 03-settings.css:
+   32px-tall row with a title that fades on the right on hover so the
+   absolutely-positioned delete button doesn't visually collide. */
+function ConvItem({
+  label,
+  active,
+  onClick,
+  onDelete,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+  onDelete: (e: React.MouseEvent) => void;
+}) {
+  // Pixel values are explicit (not `h-8`, `px-2`, etc.) because this
+  // project's `html { font-size: 14px }` makes Tailwind's rem-based
+  // scale 0.875× off — see the same note in FavoritesList.
+  const base =
+    "group relative flex h-[32px] shrink-0 cursor-pointer items-center" +
+    " gap-[12px] overflow-hidden rounded-[6px] px-[8px] py-[6px]" +
+    " text-fs-base leading-[20px] whitespace-nowrap" +
+    " transition-colors duration-300 hover:bg-bg-hover";
+  const colorCls = active
+    ? "bg-bg-hover text-text-bright"
+    : "text-text-primary";
+  // The legacy `.conv-item:hover .conv-title` rule swaps the
+  // text-overflow from ellipsis (rest) to clip + a fade-out gradient
+  // mask so the delete button has visual headroom. Express the same
+  // via group-hover arbitrary utilities — Tailwind has no built-in
+  // for `mask-image` gradients.
+  const maskOnHover =
+    "group-hover:[text-overflow:clip]" +
+    " group-hover:[-webkit-mask-image:linear-gradient(to_right,#000_78%,transparent_95%)]" +
+    " group-hover:[mask-image:linear-gradient(to_right,#000_78%,transparent_95%)]" +
+    " group-focus-within:[text-overflow:clip]" +
+    " group-focus-within:[-webkit-mask-image:linear-gradient(to_right,#000_78%,transparent_95%)]" +
+    " group-focus-within:[mask-image:linear-gradient(to_right,#000_78%,transparent_95%)]";
+  return (
+    <div
+      className={`${base} ${colorCls}`}
+      onClick={onClick}
+      title={label}
+    >
+      <span
+        className={`flex-1 overflow-hidden truncate text-fs-base leading-[20px] ${maskOnHover}`}
+      >
+        {label}
+      </span>
+      <span
+        className="absolute right-[6px] top-1/2 hidden size-[20px] -translate-y-1/2
+          items-center justify-center rounded-[4px] text-[12px]
+          leading-none text-text-muted
+          group-hover:flex hover:!bg-accent-red hover:!text-white"
+        onClick={onDelete}
+        title="Delete"
+      >
+        <svg
+          width="10"
+          height="10"
+          viewBox="0 0 10 10"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        >
+          <line x1="2" y1="2" x2="8" y2="8" />
+          <line x1="8" y1="2" x2="2" y2="8" />
+        </svg>
+      </span>
+    </div>
   );
 }
