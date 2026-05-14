@@ -783,15 +783,20 @@ const ThinkingEffortPill = React.forwardRef<
             // already announces value/min/max.
             thumb={
               <>
-                {/* Mask circle painted in the expanded pill's
-                    background colour — sits underneath the bolt and
-                    visually "cuts" the slider track + any tick at
-                    the thumb's position so the bolt doesn't have a
-                    line running through it. Sized 4px wider than
-                    the bolt so the cut feels generous, not flush. */}
+                {/* Hollow-looking ring around the bolt:
+                    - Interior is painted in `bg-bg-hover` (the
+                      expanded pill's own background), so it appears
+                      "transparent" against the surrounding pill and
+                      visually cuts the slider track + any tick at
+                      the thumb's position.
+                    - The 1px border in soft `text-bright` gives the
+                      shape a visible outline so it reads as a ring,
+                      not just an invisible mask.
+                    Sized 4px wider than the bolt so the cut feels
+                    generous and the ring frames the glyph cleanly. */}
                 <span
                   aria-hidden="true"
-                  className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-bg-hover transition-[width,height] duration-150 ease-out"
+                  className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-bg-hover border border-[color-mix(in_srgb,var(--text-bright)_25%,transparent)] transition-[width,height] duration-150 ease-out"
                   style={{
                     width: lightningSize + 4,
                     height: lightningSize + 4,
