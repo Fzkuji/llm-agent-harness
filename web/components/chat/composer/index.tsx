@@ -37,6 +37,7 @@ import { PlusMenuItem, ToolChip } from "./menu-pieces";
 import { type SlashCommand } from "./slash-commands";
 import { sendChatMessage } from "./legacy-send";
 import { Slider } from "@/components/ui/slider";
+import { Lightning } from "@phosphor-icons/react/dist/ssr";
 import { useFnFormState } from "./use-fn-form-state";
 import { useFnFormWrapper } from "./use-fn-form-wrapper";
 import { useSlashMenu } from "./use-slash-menu";
@@ -663,10 +664,21 @@ const ThinkingEffortPill = React.forwardRef<
             <span className="shrink-0 font-mono text-text-bright font-medium min-w-[56px]">
               {value}
             </span>
+            {/* Left icon — thin/small Lightning glyph = "less effort".
+                The size + opacity gap to the right icon gives a strong
+                directional cue (the user can read "from small toward
+                big" without needing a text label). */}
+            <Lightning
+              size={11}
+              weight="regular"
+              className="shrink-0 text-text-muted"
+              aria-label="less effort"
+            />
             <Slider
               min={0}
               max={maxIndex}
               step={1}
+              stops={options.length}
               value={[valueIndex]}
               onValueChange={(v) => {
                 const idx = v[0] ?? 0;
@@ -677,6 +689,13 @@ const ThinkingEffortPill = React.forwardRef<
               // would otherwise treat slider clicks as "expand again").
               onClick={(e) => e.stopPropagation()}
               className="flex-1"
+            />
+            {/* Right icon — fat/bold Lightning = "more effort". */}
+            <Lightning
+              size={17}
+              weight="fill"
+              className="shrink-0 text-text-primary"
+              aria-label="more effort"
             />
           </>
         ) : (
