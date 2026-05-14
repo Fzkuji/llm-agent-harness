@@ -10,45 +10,8 @@ async function loadProgramsMeta() {
 
 function renderFunctions() {
   // React owns this rendering now (components/sidebar/favorites-list.tsx).
-  // Early return so legacy callers (refreshFunctions, WS functions_list
-  // handler, etc.) don't fight the React reconciler by overwriting
-  // #favList with innerHTML strings.
-  return;
-}
-function _legacyRenderFunctions_deprecated() {
-  var container = document.getElementById('favList');
-  var section = document.getElementById('favSection');
-  if (!container || !section) return;
-
-  var favSet = new Set(programsMeta.favorites || []);
-  var favFiltered = availableFunctions.filter(function(f) { return favSet.has(f.name); });
-  var catOrder = ['app', 'generated', 'user', 'meta', 'builtin'];
-  var favFns = [];
-  for (var ci = 0; ci < catOrder.length; ci++) {
-    for (var fi = 0; fi < favFiltered.length; fi++) {
-      if ((favFiltered[fi].category || 'user') === catOrder[ci]) favFns.push(favFiltered[fi]);
-    }
-  }
-
-  if (favFns.length === 0) {
-    section.classList.add('empty');
-    container.innerHTML = '';
-    return;
-  }
-
-  section.classList.remove('empty');
-  var catIcons = { app: '\u{1F4E6}', meta: '\u{1F6E0}', builtin: '\u2699', generated: '\u2699', user: '\u270E' };
-  var html = '';
-  for (var i = 0; i < favFns.length; i++) {
-    var f = favFns[i];
-    var cat = f.category || 'user';
-    var icon = catIcons[cat] || '\u270E';
-    html += '<div class="fav-item" onclick="clickFunction(\'' + escAttr(f.name) + '\', \'' + escAttr(cat) + '\')" title="' + escAttr(f.description || '') + '">' +
-      '<span class="fav-icon">' + icon + '</span>' +
-      '<span class="fav-name">' + escHtml(f.name) + '</span>' +
-    '</div>';
-  }
-  container.innerHTML = html;
+  // Kept as a no-op so legacy callers (the WS `functions_list`
+  // handler, refreshFunctions stub above) don't crash if they fire.
 }
 
 // `refreshFunctions` was migrated to `web/lib/programs-actions.ts`

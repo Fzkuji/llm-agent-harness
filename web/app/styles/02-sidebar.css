@@ -347,42 +347,8 @@ div:has(> .memory-icon-wrap):hover .memory-icon-wrap svg {
   overflow-y: auto;
   overflow-x: hidden;
 }
-.fav-item {
-  padding: 6px 8px;
-  height: 32px;
-  min-height: 32px;
-  max-height: 32px;
-  flex-shrink: 0;
-  cursor: pointer;
-  transition: background 0.3s;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 14px;
-  color: var(--text-primary);
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  border-radius: 6px;
-  box-sizing: border-box;
-}
-.fav-item:hover { background: var(--bg-hover); }
-.fav-item .fav-icon {
-  font-size: 14px;
-  line-height: 1;
-  flex-shrink: 0;
-  width: 16px;
-  height: 16px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.fav-item .fav-name {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 14px;
-}
+/* `.fav-item / .fav-icon / .fav-name` rules moved to Tailwind
+   utilities inline in `components/sidebar/favorites-list.tsx`. */
 
 /* Conversations section — Claude: padding-top 16px for group spacing */
 .sidebar-conversations {

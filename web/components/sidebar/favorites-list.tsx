@@ -68,12 +68,25 @@ export function FavoritesList(): React.ReactElement | null {
         return (
           <div
             key={f.name}
-            className="fav-item"
+            // Migrated from the legacy `.fav-item` global class in
+            // 02-sidebar.css. Same visual: 32px-tall row, 6/8 padding,
+            // 12px gap between icon + name, rounded 6, hover lifts the
+            // background to `--bg-hover`.
+            className="flex h-8 cursor-pointer items-center gap-3
+              overflow-hidden truncate rounded-md px-2 py-1.5
+              text-fs-base text-text-primary
+              transition-colors duration-300 hover:bg-bg-hover"
             onClick={() => onClick(f.name, cat)}
             title={f.description || ""}
           >
-            <span className="fav-icon">{icon}</span>
-            <span className="fav-name">{f.name}</span>
+            <span
+              className="inline-flex size-4 flex-shrink-0 items-center
+                justify-center text-fs-base leading-none"
+              aria-hidden="true"
+            >
+              {icon}
+            </span>
+            <span className="flex-1 truncate text-fs-base">{f.name}</span>
           </div>
         );
       })}
