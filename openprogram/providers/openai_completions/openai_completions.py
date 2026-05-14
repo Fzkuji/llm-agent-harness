@@ -58,11 +58,31 @@ def _build_messages(context: Context, model: Model) -> list[dict[str, Any]]:
         role = "developer" if _uses_developer_role(model) else "system"
         result.append({"role": role, "content": context.system_prompt})
 
+    # claude-max-api-proxy (third-party npm package fronting the
+    # Claude Code OAuth session) does NOT understand the OpenAI
+    # multi-part content array — it stringifies the list with the
+    # JS default toString(), which means every user message arrives at
+    # Claude as ``[object Object]``. Detect this provider and flatten
+    # all-text content back to a plain string. Mixed content (images)
+    # is unsupported by this backend anyway, so we still emit the
+    # array form for it — proxy will fail loudly, which is the right
+    # behaviour.
+    _flatten_text_only = model.provider == "claude-code"
+
     for msg in context.messages:
         if isinstance(msg, UserMessage):
             if isinstance(msg.content, str):
                 result.append({"role": "user", "content": msg.content})
             else:
+                all_text = all(
+                    isinstance(b, TextContent) for b in msg.content
+                )
+                if _flatten_text_only and all_text:
+                    result.append({
+                        "role": "user",
+                        "content": "\n".join(b.text for b in msg.content),
+                    })
+                    continue
                 content_blocks: list[dict[str, Any]] = []
                 for block in msg.content:
                     if isinstance(block, TextContent):
