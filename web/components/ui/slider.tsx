@@ -21,8 +21,15 @@ const Slider = React.forwardRef<
 >(({ className, stops, ...props }, ref) => (
   <SliderPrimitive.Root
     ref={ref}
+    // `h-full` is the key for hit area: Radix accepts a click anywhere
+    // on the Root and snaps the thumb to its x — but if the Root has no
+    // explicit height it collapses to the 4px track and the user has
+    // to click that narrow strip. Making the Root fill its parent
+    // (32px tall inside the effort pill) gives an 8× more forgiving
+    // click target while the track + thumb stay visually 4px / 14px
+    // via `items-center`.
     className={cn(
-      "relative flex w-full touch-none select-none items-center",
+      "relative flex h-full w-full touch-none select-none items-center",
       className,
     )}
     {...props}
@@ -39,11 +46,14 @@ const Slider = React.forwardRef<
             // own thumb-position math (14px thumb, half-width 7).
             // `translate(-50%, -50%)` then pulls the tick's own centre
             // onto that point. `pointer-events-none` keeps the track
-            // click area uninterrupted.
+            // click area uninterrupted. Colour is `bg-bg-hover` — the
+            // same shade as the unfilled track, so ticks blend into
+            // the inactive stretch and only appear as faint dots on
+            // the accent-blue range stretch (no harsh black contrast).
             className={cn(
               "pointer-events-none absolute top-1/2 size-[6px] rounded-full",
               "-translate-x-1/2 -translate-y-1/2",
-              "bg-bg-tertiary",
+              "bg-bg-hover",
             )}
             style={{ left: `calc(${i / (stops - 1)} * (100% - 14px) + 7px)` }}
             aria-hidden="true"
