@@ -21,9 +21,7 @@ import traceback
 import uuid
 from typing import Any, Optional
 
-from openprogram.agentic_programming.context import Context
 from openprogram.programs.functions.buildin.ask_user import set_ask_user, ask_user
-from openprogram.agentic_programming.events import on_event, off_event
 from openprogram.agentic_programming.function import agentic_function
 from openprogram.agentic_programming.runtime import Runtime
 
@@ -41,7 +39,6 @@ from openprogram.webui._pause_stop import (
     register_cancel_event as _register_cancel_event,
     unregister_cancel_event as _unregister_cancel_event,
     has_active_runtime as _has_active_runtime,
-    mark_context_cancelled as _mark_context_cancelled,
     set_current_session_id as _set_current_session_id,
     reset_current_session_id as _reset_current_session_id,
 )
@@ -53,8 +50,6 @@ from openprogram.webui._stream_bridge import StreamBridge
 # ---------------------------------------------------------------------------
 # Shared state
 # ---------------------------------------------------------------------------
-_root_contexts: list[dict] = []
-_root_contexts_lock = threading.Lock()
 _ws_connections: list[Any] = []
 _ws_lock = threading.Lock()
 _loop: Optional[asyncio.AbstractEventLoop] = None
@@ -305,7 +300,7 @@ def _save_session(session_id: str):
             "session_id": getattr(runtime, "_session_id", None),
             "model": getattr(runtime, "model", None),
             "created_at": conv.get("created_at"),
-            "context_tree": root_ctx._to_dict() if root_ctx is not None else None,
+            "context_tree": None,
             "_chat_usage": conv.get("_chat_usage"),
             "_last_context_stats": conv.get("_last_context_stats"),
             "_titled": conv.get("_titled", False),
@@ -366,11 +361,7 @@ def _restore_sessions():
             if data is None:
                 continue
 
-            root_ctx = None
-            ct = data.get("context_tree")
-            if ct:
-                root_ctx = Context.from_dict(ct)
-                root_ctx.status = "idle"
+            root_ctx = None  # tree Context retired — UI now reads DAG nodes
 
             provider_name = data.get("provider_name")
             provider_override = data.get("provider_override")
@@ -537,51 +528,6 @@ def _list_providers() -> list[dict]:
     return result
 
 
-def _find_root(ctx_data: dict) -> Optional[dict]:
-    """Walk up to the root of a context path and find the stored root."""
-    path = ctx_data.get("path", "")
-    root_name = path.split("/")[0] if "/" in path else path
-    with _root_contexts_lock:
-        for r in _root_contexts:
-            if r.get("name") == root_name or r.get("path") == root_name:
-                return r
-    return None
-
-
-def _on_context_event(event_type: str, data: dict):
-    """Callback registered with the Context event system."""
-    _log(f"[event] {event_type}: {data.get('path', '?')} status={data.get('status', '?')}")
-    # If we're paused and a node just got created, wait
-    if event_type == "node_created":
-        wait_if_paused()
-        # When stop fires on a paused task, resume_execution() unblocks this
-        # thread. Raise immediately so the worker aborts at the nearest node
-        # boundary instead of running another full agentic call first.
-        from openprogram.webui._pause_stop import _current_session_id as _cv
-        _cid = _cv.get(None)
-        if _cid and _is_cancelled(_cid):
-            raise _CancelledError(f"Execution stopped by user (conv={_cid})")
-
-    # Store/update root contexts
-    path = data.get("path", "")
-    if "/" not in path:
-        # This is a root node
-        with _root_contexts_lock:
-            # Update existing or add new
-            found = False
-            for i, r in enumerate(_root_contexts):
-                if r.get("path") == path:
-                    _root_contexts[i] = data
-                    found = True
-                    break
-            if not found:
-                _root_contexts.append(data)
-
-    # Broadcast to all connected WebSocket clients
-    msg = json.dumps({"type": "event", "event": event_type, "data": data}, default=str)
-    _broadcast(msg)
-
-
 def _load_agent_session_meta(session_key: str) -> Optional[dict]:
     """Find a channel-bound agent session's meta.json by session_key.
 
@@ -629,28 +575,14 @@ def _log(text: str):
 
 
 def _get_full_tree() -> list[dict]:
-    """Return the recorded root-level context trees.
-
-    This runs from the webui request thread; ``_current_ctx`` lives
-    in the agent_loop's own thread/task and is None here. The
-    in-flight tree (when an agent is actively running) is mirrored
-    into ``_root_contexts`` via the event stream as nodes are
-    created/completed, so callers always see the same source of
-    truth regardless of who's currently mid-exec.
-    """
-    with _root_contexts_lock:
-        return list(_root_contexts)
+    """Tree visualisation now reads the DAG directly off SessionDB —
+    no in-process snapshot list anymore. Returns empty until the new
+    DAG-based viewer is wired in."""
+    return []
 
 
 def _cleanup_session_resources(session_id: str, conv: dict):
     """Clean up all resources associated with a deleted conversation."""
-    # Remove root_contexts entries — match by the conversation's root_context name
-    root_ctx = conv.get("root_context")
-    if root_ctx:
-        root_name = getattr(root_ctx, 'name', None) or (root_ctx.get("name") if isinstance(root_ctx, dict) else None)
-        if root_name:
-            with _root_contexts_lock:
-                _root_contexts[:] = [r for r in _root_contexts if r.get("name") != root_name]
     # Clean up follow-up queues and running tasks
     _follow_up_queues.pop(session_id, None)
     with _running_tasks_lock:
@@ -662,7 +594,6 @@ from openprogram.webui._functions import (
     _extract_input_meta,
     _extract_function_info,
     _extract_all_functions,
-    _get_last_ctx,
     _inject_runtime,
     _format_result,
     _find_node_by_path,
@@ -740,7 +671,7 @@ def _get_or_create_session(session_id: str = None,
                 "agent_id": resolved_agent,
                 "title": ((_sess or {}).get("title") if isinstance(_sess, dict) else None)
                          or "New conversation",
-                "root_context": Context(name="chat_session", status="idle", start_time=time.time()),
+                "root_context": None,  # tree Context retired
                 "runtime": None,          # created lazily on first message
                 "provider_name": ((_sess or {}).get("provider_name") if isinstance(_sess, dict) else None)
                                  or _inherit_prov,
@@ -1311,68 +1242,16 @@ def _execute_in_context(session_id: str, msg_id: str, action: str,
                     "_in_progress": True,
                 }
                 conv["function_trees"].append(_run_placeholder_tree)
-                _persist.init_tree(_agent_id, session_id, _run_func_idx, _run_attempt_idx)
                 _save_session(session_id)
 
-                # Register event-driven tree updates: append each node event
-                # to the JSONL file and broadcast a full partial tree.
-                def _tree_event_callback(event_type: str, data: dict):
-                    try:
-                        if event_type == "node_created":
-                            _persist.append_tree_event(
-                                _agent_id, session_id, _run_func_idx, _run_attempt_idx,
-                                {
-                                    "event": "enter",
-                                    "path": data.get("path"),
-                                    "name": data.get("name"),
-                                    "node_type": data.get("node_type", "function"),
-                                    "prompt": data.get("prompt", ""),
-                                    "params": data.get("params") or {},
-                                    "render": data.get("render", "summary"),
-                                    "compress": data.get("compress", False),
-                                    "ts": data.get("start_time"),
-                                },
-                            )
-                        elif event_type == "node_completed":
-                            _persist.append_tree_event(
-                                _agent_id, session_id, _run_func_idx, _run_attempt_idx,
-                                {
-                                    "event": "exit",
-                                    "path": data.get("path"),
-                                    "status": data.get("status"),
-                                    "output": data.get("output"),
-                                    "raw_reply": data.get("raw_reply"),
-                                    "attempts": data.get("attempts", []),
-                                    "error": data.get("error", ""),
-                                    "duration_ms": data.get("duration_ms"),
-                                    "ts": data.get("end_time"),
-                                },
-                            )
-
-                        ctx = _get_last_ctx(loaded_func)
-                        if ctx is None:
-                            ctx = getattr(loaded_func, 'context', None)
-                        if ctx is not None:
-                            partial_tree = ctx._to_dict()
-                            partial_tree["_in_progress"] = True
-                            if _run_func_idx < len(conv.get("function_trees", [])):
-                                conv["function_trees"][_run_func_idx] = partial_tree
-                            _broadcast_chat_response(session_id, msg_id, {
-                                "type": "tree_update",
-                                "tree": partial_tree,
-                                "function": func_name,
-                            })
-                    except Exception:
-                        pass
-
-                on_event(_tree_event_callback)
-
-                # Follow-up support + execution
-                with _web_follow_up(session_id, msg_id, func_name, tree_cb=_tree_event_callback):
+                # Live tree updates: retired together with the tree-Context
+                # event system. The function's DAG nodes are already written
+                # to SessionDB by the @agentic_function decorator; UI viewers
+                # query that directly.
+                with _web_follow_up(session_id, msg_id, func_name, tree_cb=None):
                     try:
                         result = _format_result(loaded_func(**call_kwargs), action=func_name)
                     finally:
-                        off_event(_tree_event_callback)
                         with _running_tasks_lock:
                             _running_tasks.pop(session_id, None)
                         _unregister_active_runtime(session_id)
@@ -1398,19 +1277,16 @@ def _execute_in_context(session_id: str, msg_id: str, action: str,
                 if _cum:
                     conv["_last_exec_cumulative_usage"] = _cum
 
-                # Get the context tree from @agentic_function's wrapper
-                func_ctx = _get_last_ctx(loaded_func)
-                if func_ctx:
-                    tree_dict = func_ctx._to_dict()
-                else:
-                    # Plain function without @agentic_function — build minimal tree
-                    tree_dict = {
-                        "path": func_name,
-                        "name": func_name,
-                        "params": {k: v for k, v in call_kwargs.items() if k != "runtime"},
-                        "output": result,
-                        "status": "success",
-                    }
+                # tree Context retired — surface the minimal tree dict the
+                # frontend currently expects. The execution's actual trace
+                # lives in SessionDB as DAG nodes and is fetched separately.
+                tree_dict = {
+                    "path": func_name,
+                    "name": func_name,
+                    "params": {k: v for k, v in call_kwargs.items() if k != "runtime"},
+                    "output": result,
+                    "status": "success",
+                }
 
                 # Replace the placeholder reserved before execution with the
                 # final tree (see `_run_func_idx` above).
@@ -1490,52 +1366,9 @@ def _execute_in_context(session_id: str, msg_id: str, action: str,
         # as cancelled and emit a "stopped" result instead of an error message.
         if _is_cancelled(session_id) or isinstance(e, _CancelledError):
             _clear_cancel(session_id)
-            ctx = None
-            _lf = locals().get("loaded_func")
-            if _lf is not None:
-                try:
-                    ctx = _get_last_ctx(_lf) or getattr(_lf, "context", None)
-                except Exception:
-                    ctx = None
-            if ctx is not None:
-                try:
-                    _mark_context_cancelled(ctx)
-                    # Persist synthetic exit records for nodes that were
-                    # running when cancellation fired. Without these, the
-                    # JSONL only holds enter events for those nodes, so
-                    # replay on page refresh shows them as running again.
-                    _fidx = locals().get("_run_func_idx")
-                    _aidx = locals().get("_run_attempt_idx")
-                    if _fidx is not None and _aidx is not None:
-                        def _walk(n):
-                            if n is None:
-                                return
-                            if (getattr(n, "status", "") == "error"
-                                    and getattr(n, "error", "") == "Cancelled by user"):
-                                _persist.append_tree_event(
-                                    _agent_id, session_id, _fidx, _aidx,
-                                    {
-                                        "event": "exit",
-                                        "path": n.path,
-                                        "status": "error",
-                                        "output": None,
-                                        "raw_reply": None,
-                                        "attempts": getattr(n, "attempts", []) or [],
-                                        "error": "Cancelled by user",
-                                        "duration_ms": getattr(n, "duration_ms", 0),
-                                        "ts": getattr(n, "end_time", time.time()),
-                                    },
-                                )
-                            for c in getattr(n, "children", []) or []:
-                                _walk(c)
-                        _walk(ctx)
-                    _broadcast_chat_response(session_id, msg_id, {
-                        "type": "tree_update",
-                        "tree": ctx._to_dict(),
-                        "function": func_name,
-                    })
-                except Exception:
-                    pass
+            # tree Context retired — no live tree to walk / persist on
+            # cancel. The DAG nodes the @agentic_function wrapper wrote
+            # before cancellation are already in SessionDB.
             try:
                 conv = _get_or_create_session(session_id)
                 now = time.time()
@@ -1557,7 +1390,7 @@ def _execute_in_context(session_id: str, msg_id: str, action: str,
                 "content": "Execution stopped by user.",
                 "function": func_name,
                 "cancelled": True,
-                "context_tree": ctx._to_dict() if ctx is not None else None,
+                "context_tree": None,
             })
             return
 
@@ -1921,9 +1754,6 @@ def start_server(port: int = 8109, open_browser: bool = True) -> threading.Threa
         print(f"Visualizer already running")
         return _server_thread
 
-    # Register our event callback (cheap)
-    on_event(_on_context_event)
-
     # Session restore is disk-bound and can take ~200–800ms on a busy
     # transcript dir. Defer it into a background thread so the uvicorn
     # socket comes up first — the CLI can connect while restore is still
@@ -1988,5 +1818,5 @@ def start_server(port: int = 8109, open_browser: bool = True) -> threading.Threa
 
 
 def stop_server():
-    """Clean up event callbacks."""
-    off_event(_on_context_event)
+    """Reserved for future shutdown hooks (no-op for now)."""
+    pass

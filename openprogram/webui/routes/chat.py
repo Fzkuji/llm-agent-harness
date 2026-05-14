@@ -65,7 +65,6 @@ def register(app):
     async def post_chat_branch(body: dict = None):
         """Fork a conversation at a specific message into a new conv."""
         from openprogram.webui import server as _s
-        from openprogram.agentic_programming.context import Context
         if body is None:
             return JSONResponse(content={"error": "no body"}, status_code=400)
         session_id = body.get("session_id")
@@ -91,9 +90,7 @@ def register(app):
             _s._sessions[new_id] = {
                 "id": new_id,
                 "title": new_title,
-                "root_context": Context(
-                    name="chat_session", status="idle", start_time=time.time(),
-                ),
+                "root_context": None,  # tree Context retired
                 "runtime": None,
                 "provider_name": src.get("provider_name"),
                 "messages": _copy.deepcopy(msgs[: pivot_idx + 1]),
