@@ -971,11 +971,35 @@ function _showConfirm(title, message, onConfirm) {
       '</div>' +
     '</div>';
   document.body.appendChild(overlay);
-  requestAnimationFrame(function() { overlay.classList.add('visible'); });
+  // Force the browser to register the initial style (opacity 0) BEFORE
+  // we flip to `.visible` (opacity 1), so the 150ms fade transition
+  // actually runs. We used `requestAnimationFrame` for this previously,
+  // but rAF is heavily throttled / paused on hidden tabs — the overlay
+  // would stay at opacity 0 forever in that case, making the dialog
+  // invisible to users who Cmd-Tab'd to another window between clicks.
+  // A synchronous read of `offsetWidth` flushes layout once, which is
+  // enough to make the subsequent class change a transition trigger.
+  void overlay.offsetWidth;
+  overlay.classList.add('visible');
 
   function close() {
     overlay.classList.remove('visible');
-    overlay.addEventListener('transitionend', function() { overlay.remove(); });
+    var removed = false;
+    overlay.addEventListener('transitionend', function() {
+      if (removed) return;
+      removed = true;
+      overlay.remove();
+    });
+    // Fallback in case transitionend never fires (e.g. tab was hidden
+    // when `.visible` got added so the fade didn't actually run, or
+    // some other style override killed the transition). Without this
+    // safety net, a "Cancel" click could leave a fully-opaque modal
+    // stuck on screen.
+    setTimeout(function () {
+      if (removed) return;
+      removed = true;
+      overlay.remove();
+    }, 300);
   }
   overlay.querySelector('#_confirmCancel').onclick = close;
   overlay.querySelector('#_confirmOk').onclick = function() { close(); onConfirm(); };
