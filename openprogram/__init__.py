@@ -19,7 +19,6 @@ OpenProgram — Agentic Programming 理念的产品化实现。
 """
 
 from openprogram.agentic_programming import (
-    Context,
     agentic_function, traced, auto_trace_module, auto_trace_package,
     Runtime,
 )
@@ -39,7 +38,6 @@ __all__ = [
     "auto_trace_module",
     "auto_trace_package",
     "Runtime",
-    "Context",
     "FollowUp",
     "run_with_follow_up",
     "ask_user",
