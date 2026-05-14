@@ -72,15 +72,24 @@ export function FavoritesList(): React.ReactElement | null {
             // 02-sidebar.css. Same visual: 32px-tall row, 6/8 padding,
             // 12px gap between icon + name, rounded 6, hover lifts the
             // background to `--bg-hover`.
-            className="flex h-8 cursor-pointer items-center gap-3
-              overflow-hidden truncate rounded-md px-2 py-1.5
+            // - `shrink-0` is critical because the parent
+            //   `.sidebar-fav-list` is `flex-direction: column` with a
+            //   `max-height`; without it the rows get squished when
+            //   the section overflows.
+            // - `h-[32px]` / `px-[8px]` / `py-[6px]` use explicit pixel
+            //   values rather than the `h-8 px-2 py-1.5` scale because
+            //   this project sets `html { font-size: 14px }`, so
+            //   Tailwind's rem-based spacing is 0.875× the default —
+            //   `h-8` would resolve to 28px, not 32px.
+            className="flex h-[32px] shrink-0 cursor-pointer items-center gap-[12px]
+              overflow-hidden truncate rounded-[6px] px-[8px] py-[6px]
               text-fs-base text-text-primary
               transition-colors duration-300 hover:bg-bg-hover"
             onClick={() => onClick(f.name, cat)}
             title={f.description || ""}
           >
             <span
-              className="inline-flex size-4 flex-shrink-0 items-center
+              className="inline-flex size-[16px] flex-shrink-0 items-center
                 justify-center text-fs-base leading-none"
               aria-hidden="true"
             >
