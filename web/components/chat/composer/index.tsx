@@ -813,13 +813,17 @@ const ThinkingEffortPill = React.forwardRef<
                     generous and the ring frames the glyph cleanly. */}
                 <span
                   aria-hidden="true"
-                  // Ring size is fixed at the SMALLEST bolt + 8 (so
-                  // 18px). Lightning grows past it as effort rises,
-                  // so high-effort glyphs visually burst out of the
-                  // ring — gives the slider a much stronger "more
-                  // = bigger" signal than a ring that scales lockstep.
-                  className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-bg-hover border-[3px] border-[color-mix(in_srgb,var(--text-bright)_40%,transparent)]"
-                  style={{ width: 18, height: 18 }}
+                  // Ring scales with the bolt — always `lightningSize
+                  // + 8`, so as effort climbs both the bolt and its
+                  // frame grow together (the bolt still sits proudly
+                  // inside the ring rather than bursting through it).
+                  // Size animates with the same 150ms easing as the
+                  // bolt's `transition-[width,height]`.
+                  className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-bg-hover border-[3px] border-[color-mix(in_srgb,var(--text-bright)_40%,transparent)] transition-[width,height] duration-150 ease-out"
+                  style={{
+                    width: lightningSize + 8,
+                    height: lightningSize + 8,
+                  }}
                 />
                 <Lightning
                   size={lightningSize}
