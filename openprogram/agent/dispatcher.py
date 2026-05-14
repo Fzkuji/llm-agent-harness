@@ -1225,8 +1225,7 @@ def _resolve_model(profile: dict, override: Optional[str] = None):
         # tries the right backend first.
         order = ["openai", "anthropic", "google", "amazon-bedrock",
                  "cerebras", "claude-code", "github-copilot",
-                 "openai-codex", "openai-codex",
-                 "gemini-subscription", "openrouter"]
+                 "openai-codex", "gemini-subscription", "openrouter"]
         if provider_hint and provider_hint not in order:
             order.insert(0, provider_hint)
         for provider in order:

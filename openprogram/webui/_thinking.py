@@ -98,15 +98,11 @@ _LEVEL_DESC = {
 # runtime classes don't expose cleanly).
 _RUNTIME_PROVIDER = {
     "ClaudeCodeRuntime": "claude-code",
-    "ClaudeCodeRuntime": "claude-code",           # backward-compat alias
     "OpenAICodexRuntime": "openai-codex",
-    "OpenAICodexRuntime": "openai-codex",    # backward-compat alias
     "AnthropicRuntime": "anthropic",
     "OpenAIRuntime": "openai",
     "GeminiRuntime": "gemini",
     "GeminiCLIRuntime": "gemini-subscription",
-    "GeminiCLIRuntime": "gemini-subscription",       # backward-compat alias
-    "GeminiCLIRuntime": "gemini-subscription", # backward-compat alias
 }
 
 

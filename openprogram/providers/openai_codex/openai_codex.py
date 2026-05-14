@@ -140,7 +140,7 @@ def stream_openai_codex_responses(
                     if isinstance(c, dict) and isinstance(c.get("text"), str)
                 )
                 print(
-                    f"[codex req] key={_cache_key!r} items={len(_input_items)} "
+                    f"[{model.api} req] key={_cache_key!r} items={len(_input_items)} "
                     f"text_chars={_input_text_len} instr={_instr_len} "
                     f"tools={_tool_names} reasoning={_reasoning}",
                     flush=True,

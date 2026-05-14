@@ -75,7 +75,7 @@ class ClaudeCodeRuntime(Runtime):
     def __init__(
         self,
         api_key: Optional[str] = None,
-        model: str = "claude-sonnet-4-6",
+        model: str = "claude-sonnet-4",
         max_retries: int = 2,
         base_url: Optional[str] = None,  # noqa: ARG002 — kept for API parity
         **_unused,

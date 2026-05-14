@@ -45,7 +45,7 @@ PROVIDERS = {
     # Claude via a local `claude-max-api-proxy` daemon (HTTP). Replaces
     # the previous CLI-spawning `claude-code` provider; tools come from
     # OpenProgram's own registry instead of the CLI's built-ins.
-    "claude-code":        ("ClaudeCodeRuntime",             "openprogram.providers.anthropic._max_proxy_runtime",  "claude-sonnet-4-6"),
+    "claude-code":        ("ClaudeCodeRuntime",             "openprogram.providers.anthropic._max_proxy_runtime",  "claude-sonnet-4"),
     "openai-codex": ("OpenAICodexRuntime", "openprogram.providers.openai_codex.runtime",           "gpt-5.5"),
     "gemini-cli":        ("GeminiCLIRuntime",    "openprogram.providers.google_gemini_cli.runtime",     "gemini-2.5-flash"),
     "anthropic":        ("AnthropicRuntime",       "openprogram.providers.anthropic.runtime",             "claude-sonnet-4-6"),
