@@ -728,11 +728,12 @@ const ThinkingEffortPill = React.forwardRef<
               />
             }
             endIcon={
-              // Same 14px filled bolt at the right endpoint. Soft
-              // blue when `xhigh` is selected; muted `border-light`
-              // otherwise (matches the unfilled track ahead of it).
+              // Larger filled bolt (20px) at the right endpoint —
+              // the size asymmetry vs the left bolt (14px) is the
+              // direct visual cue for "more effort". Same fill
+              // weight and colour logic as the left one.
               <Lightning
-                size={14}
+                size={20}
                 weight="fill"
                 className={cn(
                   "cursor-pointer transition-colors",
