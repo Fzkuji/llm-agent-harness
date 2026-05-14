@@ -176,9 +176,19 @@ export function Sidebar() {
 
   return (
     <div id="sidebar" className={"sidebar" + (open ? "" : " collapsed")}>
-      <div className="sidebar-header">
-        <div className="logo">
-          <img src="/images/logo.svg" alt="OpenProgram" className="logo-img" />
+      <div className="flex h-[48px] shrink-0 items-center justify-between p-[8px] box-border">
+        <div
+          className={
+            "flex h-[32px] min-w-0 flex-1 items-center overflow-hidden " +
+            "[transition:opacity_0.15s_ease,padding-left_0.3s_ease] " +
+            (open ? "opacity-100 pl-[8px]" : "opacity-0 pl-0")
+          }
+        >
+          <img
+            src="/images/logo.svg"
+            alt="OpenProgram"
+            className="block h-[32px] w-auto"
+          />
         </div>
         <button
           className={sidebarToggleClass}
@@ -309,52 +319,41 @@ export function Sidebar() {
       </div>
 
       {/* Favorite programs — render the section only when at least
-         one favourite exists, mirroring the legacy `empty` class. */}
-      <div
-        className={
-          "sidebar-favorites" +
-          (hasFavorites ? "" : " empty") +
-          (favCollapsed ? " is-collapsed" : "")
-        }
+         one favourite exists. */}
+      <SidebarSection
         id="favSection"
+        title="Favorite Programs"
+        collapsed={favCollapsed}
+        onToggle={() => setFavCollapsed((v) => !v)}
+        hidden={!hasFavorites}
+        legacyClass="sidebar-favorites"
       >
         <div
-          className="sidebar-section-header"
-          onClick={() => setFavCollapsed((v) => !v)}
+          id="favList"
+          className="flex flex-col gap-px max-h-[131px] overflow-y-auto
+            overflow-x-hidden px-[8px] [scrollbar-width:none]
+            [&::-webkit-scrollbar]:hidden"
         >
-          <span className="sidebar-section-title">Favorite Programs</span>
-          <span className="sidebar-section-hint">
-            {favCollapsed ? "Show" : "Hide"}
-          </span>
+          <FavoritesList />
         </div>
-        {!favCollapsed && (
-          <div className="sidebar-fav-list" id="favList">
-            <FavoritesList />
-          </div>
-        )}
-      </div>
+      </SidebarSection>
 
-      <div
-        className={
-          "sidebar-conversations" + (convCollapsed ? " is-collapsed" : "")
-        }
+      <SidebarSection
         id="convSection"
+        title="Recents"
+        collapsed={convCollapsed}
+        onToggle={() => setConvCollapsed((v) => !v)}
+        legacyClass="sidebar-conversations"
       >
         <div
-          className="sidebar-section-header"
-          onClick={() => setConvCollapsed((v) => !v)}
+          id="convList"
+          className="flex flex-1 min-h-0 flex-col gap-px overflow-x-hidden
+            overflow-y-auto px-[8px] [scrollbar-width:none]
+            [&::-webkit-scrollbar]:hidden"
         >
-          <span className="sidebar-section-title">Recents</span>
-          <span className="sidebar-section-hint">
-            {convCollapsed ? "Show" : "Hide"}
-          </span>
+          <SessionsList />
         </div>
-        {!convCollapsed && (
-          <div className="sidebar-conv-list" id="convList">
-            <SessionsList />
-          </div>
-        )}
-      </div>
+      </SidebarSection>
 
       {/* User menu footer — rendered directly here (no portal). The
          AppShell's `#userMenuFooterMount` portal logic is now a no-op
@@ -362,6 +361,63 @@ export function Sidebar() {
          is kept around for any code path that might still inject the
          legacy `_sidebar.html` template. */}
       <UserMenuFooter />
+    </div>
+  );
+}
+
+/**
+ * Collapsible section in the sidebar (Favorite Programs / Recents).
+ * Header is a click-target showing the title + a "Show/Hide" hint that
+ * fades in on hover; body is rendered only when the section is open.
+ * `legacyClass` is the global classname still referenced by 02-sidebar.css
+ * for layout-side state (`.sidebar-favorites:empty` etc.) — keep it
+ * until that file is fully migrated.
+ */
+function SidebarSection({
+  id,
+  title,
+  collapsed,
+  onToggle,
+  hidden,
+  legacyClass,
+  children,
+}: {
+  id: string;
+  title: string;
+  collapsed: boolean;
+  onToggle: () => void;
+  hidden?: boolean;
+  legacyClass: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      id={id}
+      className={
+        legacyClass +
+        (hidden ? " empty" : "") +
+        (collapsed ? " is-collapsed" : "")
+      }
+    >
+      <div
+        className="group flex shrink-0 cursor-pointer select-none items-center
+          px-[16px] py-[4px]"
+        onClick={onToggle}
+      >
+        <span className="text-[12px] font-normal text-text-muted">{title}</span>
+        <span
+          className={
+            "ml-auto text-[12px] text-text-muted " +
+            "transition-opacity duration-150 ease-out " +
+            (collapsed
+              ? "opacity-75"
+              : "opacity-0 group-hover:opacity-75")
+          }
+        >
+          {collapsed ? "Show" : "Hide"}
+        </span>
+      </div>
+      {!collapsed && children}
     </div>
   );
 }

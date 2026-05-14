@@ -27,8 +27,8 @@
 /* Custom scrollbars: defined globally below. On collapsed sidebar we hide
    them via `overflow: hidden !important` above. */
 /* --- Collapsed sidebar: static top, smooth-slide bottom --- */
-/* Logo shrinks to 0 in flex layout; fade out text so no partial clipping */
-.sidebar.collapsed .sidebar-header .logo { opacity: 0; padding-left: 0; }
+/* Logo's collapsed state (opacity 0 + padding-left 0) is now a
+   conditional Tailwind class on the logo div in sidebar.tsx. */
 /* Nav items: keep left-aligned, icons stay at same x-position (static) */
 .sidebar.collapsed .sidebar-nav-item {
   gap: 0;  /* collapse gap since label is hidden */
@@ -118,36 +118,12 @@
    above where the absolute footer renders. */
 .sidebar > .sidebar-conversations { margin-bottom: 64px; }
 
-.sidebar-header {
-  padding: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-shrink: 0;
-  height: 48px;
-  box-sizing: border-box;
-}
-
-.logo {
-  display: flex;
-  align-items: center;
-  padding-left: 8px;
-  height: 32px;
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  transition: opacity 0.15s ease, padding-left 0.3s ease;
-}
-
-.logo-img {
-  height: 32px;
-  width: auto;
-  display: block;
-}
-
-.logo-l1 { color: #ff6b6b; }
-.logo-l2 { color: #4ecdc4; }
-.logo-m  { color: #ffe66d; }
+/* `.sidebar-header / .logo / .logo-img` moved to Tailwind utilities
+   inline in `sidebar.tsx` (the collapsed-state `.sidebar.collapsed
+   .sidebar-header .logo { opacity: 0 }` rule is now a conditional
+   class on the logo div). `.logo-l1 / .logo-l2 / .logo-m` were only
+   used by the legacy welcome-screen typewriter logo (now React,
+   styled by `welcome-screen.module.css`). */
 
 /* `.sidebar-toggle` moved to Tailwind via
    `components/sidebar/nav-classes.ts::sidebarToggleClass`. */
