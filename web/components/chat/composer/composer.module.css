@@ -521,33 +521,53 @@
   color: var(--text-muted);
 }
 
-/* The slider itself adds its own track + thumb via Tailwind utilities
-   in `components/ui/slider.tsx`; this just gives it side breathing room
-   so the thumb doesn't overlap the panel edge at min/max. */
+/* The slider component handles its own track + thumb via Tailwind in
+   `components/ui/slider.tsx`. We don't add side padding here so the
+   tick row below can share the exact same coordinate space — both
+   span the full panel inner width, and tick labels are positioned at
+   the same x as the slider's thumb stops via `calc()`. */
 .thinkingPanelSlider {
-  margin: 4px 4px 10px;
+  margin: 4px 0 10px;
 }
 
-/* Per-stop micro-labels under the track — also click-targets so users
-   who don't want to drag can hop directly to a stop. The flex
-   `space-between` distributes them evenly across the slider's width;
-   the slider's own padding (4px each side) is mirrored on the labels
-   so the first/last labels sit under the thumb's min/max position. */
+/* Per-stop micro-labels under the track.
+   `position: relative` makes this row the positioning context for the
+   absolutely-placed `.thinkingPanelTick` children — each tick centers
+   itself on the matching slider stop via inline `left: calc(...)`.
+   The whole row is a click target (`onClick` on the container in
+   `ThinkingEffortPanel`); the labels themselves are not separate
+   click-targets, so a click ANYWHERE in this strip — between labels,
+   above them, below them — snaps to the nearest stop. The 28px
+   height gives a forgiving touch target without expanding the panel
+   visibly. */
 .thinkingPanelTicks {
-  display: flex;
-  justify-content: space-between;
-  padding: 0 4px;
+  position: relative;
+  height: 28px;
   font-size: 11px;
   color: var(--text-muted);
+  cursor: pointer;
 }
 .thinkingPanelTick {
-  cursor: pointer;
-  padding: 2px 0;
-  transition: color 0.12s ease;
+  position: absolute;
+  top: 50%;
+  /* `left` is set inline so each tick's center lines up with the
+     corresponding slider thumb position. `translate(-50%, -50%)`
+     pulls the label's own center to that x/y. */
+  transform: translate(-50%, -50%);
+  /* No pointer events on the label itself — the parent .ticks row
+     owns click handling. This means a click that lands on a label
+     glyph still goes to the row's onClick (same target), but more
+     importantly clicks BETWEEN labels (over the strip's transparent
+     gaps) are equally valid hit targets and snap to the nearest
+     stop. Hover still works via CSS `:hover` because we use the
+     `none` value for events only on tick label TEXT — we still want
+     visual hover, so we keep events enabled. */
+  transition: color 0.12s ease, font-weight 0.12s ease;
   user-select: none;
+  white-space: nowrap;
 }
-.thinkingPanelTick:hover {
-  color: var(--text-primary);
+.thinkingPanelTicks:hover .thinkingPanelTick:not([data-active]) {
+  color: var(--text-secondary);
 }
 .thinkingPanelTick[data-active] {
   color: var(--accent-blue, #6cb4ff);

@@ -667,18 +667,47 @@ const ThinkingEffortPanel = React.forwardRef<
         }}
         className={styles.thinkingPanelSlider}
       />
-      <div className={styles.thinkingPanelTicks}>
-        {options.map((opt, i) => (
-          <span
-            key={opt.value}
-            className={styles.thinkingPanelTick}
-            data-active={i === valueIndex || undefined}
-            onClick={() => onChange(opt.value)}
-            title={opt.desc ?? opt.value}
-          >
-            {opt.value}
-          </span>
-        ))}
+      <div
+        className={styles.thinkingPanelTicks}
+        onClick={(e) => {
+          // Click-to-snap that covers the whole tick row (not just the
+          // text glyphs). Map the click's x to the nearest stop using
+          // the same `thumb-center = ratio * (W - thumbW) + thumbW/2`
+          // formula Radix uses — see CSS `--thumb` token below.
+          const rect = e.currentTarget.getBoundingClientRect();
+          const x = e.clientX - rect.left;
+          const thumbHalf = 7; // half of the 14px thumb
+          const usable = rect.width - thumbHalf * 2;
+          if (usable <= 0) return;
+          const ratio = Math.max(
+            0,
+            Math.min(1, (x - thumbHalf) / usable),
+          );
+          const idx = Math.round(ratio * maxIndex);
+          const next = options[idx];
+          if (next) onChange(next.value);
+        }}
+      >
+        {options.map((opt, i) => {
+          const ratio = maxIndex > 0 ? i / maxIndex : 0;
+          return (
+            <span
+              key={opt.value}
+              className={styles.thinkingPanelTick}
+              data-active={i === valueIndex || undefined}
+              // Center each label horizontally at the matching slider
+              // stop. `calc(ratio * (100% - 14px) + 7px)` mirrors the
+              // thumb's center coordinate (Radix moves the 14px thumb
+              // along `0..W-14` and its center is offset by +7).
+              style={{
+                left: `calc(${ratio} * (100% - 14px) + 7px)`,
+              }}
+              title={opt.desc ?? opt.value}
+            >
+              {opt.value}
+            </span>
+          );
+        })}
       </div>
     </div>
   );
