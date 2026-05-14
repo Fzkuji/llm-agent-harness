@@ -627,6 +627,23 @@ const ThinkingEffortPill = React.forwardRef<
   // the round thumb so the bolt itself reads as the marker.
   const atMin = valueIndex === 0;
   const atMax = valueIndex === maxIndex;
+  // Effort-level tint for the COLLAPSED pill. Ramps from a faint
+  // bright-white wash at `off` (just barely lifting off the panel
+  // bg) through accent-yellow / orange / red as effort climbs.
+  // Each step is a `color-mix(... XX%, transparent)` so the tint
+  // sits softly on the surface — same "糊" feel as the soft blue
+  // already used inside the slider. Per-value overrides hardcoded
+  // to match the backend's standard effort vocabulary; unknown
+  // values fall back to the neutral whitish wash. */
+  const collapsedTint =
+    {
+      off: "color-mix(in srgb, var(--text-bright) 10%, transparent)",
+      minimal: "color-mix(in srgb, var(--accent-yellow) 22%, transparent)",
+      low: "color-mix(in srgb, var(--accent-yellow) 32%, transparent)",
+      medium: "color-mix(in srgb, var(--accent-orange) 28%, transparent)",
+      high: "color-mix(in srgb, var(--accent-orange) 38%, transparent)",
+      xhigh: "color-mix(in srgb, var(--accent-red) 32%, transparent)",
+    }[value] ?? "color-mix(in srgb, var(--text-bright) 10%, transparent)";
 
   return (
     <div
@@ -662,11 +679,16 @@ const ThinkingEffortPill = React.forwardRef<
           "rounded-full cursor-pointer select-none",
           "text-[14px]",
           "transition-[width,background-color] duration-[220ms] ease-out",
-          expanded
-            ? "bg-bg-hover text-text-bright"
-            : "bg-transparent text-text-secondary hover:bg-bg-hover hover:text-text-primary",
+          expanded ? "bg-bg-hover text-text-bright" : "text-text-primary",
         ].join(" ")}
-        style={{ width: expanded ? 260 : 132 }}
+        style={{
+          width: expanded ? 260 : 132,
+          // Tint the collapsed pill by current effort level (neutral
+          // white-grey at `off`, ramps to soft red at `xhigh`). When
+          // expanded we hand the bg back to the Tailwind class
+          // (`bg-bg-hover`) above and skip the inline override.
+          ...(expanded ? {} : { backgroundColor: collapsedTint }),
+        }}
         onClick={(e) => {
           e.stopPropagation();
           onToggle();
