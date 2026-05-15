@@ -662,7 +662,7 @@ const ThinkingEffortPill = React.forwardRef<
   // the dark panel.
   const collapsedTint =
     value === "off"
-      ? "color-mix(in srgb, #b8b8b8 62%, transparent)"
+      ? "color-mix(in srgb, #dedede 62%, transparent)"
       : `color-mix(in srgb, ${warmHue} 16%, transparent)`;
 
   // Active hue for the slider's filled elements (range bar, filled
