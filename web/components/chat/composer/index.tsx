@@ -681,9 +681,17 @@ const ThinkingEffortPill = React.forwardRef<
   // ~30px trailing gap. Re-measures whenever the value changes.
   const spacerRef = useRef<HTMLSpanElement>(null);
   const [collapsedWidth, setCollapsedWidth] = useState<number>(120);
+  // `measured` gates the width transition. On first mount the pill
+  // renders at the 120px placeholder, then this effect measures the
+  // real width and updates it — if the transition were live the pill
+  // would visibly "bounce" from 120 → real width on every page load.
+  // Keep the transition off until after that first measurement;
+  // expand/collapse toggles afterwards still animate.
+  const [measured, setMeasured] = useState(false);
   useLayoutEffect(() => {
     if (spacerRef.current) {
       setCollapsedWidth(spacerRef.current.offsetWidth);
+      setMeasured(true);
     }
   }, [value]);
 
@@ -726,7 +734,12 @@ const ThinkingEffortPill = React.forwardRef<
           "absolute left-0 top-0 h-[32px] overflow-hidden",
           "rounded-full cursor-pointer select-none",
           "text-[14px]",
-          "transition-[width,background-color] duration-[220ms] ease-out",
+          // Width transition is gated on `measured` so the first-mount
+          // 120px → real-width correction doesn't animate (no bounce
+          // on page refresh). Background colour can always transition.
+          measured
+            ? "transition-[width,background-color] duration-[220ms] ease-out"
+            : "transition-[background-color] duration-[220ms] ease-out",
           expanded ? "bg-bg-hover text-text-bright" : "text-text-primary",
         ].join(" ")}
         style={{
