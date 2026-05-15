@@ -52,9 +52,12 @@ export function FavoritesList(): React.ReactElement | null {
       // this becomes a `searchParams.get("run")` style hand-off.)
       const w = window as unknown as {
         __pendingRunFunction?: { name: string; cat: string };
+        __lastChatPath?: string;
       };
       w.__pendingRunFunction = { name, cat: category || "" };
-      router.push("/chat");
+      // Return to the conversation the user came from, not a blank
+      // /chat — the run then opens inside that existing session.
+      router.push(w.__lastChatPath || "/chat");
       return;
     }
     openFnForm(fn);

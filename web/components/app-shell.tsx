@@ -206,6 +206,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     const close = (window as unknown as { _closeAllPopovers?: () => void })._closeAllPopovers;
     if (close) close();
 
+    // Remember the last chat route so a `/programs → run` hand-off can
+    // return to the conversation the user came from, not a blank
+    // /chat. Kept on window because it must survive leaving the chat
+    // route entirely (the store's currentSessionId is nulled then).
+    if (isChatRoute(pathname)) {
+      (window as unknown as { __lastChatPath?: string }).__lastChatPath =
+        pathname;
+    }
+
     // Keep legacy `window.currentSessionId` in lockstep with the
     // Next.js client route. Legacy `init.js` parses the URL exactly
     // once at script load; SPA navigations between sessions don't

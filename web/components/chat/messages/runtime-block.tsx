@@ -84,9 +84,13 @@ export function RuntimeBlock({ msg }: { msg: ChatMsg }) {
     const contentHtml = w.renderMd ? w.renderMd(content) : content;
     let treeHtml = "";
     if (tree && w.renderInlineTree) {
+      // The tree id must be unique per block — `toggleInlineTree`
+      // resolves the body by `getElementById('ibody_' + id)`, so two
+      // runs of the same function would otherwise collide and one
+      // header would toggle the other's tree. `msg.id` is unique.
       treeHtml = w.renderInlineTree(
         tree,
-        "itree_" + (fnName || "result").replace(/[^a-zA-Z0-9]/g, "_"),
+        "itree_" + msg.id.replace(/[^a-zA-Z0-9]/g, "_"),
       );
       if (w.updateTreeData) w.updateTreeData(tree);
     }

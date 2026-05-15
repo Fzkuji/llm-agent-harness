@@ -191,21 +191,29 @@ export function ProgramsPage() {
   }, [programs, meta, folder, search, filter, sort]);
 
   // ---- actions --------------------------------------------------------
+  // Return to the conversation the user came from (not a blank /chat),
+  // so the run opens inside that existing session.
+  function chatTarget(): string {
+    return (
+      (window as unknown as { __lastChatPath?: string }).__lastChatPath ||
+      "/chat"
+    );
+  }
+
   function runProgram(name: string, category?: string) {
-    // SPA soft-nav. Stash the request on window; page-shell calls
-    // __triggerPendingRunFunction after the chat-route effect fires,
-    // and init.js drains __pendingRunFunction to open the fn-form.
+    // SPA soft-nav. Stash the request on window; the page-shell
+    // hand-off effect drains __pendingRunFunction to open the fn-form.
     (window as unknown as {
       __pendingRunFunction?: { name: string; cat: string };
     }).__pendingRunFunction = { name, cat: category || "" };
-    router.push("/chat");
+    router.push(chatTarget());
   }
 
   function editProgram(name: string) {
     (window as unknown as {
       __pendingRunFunction?: { name: string; cat: string; fn?: string };
     }).__pendingRunFunction = { name: "edit", cat: "", fn: name };
-    router.push("/chat");
+    router.push(chatTarget());
   }
 
   async function toggleFav(name: string, e: React.MouseEvent) {

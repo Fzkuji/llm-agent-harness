@@ -121,6 +121,9 @@ function StatusBadge({
   statusBadge: ReturnType<typeof useSessionStore.getState>["statusBadge"];
 }) {
   function onClick(e: React.MouseEvent) {
+    // Close the React agent-selector menus before opening this legacy
+    // popover, so the two can't sit open at the same time.
+    window.dispatchEvent(new Event("topbar-close-menus"));
     const w = window as unknown as { openChannelDropdown?: (e: MouseEvent) => void };
     w.openChannelDropdown?.(e.nativeEvent);
   }
@@ -153,6 +156,9 @@ function BranchBadge({
   branchInfo: ReturnType<typeof useSessionStore.getState>["branchInfo"];
 }) {
   function onClick(e: React.MouseEvent) {
+    // Close the React agent-selector menus before opening this legacy
+    // popover, so the two can't sit open at the same time.
+    window.dispatchEvent(new Event("topbar-close-menus"));
     const w = window as unknown as { openBranchDropdown?: (e: MouseEvent) => void };
     w.openBranchDropdown?.(e.nativeEvent);
   }
@@ -215,9 +221,26 @@ function AgentBadge({
   const ref = useRef<HTMLSpanElement>(null);
   const [open, setOpen] = useState(false);
 
+  // A `topbar-close-menus` event (fired by the other agent badge, or
+  // by the legacy branch/channel popovers) closes this menu, so only
+  // one top-bar dropdown is ever open.
+  useEffect(() => {
+    const close = () => setOpen(false);
+    window.addEventListener("topbar-close-menus", close);
+    return () => window.removeEventListener("topbar-close-menus", close);
+  }, []);
+
   function onClick() {
     if (locked) return;
-    setOpen((v) => !v);
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    // Close every other top-bar dropdown — the sibling agent badge
+    // (via the event) and the legacy branch/channel popovers.
+    window.dispatchEvent(new Event("topbar-close-menus"));
+    (window as unknown as { _closeAllPopovers?: () => void })._closeAllPopovers?.();
+    setOpen(true);
   }
 
   const label = kind === "chat" ? "Chat" : "Exec";
