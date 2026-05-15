@@ -634,53 +634,36 @@ const ThinkingEffortPill = React.forwardRef<
     maxIndex > 0
       ? Math.round(10 + (valueIndex / maxIndex) * 8)
       : 10;
-  // Effort-level tint for the COLLAPSED pill. Ramps from a faint
-  // bright-white wash at `off` (just barely lifting off the panel
-  // bg) through accent-yellow / orange / red as effort climbs.
-  // Each step is a `color-mix(... XX%, transparent)` so the tint
-  // sits softly on the surface — same "糊" feel as the soft blue
-  // already used inside the slider. Per-value overrides hardcoded
-  // to match the backend's standard effort vocabulary; unknown
-  // values fall back to the neutral whitish wash. */
-  const collapsedTint =
-    {
-      off: "color-mix(in srgb, var(--text-bright) 8%, transparent)",
-      minimal: "color-mix(in srgb, var(--accent-yellow) 13%, transparent)",
-      low: "color-mix(in srgb, var(--accent-yellow) 19%, transparent)",
-      medium: "color-mix(in srgb, var(--accent-orange) 16%, transparent)",
-      high: "color-mix(in srgb, var(--accent-orange) 23%, transparent)",
-      xhigh: "color-mix(in srgb, var(--accent-red) 20%, transparent)",
-    }[value] ?? "color-mix(in srgb, var(--text-bright) 8%, transparent)";
-
-  // Active hue for the slider's filled elements (range bar, filled
-  // tick dots, thumb, selected end-bolt). Same effort-level ramp as
-  // the collapsed pill tint, but at a higher opacity so the colour
-  // pops against the unfilled grey track. Passed down via a CSS
-  // custom property (`--slider-active`) so the slider's Tailwind
-  // classes can pick it up without prop-drilling colours.
-  const activeColor =
-    {
-      off: "color-mix(in srgb, var(--text-bright) 45%, transparent)",
-      minimal: "color-mix(in srgb, var(--accent-yellow) 70%, transparent)",
-      low: "color-mix(in srgb, var(--accent-yellow) 70%, transparent)",
-      medium: "color-mix(in srgb, var(--accent-orange) 70%, transparent)",
-      high: "color-mix(in srgb, var(--accent-orange) 70%, transparent)",
-      xhigh: "color-mix(in srgb, var(--accent-red) 70%, transparent)",
-    }[value] ?? "color-mix(in srgb, var(--accent-yellow) 70%, transparent)";
-  // Fully-opaque variant of the active hue. Used for the Lightning
-  // bolt itself — the range and ticks ride the softer half-alpha
-  // `--slider-active`, but the bolt floats above the ring as a
-  // standalone glyph and looks faded if it inherits the softened
-  // color (which mixes with whatever sits behind it).
-  const activeColorSolid =
+  // Lightened warm hue per effort level. The raw accent tokens are
+  // fairly dark (`--accent-orange` is a brownish #b8651f), so each
+  // one is pre-mixed with white to lift it to a brighter, airier
+  // tone — orange gets the most white since it reads darkest.
+  // `off` stays neutral bright-white. Everything below derives from
+  // this single hue so the collapsed tint / range / bolt all agree.
+  const warmHue =
     {
       off: "var(--text-bright)",
-      minimal: "var(--accent-yellow)",
-      low: "var(--accent-yellow)",
-      medium: "var(--accent-orange)",
-      high: "var(--accent-orange)",
-      xhigh: "var(--accent-red)",
-    }[value] ?? "var(--accent-yellow)";
+      minimal: "color-mix(in srgb, var(--accent-yellow) 62%, white)",
+      low: "color-mix(in srgb, var(--accent-yellow) 62%, white)",
+      medium: "color-mix(in srgb, var(--accent-orange) 50%, white)",
+      high: "color-mix(in srgb, var(--accent-orange) 50%, white)",
+      xhigh: "color-mix(in srgb, var(--accent-red) 58%, white)",
+    }[value] ?? "var(--text-bright)";
+
+  // Effort-level tint for the COLLAPSED pill — `warmHue` at low
+  // opacity so it sits softly on the panel surface.
+  const collapsedTint = `color-mix(in srgb, ${warmHue} 16%, transparent)`;
+
+  // Active hue for the slider's filled elements (range bar, filled
+  // tick dots, focus ring) — `warmHue` at ~70% so it still reads as
+  // a soft fill against the grey track. Passed down via the
+  // `--slider-active` CSS custom property.
+  const activeColor = `color-mix(in srgb, ${warmHue} 72%, transparent)`;
+
+  // Fully-opaque variant for the Lightning bolt itself — it floats
+  // above the ring as a standalone glyph and would look faded if it
+  // inherited the half-alpha `--slider-active`.
+  const activeColorSolid = warmHue;
 
   // Measure the spacer so the collapsed pill width exactly matches
   // its content. Hard-coding 132px gave the same chip the same
