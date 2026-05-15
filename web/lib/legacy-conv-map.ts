@@ -20,6 +20,13 @@ interface LegacyBlock {
   tool_call_id?: string;
 }
 
+interface LegacyAttempt {
+  content?: string;
+  timestamp?: number;
+  tree?: unknown;
+  usage?: unknown;
+}
+
 interface LegacyMsg {
   role?: string;
   content?: string;
@@ -30,6 +37,11 @@ interface LegacyMsg {
   id?: string;
   timestamp?: number;
   created_at?: number;
+  context_tree?: unknown;
+  usage?: unknown;
+  attempts?: LegacyAttempt[];
+  current_attempt?: number;
+  tool_calls?: LegacyBlock[];
 }
 
 export function legacyConvToChatMsgs(messages: LegacyMsg[]): ChatMsg[] {
@@ -54,7 +66,12 @@ export function legacyConvToChatMsgs(messages: LegacyMsg[]): ChatMsg[] {
     if (m.role === "assistant") {
       let thinking: string | undefined;
       const tools: ChatToolCall[] = [];
-      (m.blocks || []).forEach((b, bi) => {
+      // Backfill: pre-`blocks` messages only carry slim `tool_calls`.
+      const rawBlocks =
+        m.blocks && m.blocks.length
+          ? m.blocks
+          : (m.tool_calls || []).map((tc) => ({ type: "tool", ...tc }));
+      rawBlocks.forEach((b, bi) => {
         if (b.type === "thinking" && b.text) {
           thinking = (thinking ?? "") + b.text;
         } else if (b.type === "tool") {
@@ -79,8 +96,13 @@ export function legacyConvToChatMsgs(messages: LegacyMsg[]): ChatMsg[] {
         tools: tools.length ? tools : undefined,
         function: m.function || undefined,
         display: m.display === "runtime" ? "runtime" : undefined,
-        status: "done",
+        status: m.type === "error" ? "error" : "done",
+        rawType: m.type,
         timestamp: ts,
+        contextTree: (m.context_tree as never) || undefined,
+        usage: m.usage,
+        attempts: m.attempts as never[] | undefined,
+        current_attempt: m.current_attempt,
       });
       return;
     }

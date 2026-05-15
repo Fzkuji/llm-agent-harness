@@ -52,8 +52,17 @@ export interface ChatMsg {
   function?: string;           // if this was /run
   display?: "runtime" | "normal";
   timestamp?: number;
-  attempts?: { content: string; timestamp: number }[];
+  attempts?: { content: string; timestamp: number; tree?: TreeNode; usage?: unknown }[];
   current_attempt?: number;
+  /** Server response type — "result" / "error". Drives the runtime
+   *  block's error styling and the assistant bubble's error branch. */
+  rawType?: string;
+  /** Execution tree captured with a `/run` result, rendered inside the
+   *  runtime block. */
+  contextTree?: TreeNode;
+  /** Provider usage for the runtime block footer. Opaque — passed
+   *  straight to the legacy `formatUsageFooterLabel`. */
+  usage?: unknown;
 }
 
 export interface ConvSummary {
