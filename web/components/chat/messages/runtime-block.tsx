@@ -13,7 +13,7 @@ import { useState } from "react";
 
 import type { ChatMsg } from "@/lib/session-store";
 
-import { renderMarkdown } from "./markdown";
+import { renderMarkdown, useMarkdownReady } from "./markdown";
 
 /** Split a `run fn(args)` / `fn arg1 arg2` command into name + params
  *  for the header signature — mirrors `parseRunCommandForDisplay`. */
@@ -28,6 +28,7 @@ function parseRun(cmd: string): { fn: string; params: string } {
 
 export function RuntimeBlock({ msg }: { msg: ChatMsg }) {
   const [collapsed, setCollapsed] = useState(false);
+  useMarkdownReady();
   const { fn, params } = parseRun(msg.function || msg.content || "");
   const html = renderMarkdown(msg.content || "");
 

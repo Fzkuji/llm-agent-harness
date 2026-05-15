@@ -29,6 +29,11 @@ function dispatch(msg: ChatMsg) {
     return <div className="message system">{msg.content}</div>;
   }
   if (msg.display === "runtime") {
+    // A `/run` turn renders as ONE runtime block, owned by the
+    // assistant reply (it carries the result + the `function`
+    // signature). The paired user message only holds the raw command
+    // — drop it so the command isn't shown twice.
+    if (msg.role === "user") return null;
     return <RuntimeBlock msg={msg} />;
   }
   if (msg.role === "user") {

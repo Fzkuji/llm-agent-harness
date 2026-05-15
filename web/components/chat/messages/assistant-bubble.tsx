@@ -10,7 +10,7 @@
  */
 import type { ChatMsg } from "@/lib/session-store";
 
-import { renderMarkdown } from "./markdown";
+import { renderMarkdown, useMarkdownReady } from "./markdown";
 import { ThinkingBlock } from "./thinking-block";
 import { ToolsBlock } from "./tool-card";
 
@@ -25,6 +25,9 @@ function TypingIndicator() {
 }
 
 export function AssistantBubble({ msg }: { msg: ChatMsg }) {
+  // Subscribed so the bubble re-renders once `renderMd` lands and the
+  // markdown can be rendered for real instead of escaped.
+  useMarkdownReady();
   const streaming = msg.status === "streaming" || msg.status === "pending";
   const tools = msg.tools ?? [];
   const hasContent = !!msg.content;
