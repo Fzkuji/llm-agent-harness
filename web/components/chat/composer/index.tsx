@@ -653,13 +653,16 @@ const ThinkingEffortPill = React.forwardRef<
     }[value] ?? "var(--text-bright)";
 
   // Effort-level tint for the COLLAPSED pill — `warmHue` at low
-  // opacity so it sits softly on the panel surface. `off` uses a
-  // higher percentage: a faint white wash reads as flat grey on the
-  // dark panel, so it needs more opacity to look like a clean
-  // light chip rather than a dull grey one.
+  // opacity so it sits softly on the panel surface. `off` is special:
+  // it must be a LIGHT wash in BOTH themes. `warmHue.off` is
+  // `--text-bright`, which is near-white on dark but near-BLACK on
+  // light — using it for the tint turned the light-theme `off` pill
+  // into a dark-grey chip. So the `off` branch washes with literal
+  // `white` instead, keeping the chip light-on-light and light-on-
+  // dark alike.
   const collapsedTint =
     value === "off"
-      ? `color-mix(in srgb, ${warmHue} 30%, transparent)`
+      ? "color-mix(in srgb, white 26%, transparent)"
       : `color-mix(in srgb, ${warmHue} 16%, transparent)`;
 
   // Active hue for the slider's filled elements (range bar, filled
