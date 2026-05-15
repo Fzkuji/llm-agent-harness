@@ -9,6 +9,7 @@ import { RightSidebar } from "./right-sidebar/right-sidebar";
 import { Composer } from "./chat/composer";
 import { TopBar } from "./chat/top-bar";
 import { WelcomeScreen } from "./chat/welcome-screen";
+import { MessageList } from "./chat/messages/message-list";
 import { useSessionStore } from "@/lib/session-store";
 import { applyChatWsMessage, appendLocalUserTurn } from "@/lib/chat-stream";
 import { legacyConvToChatMsgs } from "@/lib/legacy-conv-map";
@@ -160,20 +161,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [composerMount, setComposerMount] = useState<HTMLElement | null>(null);
   const [welcomeMount, setWelcomeMount] = useState<HTMLElement | null>(null);
   const [topbarMount, setTopbarMount] = useState<HTMLElement | null>(null);
+  const [messagesMount, setMessagesMount] = useState<HTMLElement | null>(null);
   useEffect(() => {
     let cancelled = false;
     setComposerMount(null);
     setWelcomeMount(null);
     setTopbarMount(null);
+    setMessagesMount(null);
     function findMounts() {
       const composer = document.getElementById("composer-mount");
       const welcome = document.getElementById("welcome-mount");
       const topbar = document.getElementById("topbar-mount");
+      const messages = document.getElementById("messages-mount");
       if (cancelled) return false;
       if (composer) setComposerMount(composer);
       if (welcome) setWelcomeMount(welcome);
       if (topbar) setTopbarMount(topbar);
-      return !!(composer && welcome && topbar);
+      if (messages) setMessagesMount(messages);
+      return !!(composer && welcome && topbar && messages);
     }
     if (findMounts()) return;
     const t = setInterval(() => {
@@ -214,6 +219,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       const m = pathname.match(/^\/s\/([^/]+)/);
       const sid = m ? m[1] : null;
       (window as unknown as { currentSessionId?: string | null }).currentSessionId = sid;
+      // Keep the React message store's active conversation in lockstep
+      // with the route so <MessageList /> shows the right stream. A
+      // brand-new chat (/chat → sid null) gets its real id later from
+      // the `chat_ack` reducer.
+      useSessionStore.getState().setCurrentConv(sid);
     } catch {
       /* ignore */
     }
@@ -339,6 +349,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {composerMount && createPortal(<Composer />, composerMount)}
       {welcomeMount && createPortal(<WelcomeScreen />, welcomeMount)}
       {topbarMount && createPortal(<TopBar />, topbarMount)}
+      {messagesMount && createPortal(<MessageList />, messagesMount)}
     </div>
   );
 }

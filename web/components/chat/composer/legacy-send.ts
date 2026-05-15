@@ -30,6 +30,10 @@ interface LegacyChatGlobals {
   _thinkingEffort?: string;
   _toolsEnabled?: boolean;
   _webSearchEnabled?: boolean;
+  /** Stashed for the chat-stream reducer: the server never echoes a
+   *  web-originated user turn back, so `handleAck` reads this to build
+   *  the user bubble once `chat_ack` assigns the msg_id. */
+  __pendingUserText?: string;
 }
 
 /**
@@ -48,6 +52,7 @@ export function sendChatMessage({
   w._toolsEnabled = toolsEnabled;
   w._webSearchEnabled = webSearchEnabled;
   if (typeof w.sendMessage !== "function") return false;
+  w.__pendingUserText = text;
   w.sendMessage(text);
   return true;
 }

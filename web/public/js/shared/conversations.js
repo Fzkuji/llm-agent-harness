@@ -1043,6 +1043,12 @@ function newSession() {
   // Already on /, reset in-place
   currentSessionId = null;
   history.replaceState(null, '', '/chat');
+  // Point the React <MessageList /> at "no conversation" so it clears.
+  // history.replaceState doesn't fire a Next.js route change, so the
+  // app-shell pathname effect won't do this for us.
+  try {
+    if (window.__sessionStore) window.__sessionStore.getState().setCurrentConv(null);
+  } catch (e) {}
   pendingResponses = {};
   trees = [];
   var container = document.getElementById('chatMessages');
@@ -1052,7 +1058,9 @@ function newSession() {
   // couldn't re-render the welcome panel into #chatMessages.
   if (container) {
     Array.from(container.children).forEach(function (ch) {
-      if (ch.id === 'welcome-mount') return;
+      // Keep both React portal hosts alive (welcome panel + message
+      // stream). See `_clearChatMessages`.
+      if (ch.id === 'welcome-mount' || ch.id === 'messages-mount') return;
       container.removeChild(ch);
     });
   }
@@ -1192,7 +1200,10 @@ function extractMessagesFromTree(tree) {
 // loading a conversation and then clicking "New chat").
 function _clearChatMessages(container) {
   Array.from(container.children).forEach(function (ch) {
-    if (ch.id === 'welcome-mount') return;
+    // Preserve the React portal hosts — `#welcome-mount` and
+    // `#messages-mount` (the <MessageList /> portal). Removing them
+    // would tear down the React render targets.
+    if (ch.id === 'welcome-mount' || ch.id === 'messages-mount') return;
     container.removeChild(ch);
   });
 }
@@ -1216,82 +1227,9 @@ function renderSessionMessages(conv) {
   setWelcomeVisible(false);
   _clearChatMessages(container);
 
-  for (var mi = 0; mi < conv.messages.length; mi++) {
-    var msg = conv.messages[mi];
-    if (msg.type === 'status') continue;
-
-    if (msg.role === 'user' && msg.display === 'runtime') {
-      var nextMsg = (mi + 1 < conv.messages.length) ? conv.messages[mi + 1] : null;
-      if (nextMsg && nextMsg.role === 'assistant' && (nextMsg.display === 'runtime' || nextMsg.function)) {
-        var restoredEl = _buildRestoredRuntimeBlock(msg, nextMsg, mi);
-        // Stamp BOTH underlying message ids so the history-graph
-        // visibility sync can light up both runtime-display nodes
-        // (user-call + assistant-result) when this merged block is
-        // on screen. data-msg-id stays single for the action bar's
-        // retry/branch targeting — nextMsg.id is the assistant id
-        // which the retry endpoint walks back from correctly.
-        if (nextMsg.id) restoredEl.setAttribute('data-msg-id', nextMsg.id);
-        var ids = [];
-        if (msg.id) ids.push(msg.id);
-        if (nextMsg.id) ids.push(nextMsg.id);
-        if (ids.length) restoredEl.setAttribute('data-msg-ids', ids.join(' '));
-        container.appendChild(restoredEl);
-        mi++;
-        continue;
-      }
-      var interruptedEl = _buildInterruptedRuntimeBlock(msg);
-      if (msg.id) interruptedEl.setAttribute('data-msg-id', msg.id);
-      container.appendChild(interruptedEl);
-      continue;
-    }
-
-    var div = document.createElement('div');
-    if (msg.role === 'user') {
-      div.className = 'message user';
-      div.innerHTML =
-        '<div class="message-header">' +
-          '<div class="message-avatar user-avatar">U</div>' +
-          '<div class="message-sender">You</div>' +
-        '</div>' +
-        '<div class="message-content">' + escHtml(msg.content || '') + '</div>';
-    } else {
-      var isOrphanRuntime = msg.display === 'runtime' || (msg.function && msg.function !== 'chat' && msg.type === 'result');
-      if (isOrphanRuntime) {
-        div = _buildOrphanRuntimeBlock(msg, mi);
-      } else {
-        div = _buildAssistantMessage(msg, mi);
-      }
-    }
-    // Stamp msg_id so the hover action bar (copy/retry/branch) can
-    // target the right server-side message. The retry endpoint
-    // walks back to the nearest user turn, so passing an assistant
-    // id (may be "{x}_reply") is equally valid.
-    if (msg.id) div.setAttribute('data-msg-id', msg.id);
-    // ContextGit metadata — sibling counts drive <N/M> nav, timestamp
-    // drives the hover tooltip. See message-actions-nav.js.
-    if (msg.sibling_index && msg.sibling_total) {
-      div.setAttribute('data-sibling-index', String(msg.sibling_index));
-      div.setAttribute('data-sibling-total', String(msg.sibling_total));
-      // Server provides direct prev/next ids because the client only
-      // holds the linear chain under HEAD — sibling branches aren't
-      // in _allMessages. See server load_session handler.
-      if (msg.prev_sibling_id) div.setAttribute('data-prev-sibling', msg.prev_sibling_id);
-      if (msg.next_sibling_id) div.setAttribute('data-next-sibling', msg.next_sibling_id);
-    }
-    if (msg.timestamp || msg.created_at) {
-      var ts = msg.timestamp || msg.created_at;
-      // Stamp the raw timestamp as a data attr only. The visible
-      // hover target is a small badge rendered by message-actions.js
-      // inside the action bar — NOT `div.title`, which would make
-      // the native browser tooltip fire on the entire bubble.
-      var tsMs = ts > 1e12 ? ts : ts * 1000;
-      div.setAttribute('data-created-at', String(tsMs));
-    }
-    container.appendChild(div);
-    if (typeof window.ensureMessageActions === 'function') {
-      window.ensureMessageActions(div);
-    }
-  }
+  // Phase 3: the React <MessageList /> renders the message bubbles now
+  // (fed via `__feedStoreFromConv` above). The legacy DOM-building loop
+  // is gone — only the non-render bookkeeping below still runs.
 
   // Expose the full message list to the nav module so it can walk
   // siblings without a round-trip. Populated here since this is the
@@ -1313,44 +1251,19 @@ function renderSessionMessages(conv) {
     );
   }
 
-  // Re-attach any in-flight assistant placeholders that this
-  // re-render detached. renderSessionMessages clears the chat
-  // container above; _renderChatStreamEvent still mutates the
-  // pendingResponses node (now detached) so tool_use / tool_result
-  // bubbles accumulate in memory but the user sees nothing until
-  // _handleChatResult re-attaches at the end. Re-attaching here means
-  // retry's tool calls render live, not all-at-once on completion.
-  // Re-attach in-flight placeholders that this re-render detached.
-  // Two guards prevent ghost bubbles on branch switches:
-  //   * skip when no run is active — a placeholder lingering past
-  //     run completion is by definition orphan, drop it
-  //   * skip when the placeholder's key isn't on the current branch
-  //     (e.g. a run on a sibling that the user just navigated away
-  //     from); the run still owns it but it shouldn't render here
+  // Phase 3: legacy in-flight placeholder re-attachment is gone — the
+  // React store keeps streaming bubbles alive across a conversation
+  // re-render on its own, so there are no detached legacy nodes to
+  // re-attach. `pendingResponses` is still drained so it doesn't grow
+  // unbounded.
   try {
     var _runActive = (typeof window.isRunning !== 'undefined' && window.isRunning)
                   || (typeof isRunning !== 'undefined' && isRunning);
-    var idsOnBranch = {};
-    (conv.messages || []).forEach(function (m) {
-      if (m && m.id) idsOnBranch[m.id] = true;
-    });
-    Object.keys(pendingResponses || {}).forEach(function (k) {
-      var ph = pendingResponses[k];
-      if (!ph || document.body.contains(ph)) return;
-      // Key is on this branch (the user msg the assistant is replying
-      // to) → re-attach. Brand-new retry/edit puts its placeholder
-      // key as the just-forked user msg, which is the new HEAD and
-      // therefore on the branch we're about to render. So this also
-      // covers the live-streaming retry case.
-      if (_runActive && idsOnBranch[k]) {
-        container.appendChild(ph);
-      } else if (!_runActive) {
+    if (!_runActive) {
+      Object.keys(pendingResponses || {}).forEach(function (k) {
         delete pendingResponses[k];
-      }
-      // else: run is active but key not on this branch — leave the
-      // node detached (still in pendingResponses for the owner branch
-      // to find on its next render).
-    });
+      });
+    }
   } catch (e) {}
 
   // Branch switch / checkout pivot: scroll to the message the user

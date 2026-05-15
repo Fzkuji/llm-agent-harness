@@ -8,6 +8,8 @@
  * card, then the answer text. While the turn is still streaming with
  * nothing rendered yet, a typing indicator stands in.
  */
+import { useEffect, useRef } from "react";
+
 import type { ChatMsg } from "@/lib/session-store";
 
 import { renderMarkdown, useMarkdownReady } from "./markdown";
@@ -33,8 +35,26 @@ export function AssistantBubble({ msg }: { msg: ChatMsg }) {
   const hasContent = !!msg.content;
   const empty = !hasContent && !msg.thinking && tools.length === 0;
 
+  // Wire the legacy hover action bar onto the bubble once the turn is
+  // settled (a streaming bubble has no actions yet). Re-run when the
+  // turn finalizes so the bar reflects the final state.
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (streaming) return;
+    const ensure = (window as unknown as {
+      ensureMessageActions?: (el: HTMLElement) => void;
+    }).ensureMessageActions;
+    if (ensure && ref.current) {
+      try {
+        ensure(ref.current);
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [msg.id, streaming]);
+
   return (
-    <div className="message assistant" data-msg-id={msg.id}>
+    <div className="message assistant" data-msg-id={msg.id} ref={ref}>
       <div className="message-header">
         <div className="message-avatar bot-avatar">A</div>
         <div className="message-sender">Agentic</div>

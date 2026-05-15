@@ -3,26 +3,28 @@
 /**
  * Message list — the React message stream.
  *
- * Subscribes to the session store's per-conversation id list and
- * renders one bubble per id. Each `MessageRow` subscribes to *its own*
- * message entry (`useMessageById`), so a streaming delta re-renders
- * only the affected bubble — not the whole list.
+ * Portaled into `#messages-mount` (a `display:contents` host inside the
+ * legacy `#chatMessages` container), so each rendered bubble becomes a
+ * direct flex child of `#chatMessages` — the same layout the legacy
+ * renderer produced.
  *
- * Phase 2: this component is built but not yet mounted. Phase 3 wires
- * it into the chat route in place of the legacy chat-ws.js renderer.
+ * The active conversation comes from the store's `currentSessionId`,
+ * kept in sync by the `chat_ack` reducer and the route effect in
+ * `app-shell.tsx`. Each `MessageRow` subscribes to its own message
+ * entry so a streaming delta re-renders only the affected bubble.
  */
-import { memo } from "react";
+import { memo, useEffect } from "react";
 
 import {
   useMessageById,
   useMessageIds,
+  useSessionStore,
   type ChatMsg,
 } from "@/lib/session-store";
 
 import { AssistantBubble } from "./assistant-bubble";
 import { RuntimeBlock } from "./runtime-block";
 import { UserBubble } from "./user-bubble";
-import { useStickToBottom } from "./use-stick-to-bottom";
 
 function dispatch(msg: ChatMsg) {
   if (msg.role === "system") {
@@ -48,18 +50,42 @@ const MessageRow = memo(function MessageRow({ id }: { id: string }) {
   return dispatch(msg);
 });
 
-export function MessageList({ sessionId }: { sessionId: string | null }) {
+/** Pin `#chatArea` to the bottom as `#chatMessages` grows, unless the
+ *  user has scrolled up. Observes the container rather than threading a
+ *  dependency through, so both new bubbles and streamed text deltas
+ *  keep the viewport at the bottom. */
+function useChatAreaStick() {
+  useEffect(() => {
+    const area = document.getElementById("chatArea");
+    const msgs = document.getElementById("chatMessages");
+    if (!area || !msgs) return;
+    let stuck = true;
+    const pin = () => {
+      if (stuck) area.scrollTop = area.scrollHeight;
+    };
+    const onScroll = () => {
+      stuck = area.scrollHeight - area.scrollTop - area.clientHeight < 80;
+    };
+    area.addEventListener("scroll", onScroll, { passive: true });
+    const ro = new ResizeObserver(pin);
+    ro.observe(msgs);
+    return () => {
+      area.removeEventListener("scroll", onScroll);
+      ro.disconnect();
+    };
+  }, []);
+}
+
+export function MessageList() {
+  const sessionId = useSessionStore((s) => s.currentSessionId);
   const ids = useMessageIds(sessionId);
-  // The scroll container self-pins via a ResizeObserver on its
-  // children, so streaming deltas and new messages both keep the view
-  // at the bottom without a dependency being threaded here.
-  const scrollRef = useStickToBottom();
+  useChatAreaStick();
 
   return (
-    <div className="chat-messages" ref={scrollRef}>
+    <>
       {ids.map((id) => (
         <MessageRow key={id} id={id} />
       ))}
-    </div>
+    </>
   );
 }

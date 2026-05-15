@@ -114,9 +114,13 @@ function scrollToBottom(opts) {
 }
 
 function appendToChat(el) {
-  var container = document.getElementById('chatMessages');
-  if (!container) return;
-  container.appendChild(el);
+  // Phase 3: the React <MessageList /> owns the message stream. Legacy
+  // bubble builders still run (they populate `conversations[]`, titles,
+  // trees) but their DOM nodes must NOT enter `#chatMessages` — that
+  // would double-render alongside the React rows. Dropping the append
+  // here is the single chokepoint that neuters every legacy bubble
+  // renderer (addUserMessage / addAssistantPlaceholder / runtime block
+  // builders / _handleChatResult / _handleRuntimeResult) at once.
 }
 
 function autoResize(el) {

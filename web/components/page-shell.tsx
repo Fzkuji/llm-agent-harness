@@ -124,6 +124,17 @@ function stripLegacyChatChrome(host: HTMLElement) {
   // logo + buttons sit in roughly the same vertical region.
   const chatMessages = host.querySelector("#chatMessages");
   if (chatMessages) {
+    // `#messages-mount` hosts the React <MessageList /> portal — the
+    // message stream. `display: contents` lets each rendered bubble
+    // become a direct flex child of `#chatMessages`, matching the
+    // layout the legacy renderer produced. It sits BEFORE the welcome
+    // mount so messages render above the (hidden-when-non-empty)
+    // welcome panel.
+    const mmount = document.createElement("div");
+    mmount.id = "messages-mount";
+    mmount.style.display = "contents";
+    chatMessages.appendChild(mmount);
+
     const wmount = document.createElement("div");
     wmount.id = "welcome-mount";
     // `display: contents` makes the mount point invisible to layout —
@@ -234,7 +245,7 @@ export function PageShell({ page }: { page: Page }) {
   //     chat area in place (welcome screen + cleared state)
   // SPA hand-off from /programs → /chat lives in its own hook —
   // see lib/use-pending-run-function.ts.
-  usePendingRunFunction(page === "chat");
+  usePendingRunFunction(pathname);
 
   useEffect(() => {
     if (page !== "chat") return;

@@ -51,6 +51,10 @@ interface ChatResponseData {
   content?: string;
   text?: string;
   cancelled?: boolean;
+  context_tree?: unknown;
+  usage?: unknown;
+  attempts?: { content: string; timestamp: number; tree?: unknown; usage?: unknown }[];
+  current_attempt?: number;
 }
 
 interface WsEnvelope {
@@ -75,46 +79,109 @@ export function applyChatWsMessage(msg: WsEnvelope): void {
   }
 }
 
+/** A `chat_ack` only tells us which conversation the turn belongs to —
+ *  for a brand-new chat that's the first time the server-assigned id is
+ *  known. The assistant reply bubble is NOT created here: doing so
+ *  would land it in `messageOrder` before the user turn (whose
+ *  `user_message` broadcast can arrive either side of the ack). The
+ *  reply is created lazily on the first stream event / result instead,
+ *  by which point the user turn is already in place. */
 function handleAck(d: { session_id?: string; msg_id?: string } | undefined): void {
-  if (!d?.session_id || !d?.msg_id) return;
+  if (!d?.session_id) return;
+  useSessionStore.getState().setCurrentConv(d.session_id);
+
+  // The server does NOT echo a web-originated user turn back as a
+  // `user_message` broadcast (only channel/peer turns get that). So the
+  // user bubble is created here, from the text the composer stashed on
+  // `window.__pendingUserText` just before sending. `chat_ack.msg_id`
+  // IS the user turn's id — keying it here lets the reply (`_reply`
+  // suffix) and the later result anchor to the same turn.
+  const w = window as unknown as { __pendingUserText?: string };
+  const text = w.__pendingUserText;
+  if (d.msg_id && typeof text === "string" && text) {
+    w.__pendingUserText = undefined;
+    const isRun = /^(run|create|fix)\s/i.test(text);
+    appendLocalUserTurn(
+      d.session_id,
+      d.msg_id,
+      text,
+      isRun ? "runtime" : undefined,
+    );
+    // Create the reply bubble right away (after the user turn, so the
+    // order is right) — gives an immediate typing indicator / pending
+    // runtime block instead of a gap until the first stream event.
+    const rid = replyId(d.msg_id);
+    ensureReply(d.session_id, rid);
+    if (isRun) {
+      useSessionStore
+        .getState()
+        .updateMessage(d.session_id, rid, { display: "runtime" });
+    }
+  }
+}
+
+/** Fetch the assistant reply bubble, creating it on first use. Keeps
+ *  reply creation after the user turn in `messageOrder`. */
+function ensureReply(sid: string, rid: string): ChatMsg {
   const store = useSessionStore.getState();
-  const rid = replyId(d.msg_id);
-  if (store.messagesById[rid]) return;
-  store.appendMessage(d.session_id, {
+  const existing = store.messagesById[rid];
+  if (existing) return existing;
+  store.appendMessage(sid, {
     id: rid,
     role: "assistant",
     content: "",
     status: "streaming",
   });
+  return useSessionStore.getState().messagesById[rid];
 }
 
 function handleResponse(d: ChatResponseData | undefined): void {
-  if (!d || !d.session_id || !d.msg_id) return;
+  if (!d || !d.msg_id) return;
+  // Stream / result envelopes don't always carry `session_id` — the
+  // legacy renderer only ever keyed off `msg_id`. Fall back to the
+  // store's current conversation (set by the preceding `chat_ack`).
+  const sid =
+    d.session_id || useSessionStore.getState().currentSessionId || undefined;
+  if (!sid) return;
 
   // A user turn — either echoed back by the server or broadcast from a
   // peer. Keyed by the bare `msg_id` (the reply takes the `_reply`
   // suffix), so it never collides with its own assistant bubble.
   if (d.type === "user_message") {
-    handleUserMessage(d);
+    handleUserMessage(sid, d);
     return;
   }
 
   const rid = replyId(d.msg_id);
 
   if (d.type === "stream_event" && d.event) {
-    applyStreamEvent(d.session_id, rid, d.event);
+    // A `/run` turn: tag the reply as a runtime turn up front so
+    // <MessageList /> routes it to <RuntimeBlock />, which renders the
+    // `#runtime_pending` host the legacy CLI/tree stream handlers
+    // target. `_chat` / `chat` are plain chat — left as assistant.
+    const isRuntime =
+      d.display === "runtime" ||
+      (!!d.function && d.function !== "_chat" && d.function !== "chat");
+    if (isRuntime) {
+      ensureReply(sid, rid);
+      useSessionStore.getState().updateMessage(sid, rid, {
+        display: "runtime",
+        function: d.function,
+      });
+    }
+    applyStreamEvent(sid, rid, d.event);
     return;
   }
   if (d.type === "result" || d.type === "error" || d.type === "cancelled") {
-    finalize(d.session_id, rid, d);
+    finalize(sid, rid, d);
   }
 }
 
-function handleUserMessage(d: ChatResponseData): void {
-  if (!d.session_id || !d.msg_id) return;
+function handleUserMessage(sid: string, d: ChatResponseData): void {
+  if (!d.msg_id) return;
   const store = useSessionStore.getState();
   if (store.messagesById[d.msg_id]) return;
-  store.appendMessage(d.session_id, {
+  store.appendMessage(sid, {
     id: d.msg_id,
     role: "user",
     content: d.content ?? d.text ?? "",
@@ -148,8 +215,7 @@ export function appendLocalUserTurn(
 
 function applyStreamEvent(sid: string, rid: string, evt: StreamEvent): void {
   const store = useSessionStore.getState();
-  const cur = store.messagesById[rid];
-  if (!cur) return; // placeholder must exist — chat_ack creates it
+  const cur = ensureReply(sid, rid);
 
   switch (evt.type) {
     case "text":
@@ -194,8 +260,7 @@ function applyStreamEvent(sid: string, rid: string, evt: StreamEvent): void {
 
 function finalize(sid: string, rid: string, d: ChatResponseData): void {
   const store = useSessionStore.getState();
-  const cur = store.messagesById[rid];
-  if (!cur) return;
+  const cur = ensureReply(sid, rid);
 
   const status: ChatMsg["status"] =
     d.type === "error"
@@ -204,9 +269,17 @@ function finalize(sid: string, rid: string, d: ChatResponseData): void {
         ? "cancelled"
         : "done";
 
-  const patch: Partial<ChatMsg> = { status };
+  const patch: Partial<ChatMsg> = { status, rawType: d.type };
   if (d.function) patch.function = d.function;
   if (d.display) patch.display = d.display;
+  // A `/run` result carries the execution tree, usage and attempt
+  // history that the runtime block renders in its body / footer.
+  if (d.context_tree) patch.contextTree = d.context_tree as never;
+  if (d.usage) patch.usage = d.usage;
+  if (d.attempts) patch.attempts = d.attempts as never[];
+  if (typeof d.current_attempt === "number") {
+    patch.current_attempt = d.current_attempt;
+  }
 
   // `result` carries the full final text. Streaming usually already
   // built `content` delta-by-delta; only fall back to the result's
