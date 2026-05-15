@@ -12,28 +12,6 @@ from fastapi.responses import JSONResponse
 
 
 def register(app):
-    @app.get("/api/sessions/{session_id}/dag-tree")
-    async def get_session_dag_tree(session_id: str):
-        """Return one session's ``@agentic_function`` execution forest
-        as a list of tree dicts the existing viewer can render.
-
-        Reads the DAG straight off SessionDB — no live in-memory
-        snapshot, no event subscription. Each call hits SQLite once.
-        Returns ``{"trees": []}`` when the session has no code Calls
-        (e.g. a chat-only conversation with no tools).
-        """
-        from openprogram.agent.session_db import default_db
-        from openprogram.context.dag_view import dag_to_tree_dicts
-        from openprogram.context.storage import GraphStore
-
-        db = default_db()
-        if db.get_session(session_id) is None:
-            return JSONResponse(
-                content={"error": "unknown session"}, status_code=404,
-            )
-        graph = GraphStore(db.db_path, session_id).load()
-        return JSONResponse(content={"trees": dag_to_tree_dicts(graph)})
-
     @app.get("/api/functions")
     async def get_functions():
         from openprogram.webui import server as _s

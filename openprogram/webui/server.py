@@ -1220,7 +1220,7 @@ def _execute_in_context(session_id: str, msg_id: str, action: str,
                 # Live tree updates: retired together with the tree-Context
                 # event system. The function's DAG nodes are already written
                 # to SessionDB by the @agentic_function decorator; UI viewers
-                # query that directly via /api/sessions/{id}/dag-tree.
+                # query that directly off SessionDB.
                 with _web_follow_up(session_id, msg_id, func_name, tree_cb=None):
                     try:
                         result = _format_result(loaded_func(**call_kwargs), action=func_name)
@@ -1253,7 +1253,7 @@ def _execute_in_context(session_id: str, msg_id: str, action: str,
                 # tree Context retired — surface the minimal tree dict the
                 # frontend currently expects on the assistant reply. The
                 # execution's actual trace lives in SessionDB as DAG nodes,
-                # fetched separately via /api/sessions/{id}/dag-tree.
+                # read directly off SessionDB.
                 tree_dict = {
                     "path": func_name,
                     "name": func_name,
@@ -1503,7 +1503,7 @@ async def _websocket_handler(ws):
     try:
         # Send current state on connect. ``full_tree`` is kept as an
         # empty payload for protocol compatibility — execution traces
-        # are now DAG nodes fetched via /api/sessions/{id}/dag-tree.
+        # are now DAG nodes stored in SessionDB.
         await ws.send_text(json.dumps(
             {"type": "full_tree", "data": []}, default=str
         ))

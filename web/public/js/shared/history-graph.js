@@ -120,16 +120,20 @@
     return { roots: roots, byId: byId };
   }
 
-  // Depth assignment (row). Parent is always above its children.
-  function _assignDepth(roots) {
-    var maxDepth = 0;
-    function walk(n, d) {
-      n._depth = d;
-      if (d > maxDepth) maxDepth = d;
-      n.children.forEach(function (c) { walk(c, d + 1); });
-    }
-    roots.forEach(function (r) { walk(r, 0); });
-    return maxDepth;
+  // Depth assignment (row). git-log style: every node gets its OWN
+  // row, ordered by creation time. A child is always created after its
+  // parent, so this keeps parents above children while guaranteeing
+  // one-node-per-row — which lets each row carry an inline label
+  // without siblings colliding. Fork edges simply skip rows.
+  function _assignDepth(byId) {
+    var all = Object.keys(byId).map(function (id) { return byId[id]; });
+    all.sort(function (a, b) {
+      var dt = (a.created_at || 0) - (b.created_at || 0);
+      if (dt !== 0) return dt;
+      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+    });
+    all.forEach(function (n, i) { n._depth = i; });
+    return all.length ? all.length - 1 : 0;
   }
 
   // Walk from headId up to root, collecting ids. Returns [] if head unknown.
@@ -228,6 +232,26 @@
     if (role === 'assistant') return 'triangle';
     if (role === 'user') return 'circle';
     return 'circle';
+  }
+
+  // Inline row label. Runtime nodes show the function name; chat
+  // messages show their content preview so the graph reads as a
+  // detailed transcript outline, not a column of anonymous dots.
+  function _labelFor(node) {
+    if (node.display === 'runtime') return node.function || 'runtime';
+    if (node.preview) return node.preview;
+    if (node.role === 'user') return 'You';
+    if (node.role === 'assistant') return 'Agent';
+    return node.role || '?';
+  }
+
+  // Truncate to fit a pixel width (≈6.2px per char at the 11px label
+  // font). Adaptive: a wider panel passes a larger maxW, so labels
+  // grow instead of staying clipped.
+  function _fitLabel(text, maxW) {
+    var max = Math.max(4, Math.floor(maxW / 6.2));
+    if (text.length <= max) return text;
+    return text.slice(0, max - 1) + '…';
   }
 
   // Compute shape size attrs for a given "isCurrent" state. Kept as a
@@ -382,7 +406,7 @@
     }
 
     var tree = _buildTree(graph);
-    var maxDepth = _assignDepth(tree.roots);
+    var maxDepth = _assignDepth(tree.byId);
     var lanes = _assignLanes(tree.byId, tree.roots, headId);
     _leafOfNode = lanes.leafOfNode;
 
@@ -398,7 +422,16 @@
     _headAncestors(tree.byId, headId).forEach(function (id) { headAncestors[id] = true; });
     _headAncestorSet = headAncestors;
 
-    var width = PAD_X * 2 + COL_W * Math.max(lanes.laneCount - 1, 0);
+    // Lane area = the coloured branch ribbons. Labels start just past
+    // the rightmost lane and the graph extends DOWNWARD (one row per
+    // node). The label column is adaptive: it stretches to whatever
+    // width the panel currently has, so opening / widening the sidebar
+    // gives the labels more room instead of clipping them.
+    var laneArea = PAD_X + COL_W * Math.max(lanes.laneCount - 1, 0);
+    var labelX = laneArea + 16;
+    var panelW = (body && body.clientWidth) || 240;
+    var width = Math.max(panelW - 4, labelX + 90);
+    var labelMaxW = width - labelX - 10;
     var height = PAD_Y * 2 + ROW_H * maxDepth;
 
     var svg = _svg('svg', {
@@ -473,6 +506,24 @@
       nodeG.appendChild(g);
     });
 
+    // Inline labels — one per row, all starting at the same x so they
+    // form a clean column to the right of the branch ribbons.
+    var labelG = _svg('g', { class: 'history-labels' });
+    Object.keys(tree.byId).forEach(function (id) {
+      var node = tree.byId[id];
+      var p = pos(node);
+      var onHead = !!headAncestors[id];
+      var text = _svg('text', {
+        x: String(labelX),
+        y: String(p.y),
+        class: 'history-label' + (onHead ? ' on-head' : '') + (id === headId ? ' is-head' : ''),
+        'data-msg-id': id,
+      });
+      text.textContent = _fitLabel(_labelFor(node), labelMaxW);
+      labelG.appendChild(text);
+    });
+    svg.appendChild(labelG);
+
     // Branch-name tags — git-style labels floating above leaves that
     // the user explicitly named. Source of truth is
     // window._branchesByConv (populated by conversations.js after
@@ -532,8 +583,10 @@
     _visibleIds = Object.create(null);
 
     // First render after #chatArea mounts is a good moment to hook
-    // chat scroll → visibility sync. Idempotent.
+    // chat scroll → visibility sync, and the panel resize → re-fit
+    // observer. Both idempotent.
     _wireChatScrollSync();
+    _wirePanelResize();
     // Compute once synchronously for nodes whose chat bubbles are
     // already laid out, then again on the next frame: a render
     // triggered by a *new* message often runs before that message's
@@ -807,4 +860,33 @@
     if (_lastGraph) _origRender(_lastGraph, _lastHeadId);
   };
   window.recomputeHistoryVisibility = _recomputeVisibility;
+
+  // Re-fit the graph when the History panel resizes (sidebar opened /
+  // widened). The label column is laid out against the panel width, so
+  // a width change needs a fresh render — bypass the signature
+  // short-circuit by clearing _lastSignature first. Idempotent.
+  var _panelResizeWired = false;
+  function _wirePanelResize() {
+    if (_panelResizeWired) return;
+    if (typeof ResizeObserver === 'undefined') return;
+    var panel = document.getElementById('historyPanel');
+    if (!panel) return;
+    var body = panel.querySelector('.history-body');
+    if (!body) return;
+    _panelResizeWired = true;
+    var lastW = body.clientWidth;
+    var raf = 0;
+    var ro = new ResizeObserver(function () {
+      var w = body.clientWidth;
+      if (w === lastW || !_lastGraph) return;
+      lastW = w;
+      if (raf) return;
+      raf = requestAnimationFrame(function () {
+        raf = 0;
+        _lastSignature = null;
+        _origRender(_lastGraph, _lastHeadId);
+      });
+    });
+    ro.observe(body);
+  }
 })();

@@ -87,14 +87,6 @@ function handleChatResponse(data) {
     _handleChatResult(data, type);
   }
 
-  // Pull the @agentic_function execution forest off SessionDB after
-  // each completed response. Backend no longer streams partial trees;
-  // we fetch the final shape once and let tree-render.js redraw.
-  if (type === 'result' && currentSessionId &&
-      typeof window.fetchSessionDagTree === 'function') {
-    window.fetchSessionDagTree(currentSessionId);
-  }
-
   // Store assistant message
   if (currentSessionId && conversations[currentSessionId]) {
     if (!conversations[currentSessionId].messages) conversations[currentSessionId].messages = [];

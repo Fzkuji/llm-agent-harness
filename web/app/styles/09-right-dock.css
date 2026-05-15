@@ -247,6 +247,18 @@
 }
 .history-node.is-head { filter: drop-shadow(0 0 4px rgba(255,255,255,0.35)); }
 
+/* Inline row labels — message preview / function name beside each node. */
+.history-label {
+  font-size: 11px;
+  font-family: var(--font-sans, sans-serif);
+  fill: var(--text-muted);
+  dominant-baseline: middle;
+  pointer-events: none;
+  user-select: none;
+}
+.history-label.on-head { fill: var(--text-secondary); }
+.history-label.is-head { fill: var(--text-primary); font-weight: 600; }
+
 .history-tooltip {
   position: absolute;
   pointer-events: none;

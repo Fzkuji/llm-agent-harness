@@ -129,7 +129,7 @@ async def handle_load_session(ws, cmd: dict):
                 "next_sibling_id": next_id,
             })
 
-        tree_data = {}  # tree Context retired — DAG tree is fetched via /api/sessions/{id}/dag-tree
+        tree_data = {}  # tree Context retired — execution trace lives in SessionDB DAG nodes
         try:
             from openprogram.agent.session_db import default_db
             full_msgs = default_db().get_messages(conv["id"])
