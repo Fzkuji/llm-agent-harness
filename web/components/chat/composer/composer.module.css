@@ -6,8 +6,15 @@
 .inputArea {
   padding: 12px 24px 24px;
   background: var(--bg-primary);
-  flex-shrink: 0;
-  position: relative;
+  /* Anchored to the bottom of `#chatView` and floated OVER the chat
+     area, not pushed into the flex flow — so growing the fn-form
+     overlaps the chat content instead of squeezing it shorter (which
+     made the welcome screen reflow). */
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
 }
 .inputArea::before {
   content: "";
@@ -532,7 +539,8 @@
   transition: background 0.12s;
   text-align: left;
 }
-.slashMenuItem:hover {
+.slashMenuItem:hover,
+.slashMenuItemActive {
   background: var(--bg-hover);
 }
 .slashMenuName {

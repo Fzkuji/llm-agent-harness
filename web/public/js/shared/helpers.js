@@ -140,7 +140,10 @@ function setWelcomeVisible(show) {
   }
   var cm = document.getElementById('chatMessages');
   var ca = document.getElementById('chatArea');
-  if (cm) cm.style.paddingBottom = show ? '0' : '';
+  // The composer is absolutely anchored over the chat area's bottom,
+  // so the welcome screen needs bottom clearance to keep its examples
+  // row above the (collapsed) composer rather than behind it.
+  if (cm) cm.style.paddingBottom = show ? '150px' : '';
   if (ca) ca.classList.toggle('welcome-visible', !!show);
 }
 

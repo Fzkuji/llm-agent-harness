@@ -252,7 +252,46 @@ export function Composer() {
     send({ action: "stop", session_id: currentSessionId });
   }
 
+  // Pick a slash command — argless commands run immediately, commands
+  // that take arguments just fill the input so the user can type them.
+  function selectSlashCommand(cmd: SlashCommand) {
+    if (cmd.args) {
+      setInput(`${cmd.name} `);
+      requestAnimationFrame(() => textareaRef.current?.focus());
+      return;
+    }
+    if (slash.runCommand(cmd.name)) {
+      setInput("");
+      slash.close();
+    }
+  }
+
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    // While the slash menu is open it captures the arrow keys (move the
+    // highlight), Enter (pick the highlighted command) and Escape.
+    if (slash.visible) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        slash.move(1);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        slash.move(-1);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        slash.close();
+        return;
+      }
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        const cmd = slash.matches[slash.activeIndex];
+        if (cmd) selectSlashCommand(cmd);
+        return;
+      }
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       submit();
@@ -260,8 +299,14 @@ export function Composer() {
   }
 
   function onMenuItemClick(cmd: SlashCommand) {
-    setInput(cmd.args ? `${cmd.name} ` : cmd.name);
-    requestAnimationFrame(() => textareaRef.current?.focus());
+    selectSlashCommand(cmd);
+  }
+
+  // Dismiss the slash menu when the textarea loses focus (the user
+  // clicked away). Menu-item clicks preventDefault their mousedown so
+  // they don't trigger this before the click registers.
+  function onTextareaBlur() {
+    if (slash.query !== null) slash.close();
   }
 
   /* ---- Function form submit ---------------------------------------- */
@@ -378,10 +423,16 @@ export function Composer() {
           <div
             className={`${styles.slashMenu} ${slash.closing ? styles.closing : styles.opening}`}
           >
-            {slash.matches.map((c) => (
+            {slash.matches.map((c, i) => (
               <div
                 key={c.name}
-                className={styles.slashMenuItem}
+                ref={
+                  i === slash.activeIndex
+                    ? (el) => el?.scrollIntoView({ block: "nearest" })
+                    : undefined
+                }
+                className={`${styles.slashMenuItem} ${i === slash.activeIndex ? styles.slashMenuItemActive : ""}`}
+                onMouseEnter={() => slash.move(i - slash.activeIndex)}
                 onMouseDown={(e) => {
                   e.preventDefault();
                   onMenuItemClick(c);
@@ -435,6 +486,7 @@ export function Composer() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={onKeyDown}
+              onBlur={onTextareaBlur}
             />
           </div>
         )}

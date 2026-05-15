@@ -129,19 +129,13 @@
   margin: auto auto 0;
   flex-shrink: 0;
   opacity: 1;
-  transform: translateY(0);
-  transition:
-    opacity 0.18s ease,
-    transform 0.25s cubic-bezier(0.25, 0.1, 0.25, 1);
+  transition: opacity 0.18s ease;
 }
-/* Collapsed state — triggered when the function-form opens. The row
-   slides down toward the composer and fades out, mirroring the
-   legacy welcome-examples drop animation. `visibility: hidden` after
-   the transition removes the row from focus / hit-testing while
-   keeping the layout slot intact. */
+/* Collapsed state — the fn-form expands over the welcome screen, so
+   the examples row just fades out in place (no slide — the welcome
+   layout is fixed and doesn't move). */
 .examples[data-collapsed="true"] {
   opacity: 0;
-  transform: translateY(24px);
   pointer-events: none;
 }
 :global(body.slash-menu-open) .examples {

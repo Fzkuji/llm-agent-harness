@@ -40,6 +40,10 @@ export interface SlashMenuHook {
   closing: boolean;
   matches: SlashCommand[];
   visible: boolean;
+  /** Index of the keyboard-highlighted command in `matches`. */
+  activeIndex: number;
+  /** Move the highlight by `delta`, wrapping around the list. */
+  move: (delta: number) => void;
   close: () => void;
   runCommand: (text: string) => boolean;
 }
@@ -90,6 +94,24 @@ export function useSlashMenu({ input, textareaRef, send }: UseSlashMenuArgs): Sl
     return SLASH_COMMANDS.filter((c) => c.name.toLowerCase().startsWith(query));
   }, [query]);
 
+  // Keyboard highlight — reset to the top whenever the filter changes
+  // so the user always starts from the first match.
+  const [activeIndex, setActiveIndex] = useState(0);
+  useEffect(() => {
+    setActiveIndex(0);
+  }, [query]);
+
+  const move = useCallback(
+    (delta: number) => {
+      setActiveIndex((i) => {
+        const n = matches.length;
+        if (n === 0) return 0;
+        return (i + delta + n) % n;
+      });
+    },
+    [matches.length],
+  );
+
   const slashContext = useMemo<SlashContext>(
     () => ({
       sessionId: currentSessionId,
@@ -127,6 +149,8 @@ export function useSlashMenu({ input, textareaRef, send }: UseSlashMenuArgs): Sl
     closing,
     matches,
     visible: query !== null && matches.length > 0,
+    activeIndex: Math.min(activeIndex, Math.max(0, matches.length - 1)),
+    move,
     close,
     runCommand,
   };
