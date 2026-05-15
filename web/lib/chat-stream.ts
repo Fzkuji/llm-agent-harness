@@ -52,6 +52,8 @@ interface ChatResponseData {
   text?: string;
   cancelled?: boolean;
   context_tree?: unknown;
+  /** Live execution tree carried by `tree_update` envelopes. */
+  tree?: unknown;
   usage?: unknown;
   attempts?: { content: string; timestamp: number; tree?: unknown; usage?: unknown }[];
   current_attempt?: number;
@@ -153,6 +155,18 @@ function handleResponse(d: ChatResponseData | undefined): void {
   }
 
   const rid = replyId(d.msg_id);
+
+  // Live execution tree for a streaming `/run` — store it on the reply
+  // so <RuntimeBlock />'s <ExecutionTree /> renders it as it grows.
+  if (d.type === "tree_update" && d.tree) {
+    ensureReply(sid, rid);
+    useSessionStore.getState().updateMessage(sid, rid, {
+      display: "runtime",
+      function: d.function,
+      contextTree: d.tree as never,
+    });
+    return;
+  }
 
   if (d.type === "stream_event" && d.event) {
     // A `/run` turn: tag the reply as a runtime turn up front so

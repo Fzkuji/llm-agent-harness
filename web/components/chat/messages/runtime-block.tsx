@@ -3,54 +3,49 @@
 /**
  * Runtime block — a `/run <fn>` turn.
  *
- * Rather than re-implement the legacy execution-tree renderer, attempt
- * navigation and usage footer in React, this component delegates to the
- * legacy HTML builders (`buildRuntimeBlockHtml`, `renderInlineTree`,
- * `renderAttemptNav`, all globals defined by the chat-page scripts) and
- * injects the resulting markup. The builders emit inline `onclick`
- * handlers that point at other legacy globals (`toggleRuntimeBlock`,
- * `retryCurrentBlock`, tree node toggles), so collapse / retry / tree
- * interaction keep working without a React port.
+ * Real React now (no more delegation to the legacy `buildRuntimeBlockHtml`):
+ * a collapsible header, the `return:` output, the React <ExecutionTree />,
+ * and a footer with Retry / attempt-nav / usage. While the turn is still
+ * streaming the block renders a pending placeholder carrying
+ * `id="runtime_pending"` so the legacy CLI/tree stream handlers can
+ * target it; on finalize React takes over with the full block.
  *
- * React owns the message ordering and lifecycle; the block's internals
- * stay legacy. While the turn is still streaming, the block renders a
- * pending placeholder carrying `id="runtime_pending"` so the legacy
- * stream/tree handlers can target it.
+ * Retry (`retryCurrentBlock`) and attempt switching (`switchAttempt`)
+ * are still legacy globals — they belong to the conversation / WS
+ * layer, migrated in a later slice.
  */
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
+import { formatUsageFooterLabel } from "@/lib/format";
 import type { ChatMsg } from "@/lib/session-store";
 
+import { ExecutionTree } from "./execution-tree";
+import { renderMarkdown, useMarkdownReady } from "./markdown";
+
 interface RuntimeLegacyGlobals {
-  buildRuntimeBlockHtml?: (
-    fn: string,
-    params: string,
-    contentHtml: string,
-    treeHtml: string,
-    attemptNavHtml: string,
-    rerunHtml: string,
-    usage: unknown,
-  ) => string;
-  renderInlineTree?: (tree: unknown, id: string) => string;
-  renderAttemptNav?: (fn: string, idx: number, total: number) => string;
-  parseRunCommandForDisplay?: (cmd: string) => { funcName: string; params: string };
-  renderMd?: (md: string) => string;
-  escAttr?: (s: string) => string;
-  updateTreeData?: (tree: unknown) => void;
+  retryCurrentBlock?: (fn: string) => void;
+  switchAttempt?: (fn: string, dir: number) => void;
+  renderMathInElement?: (el: HTMLElement, opts: unknown) => void;
 }
 
-function legacy(): RuntimeLegacyGlobals {
-  return window as unknown as RuntimeLegacyGlobals;
+/** Split a `run fn(args)` / `run fn arg1 arg2` command into name +
+ *  params for the header signature. */
+function parseRun(cmd: string): { fn: string; params: string } {
+  const text = cmd.replace(/^(run|create|fix)\s+/i, "").trim();
+  const paren = text.match(/^([\w.-]+)\s*\(([^]*)\)\s*$/);
+  if (paren) return { fn: paren[1], params: paren[2] };
+  const sp = text.indexOf(" ");
+  if (sp < 0) return { fn: text, params: "" };
+  return { fn: text.slice(0, sp), params: text.slice(sp + 1).trim() };
 }
 
-/** Resolve the content + tree to display, honoring the selected
- *  attempt — mirrors legacy `_getDisplayContent`. */
+/** Content + tree for the selected attempt — mirrors legacy
+ *  `_getDisplayContent`. */
 function displayContent(msg: ChatMsg): { content: string; tree: unknown } {
   let content = msg.content || "";
   let tree: unknown = msg.contextTree || null;
   if (msg.attempts && msg.attempts.length > 0) {
-    const idx = msg.current_attempt || 0;
-    const att = msg.attempts[idx];
+    const att = msg.attempts[msg.current_attempt || 0];
     if (att) {
       content = att.content || content;
       tree = att.tree || tree;
@@ -61,76 +56,20 @@ function displayContent(msg: ChatMsg): { content: string; tree: unknown } {
 
 export function RuntimeBlock({ msg }: { msg: ChatMsg }) {
   const ref = useRef<HTMLDivElement>(null);
+  const [collapsed, setCollapsed] = useState(false);
+  useMarkdownReady();
+
   const streaming = msg.status === "streaming" || msg.status === "pending";
+  const { fn, params } = parseRun(msg.function || msg.content || "");
+  const fnName = msg.function || fn;
+  const { content, tree } = displayContent(msg);
 
-  const w = legacy();
-  const fnName = msg.function || "";
-
-  let html: string;
-  if (streaming || !w.buildRuntimeBlockHtml) {
-    // Pending: a minimal header + typing dots. The id lets the legacy
-    // `_handleStreamEvent` / `_handleTreeUpdate` stream into this node.
-    html =
-      '<div class="runtime-block-header" onclick="toggleRuntimeBlock&&toggleRuntimeBlock(this)">' +
-      '<span class="runtime-icon">&#9654;</span>' +
-      '<span class="runtime-func">' +
-      (fnName || "run") +
-      "()</span></div>" +
-      '<div class="runtime-block-body"><div class="runtime-block-content">' +
-      '<div class="typing-indicator"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>' +
-      "</div></div>";
-  } else {
-    const { content, tree } = displayContent(msg);
-    const contentHtml = w.renderMd ? w.renderMd(content) : content;
-    let treeHtml = "";
-    if (tree && w.renderInlineTree) {
-      // The tree id must be unique per block — `toggleInlineTree`
-      // resolves the body by `getElementById('ibody_' + id)`, so two
-      // runs of the same function would otherwise collide and one
-      // header would toggle the other's tree. `msg.id` is unique.
-      treeHtml = w.renderInlineTree(
-        tree,
-        "itree_" + msg.id.replace(/[^a-zA-Z0-9]/g, "_"),
-      );
-      if (w.updateTreeData) w.updateTreeData(tree);
-    }
-    let attemptNavHtml = "";
-    if (msg.attempts && msg.attempts.length > 1 && w.renderAttemptNav) {
-      attemptNavHtml = w.renderAttemptNav(
-        fnName,
-        msg.current_attempt || 0,
-        msg.attempts.length,
-      );
-    }
-    const rerunHtml =
-      fnName && w.escAttr
-        ? '<button class="rerun-btn" onclick="retryCurrentBlock(\'' +
-          w.escAttr(fnName) +
-          "')\">&#8634; Retry</button>"
-        : "";
-    let params = "";
-    if (w.parseRunCommandForDisplay) {
-      params = w.parseRunCommandForDisplay(msg.content || "").params || "";
-    }
-    html = w.buildRuntimeBlockHtml(
-      fnName,
-      params,
-      contentHtml,
-      treeHtml,
-      attemptNavHtml,
-      rerunHtml,
-      msg.usage,
-    );
-  }
-
-  // KaTeX / markdown post-processing the legacy renderer applies after
-  // injecting HTML — keep math + code highlighting consistent.
+  // KaTeX pass over the rendered output (same as the legacy renderer).
   useEffect(() => {
     const el = ref.current;
-    if (!el) return;
-    const renderMath = (window as unknown as { renderMathInElement?: (e: HTMLElement, o: unknown) => void })
+    const renderMath = (window as unknown as RuntimeLegacyGlobals)
       .renderMathInElement;
-    if (renderMath) {
+    if (el && renderMath) {
       try {
         renderMath(el, {
           delimiters: [
@@ -142,24 +81,135 @@ export function RuntimeBlock({ msg }: { msg: ChatMsg }) {
         /* ignore */
       }
     }
-  }, [html]);
+  }, [content]);
 
   const cls = [
     "runtime-block",
+    collapsed ? "collapsed" : "",
     streaming ? "runtime-block-pending" : "",
     msg.status === "error" ? "error" : "",
   ]
     .filter(Boolean)
     .join(" ");
 
+  const header = (
+    <div
+      className="runtime-block-header"
+      onClick={() => setCollapsed((c) => !c)}
+    >
+      <span className="runtime-icon">{"▶"}</span>
+      <span className="runtime-func">
+        {fnName}
+        {params ? (
+          <>
+            (<span className="runtime-params">{params}</span>)
+          </>
+        ) : (
+          "()"
+        )}
+      </span>
+      {!streaming ? (
+        <span className="runtime-result-preview">
+          {"-> " +
+            content.replace(/\s+/g, " ").trim().slice(0, 60) +
+            (content.length > 60 ? "…" : "")}
+        </span>
+      ) : null}
+    </div>
+  );
+
+  if (streaming) {
+    return (
+      <div ref={ref} className={cls} id="runtime_pending" data-function={fnName}>
+        {header}
+        <div className="runtime-block-body">
+          <div className="runtime-block-content">
+            {tree ? (
+              <ExecutionTree tree={tree as never} />
+            ) : (
+              <div className="typing-indicator">
+                <div className="dot" />
+                <div className="dot" />
+                <div className="dot" />
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const w = window as unknown as RuntimeLegacyGlobals;
+  const attempts = msg.attempts ?? [];
+  const attemptIdx = msg.current_attempt || 0;
+  const usageHtml = formatUsageFooterLabel(
+    (msg.usage as Parameters<typeof formatUsageFooterLabel>[0]) || null,
+  );
+  const hasFooter = !!fnName || attempts.length > 1 || !!usageHtml;
+
   return (
     <div
       ref={ref}
       className={cls}
-      id={streaming ? "runtime_pending" : undefined}
       data-function={fnName || undefined}
       data-msg-id={msg.id}
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
+    >
+      {header}
+      <div className="runtime-block-body">
+        <div className="runtime-block-content">
+          <div className="runtime-result">
+            <span className="runtime-return-label">return:</span>
+          </div>
+          <div
+            className="runtime-output"
+            dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
+          />
+          {tree ? <ExecutionTree tree={tree as never} /> : null}
+        </div>
+      </div>
+      {hasFooter ? (
+        <div className="runtime-block-footer">
+          <div className="runtime-footer-left">
+            {fnName ? (
+              <button
+                className="rerun-btn"
+                onClick={() => w.retryCurrentBlock?.(fnName)}
+              >
+                {"↻ Retry"}
+              </button>
+            ) : null}
+          </div>
+          <div className="runtime-footer-center">
+            {attempts.length > 1 ? (
+              <div className="attempt-nav">
+                <button
+                  className="attempt-nav-btn"
+                  disabled={attemptIdx <= 0}
+                  title="Previous attempt"
+                  onClick={() => w.switchAttempt?.(fnName, -1)}
+                >
+                  {"◀"}
+                </button>
+                <span className="attempt-nav-label">
+                  {attemptIdx + 1}/{attempts.length}
+                </span>
+                <button
+                  className="attempt-nav-btn"
+                  disabled={attemptIdx >= attempts.length - 1}
+                  title="Next attempt"
+                  onClick={() => w.switchAttempt?.(fnName, 1)}
+                >
+                  {"▶"}
+                </button>
+              </div>
+            ) : null}
+          </div>
+          <div
+            className="runtime-footer-right"
+            dangerouslySetInnerHTML={{ __html: usageHtml }}
+          />
+        </div>
+      ) : null}
+    </div>
   );
 }

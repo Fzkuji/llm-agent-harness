@@ -171,6 +171,24 @@ function _handleContextStats(data) {
     if (typeof window._recordCacheWrite === 'function') window._recordCacheWrite(currentSessionId);
   }
 
+  // Feed the React store — this is what the composer's <ContextBadge />
+  // actually renders from. The legacy #contextStats / _renderTokenBadge
+  // DOM paths below are dead after the React migration (those nodes no
+  // longer exist), so without this push the badge stays invisible.
+  if (window.__sessionStore && typeof currentSessionId !== 'undefined' && currentSessionId) {
+    try {
+      window.__sessionStore.getState().setContextStats(
+        currentSessionId,
+        {
+          input: chat.input_tokens || 0,
+          output: chat.output_tokens || 0,
+          cache_read: chat.cache_read || 0,
+        },
+        data.context_window || null,
+      );
+    } catch (e) { /* store not ready yet — a later stats event will land */ }
+  }
+
   // Update token badge directly from WS data — no HTTP round-trip needed.
   if (typeof window._renderTokenBadge === 'function' && typeof currentSessionId !== 'undefined' && currentSessionId) {
     var wsTokenData = {
@@ -530,55 +548,10 @@ function _copyChatTools(ev, btn) {
 window._copyChatTools = _copyChatTools;
 
 function _handleStreamEvent(data) {
-  var evt = data.event || {};
-
-  // Plain chat mode: no runtime_pending block (or one that was spawned
-  // by _handleRunningTask for a `_chat` task during a reconnect). Stream
-  // text deltas directly into the assistant placeholder so the response
-  // appears word-by-word.
-  var pendingBlock = document.getElementById('runtime_pending');
-  var isChatStream = data.function === '_chat';
-  if (!pendingBlock || isChatStream) {
-    _renderChatStreamEvent(evt, data.msg_id);
-    return;
-  }
-
-  var content = pendingBlock.querySelector('.runtime-block-content');
-  if (!content) return;
-
-  var termWrap = content.querySelector('.stream-terminal-wrap');
-  var terminal;
-  if (!termWrap) {
-    termWrap = document.createElement('div');
-    termWrap.className = 'stream-terminal-wrap';
-    termWrap.innerHTML =
-      '<div class="stream-terminal-header" onclick="this.parentElement.classList.toggle(\'collapsed\')">' +
-        '<span class="stream-terminal-toggle">&#9654;</span>' +
-        '<span>CLI Output</span>' +
-      '</div>' +
-      '<div class="stream-terminal"></div>';
-    content.appendChild(termWrap);
-  }
-  terminal = termWrap.querySelector('.stream-terminal');
-  var evt = data.event;
-  var line = document.createElement('div');
-  var time = '<span class="stream-time">[' + evt.elapsed + 's]</span> ';
-  if (evt.type === 'text') {
-    line.innerHTML = time + '<span class="stream-text">' + escHtml(evt.text || '') + '</span>';
-  } else if (evt.type === 'tool_use') {
-    line.innerHTML = time + '<span class="stream-tool">$ ' + escHtml(evt.tool || '?') + '</span> <span class="stream-text">' + escHtml(evt.input || '') + '</span>';
-  } else if (evt.type === 'status') {
-    line.innerHTML = time + '<span class="stream-status">' + escHtml(evt.text || '') + '</span>';
-  } else {
-    line.innerHTML = time + escHtml(evt.text || evt.type || '');
-  }
-  terminal.appendChild(line);
-  // Cap line count to keep DOM light on long Codex / Claude Code runs.
-  var MAX_STREAM_LINES = 500;
-  while (terminal.childElementCount > MAX_STREAM_LINES) {
-    terminal.removeChild(terminal.firstElementChild);
-  }
-  terminal.scrollTop = terminal.scrollHeight;
+  // Phase 3: streaming deltas (text / thinking / tool calls, and the
+  // /run CLI terminal) are rendered by React — the chat-stream reducer
+  // applies stream events to the message store. Legacy DOM renderer
+  // retired — no-op so the dispatch path holds.
 }
 
 function _handleFollowUpQuestion(data) {
@@ -609,49 +582,11 @@ function _handleFollowUpQuestion(data) {
 }
 
 function _handleTreeUpdate(data) {
-  if (!data.tree) return;
-  var treeJson = JSON.stringify(data.tree);
-  if (treeJson === window._lastTreeJson) return;
-  window._lastTreeJson = treeJson;
-
-  var pendingBlock = document.getElementById('runtime_pending');
-  if (!pendingBlock) return;
-  var content = pendingBlock.querySelector('.runtime-block-content');
-  if (!content) {
-    var body = pendingBlock.querySelector('.runtime-block-body');
-    if (body) { body.innerHTML = '<div class="runtime-block-content"></div>'; content = body.firstChild; }
-  }
-  if (!content) return;
-
-  var treeId = 'itree_live_' + (data.function || 'run').replace(/[^a-zA-Z0-9]/g, '_');
-  if (!content.querySelector('.inline-tree')) {
-    var existingFU = content.querySelector('.follow-up-container');
-    content.innerHTML =
-      '<div class="runtime-result"><span class="runtime-return-label">return:</span></div>' +
-      '<div class="typing-indicator"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>' +
-      renderInlineTree(data.tree, treeId);
-    if (existingFU) content.appendChild(existingFU);
-  } else {
-    var treeBody = content.querySelector('.inline-tree-body');
-    if (treeBody) {
-      function _expandAll(n) {
-        if (n.path) expandedNodes.add(n.path);
-        if (n.children) n.children.forEach(_expandAll);
-      }
-      _expandAll(data.tree);
-      treeBody.innerHTML = renderTreeNode(data.tree);
-    }
-    var headerSpan = content.querySelector('.inline-tree-header > span:first-child');
-    if (headerSpan) {
-      var hasRunning = _treeHasRunning(data.tree);
-      var statusIcon = hasRunning
-        ? '<span class="pulse" style="color:var(--accent-blue)">&#9679;</span> '
-        : '<span style="color:var(--accent-cyan)">&#9670;</span> ';
-      headerSpan.innerHTML = statusIcon + 'Execution Tree';
-    }
-  }
-  scrollToBottom();
-  startElapsedTimer();
+  // Phase 3: the live execution tree is rendered by the React
+  // <ExecutionTree /> inside <RuntimeBlock /> now — the chat-stream
+  // reducer stores `tree_update` payloads on the reply message. This
+  // legacy DOM renderer is retired; kept as a no-op so the
+  // `handleChatResponse` dispatch doesn't throw.
 }
 
 function _handleRetryResult(data) {
@@ -759,189 +694,12 @@ function _handleRetryResult(data) {
 }
 
 function _handleRuntimeResult(data, type) {
-  window._lastTreeJson = null;
-  var pendingBlock = document.getElementById('runtime_pending');
-  if (!pendingBlock && data.function) {
-    pendingBlock = document.querySelector('.runtime-block[data-function="' + data.function + '"]');
-  }
-
-  var pendingKeys = Object.keys(pendingResponses);
-  for (var pi = 0; pi < pendingKeys.length; pi++) {
-    var pel = pendingResponses[pendingKeys[pi]];
-    if (pel && pel.parentNode) pel.parentNode.removeChild(pel);
-    delete pendingResponses[pendingKeys[pi]];
-  }
-
-  var runtimeParams = '';
-  if (pendingBlock) {
-    var paramsSpan = pendingBlock.querySelector('.runtime-params');
-    if (paramsSpan) runtimeParams = paramsSpan.textContent || '';
-  }
-  if (!runtimeParams && currentSessionId && conversations[currentSessionId]) {
-    var msgs = conversations[currentSessionId].messages || [];
-    for (var ri = msgs.length - 1; ri >= 0; ri--) {
-      if (msgs[ri].role === 'user' && msgs[ri].display === 'runtime') {
-        var parsed = parseRunCommandForDisplay(msgs[ri].content);
-        runtimeParams = parsed.params;
-        break;
-      }
-    }
-  }
-
-  var content = data.content || '';
-  var resultContentHtml = renderMd(content);
-  var treeHtml = '';
-  var attemptNavHtml = '';
-  var rerunHtml = data.function ? '<button class="rerun-btn" onclick="retryCurrentBlock(\'' + escAttr(data.function) + '\')">&#8634; Retry</button>' : '';
-
-  if (data.context_tree && (data.context_tree.path || data.context_tree.name)) {
-    var ct = data.context_tree;
-    treeHtml = renderInlineTree(ct, 'itree_' + (data.function || 'result').replace(/[^a-zA-Z0-9]/g, '_'));
-    var rootKey = ct.path || ct.name;
-    var idx = trees.findIndex(function(t) { return t.path === rootKey || t.name === ct.name; });
-    if (idx >= 0) { trees[idx] = ct; } else { trees.push(ct); }
-    expandedNodes.add(rootKey);
-  }
-
-  if (data.attempts && data.attempts.length > 1) {
-    attemptNavHtml = renderAttemptNav(data.function, data.current_attempt || 0, data.attempts.length);
-  }
-
-  var blockHtml = buildRuntimeBlockHtml(data.function, runtimeParams, resultContentHtml, treeHtml, attemptNavHtml, rerunHtml, data.usage);
-  var blockClass = 'runtime-block' + (type === 'error' ? ' error' : '');
-
-  if (pendingBlock) {
-    pendingBlock.className = blockClass;
-    pendingBlock.id = '';
-    pendingBlock.setAttribute('data-function', data.function);
-    pendingBlock.innerHTML = blockHtml;
-  } else {
-    // Check for existing completed block (retry result arriving after page refresh)
-    var existingFnBlock = data.function ? document.querySelector('.runtime-block[data-function="' + data.function + '"]') : null;
-    if (existingFnBlock) {
-      existingFnBlock.className = blockClass;
-      existingFnBlock.innerHTML = blockHtml;
-    } else {
-      var newBlock = document.createElement('div');
-      newBlock.className = blockClass;
-      newBlock.setAttribute('data-function', data.function);
-      newBlock.innerHTML = blockHtml;
-      appendToChat(newBlock);
-    }
-  }
-  scrollToBottom();
+  // Phase 3: the runtime block is rendered by React <RuntimeBlock />
+  // now (fed by the chat-stream reducer's `finalize`). This legacy DOM
+  // renderer is retired — kept as a no-op so the dispatch path holds.
 }
 
 function _handleChatResult(data, type) {
-  // _handleRunningTask creates a `runtime_pending` bubble when the server
-  // reports an in-flight `_chat` task (e.g. after a reconnect / load race).
-  // That's a second placeholder competing with pendingResponses[*] — drop it
-  // so the reply lands in a single bubble.
-  var ghostChat = document.getElementById('runtime_pending');
-  if (ghostChat && ghostChat.classList.contains('bot')) {
-    ghostChat.remove();
-  }
-
-  var targetEl = null;
-  if (data.msg_id && pendingResponses[data.msg_id]) {
-    targetEl = pendingResponses[data.msg_id];
-    delete pendingResponses[data.msg_id];
-  } else {
-    // Fallback: match by first pending key only when msg_id didn't
-    // resolve (e.g., legacy callers that don't stamp it). Still drop
-    // every other stale entry so we don't leave orphans for the next
-    // branch render to re-attach.
-    var pendingKeys = Object.keys(pendingResponses);
-    if (pendingKeys.length > 0) {
-      var key = pendingKeys[0];
-      targetEl = pendingResponses[key];
-      delete pendingResponses[key];
-    }
-  }
-
-  if (targetEl && !document.body.contains(targetEl)) {
-    // Placeholder was detached by a session_loaded re-render. Re-attach
-    // the same node so the reply lands in one bubble, not two.
-    appendToChat(targetEl);
-  } else if (!targetEl) {
-    targetEl = document.createElement('div');
-    targetEl.className = 'message assistant';
-    appendToChat(targetEl);
-  }
-
-  var contentHtml = '';
-  if (type === 'error') {
-    contentHtml = '<div class="error-content">' + escHtml(data.content) + '</div>';
-    if (data.retry_query) {
-      var retryAttr = escAttr(data.retry_query);
-      contentHtml += '<button class="rerun-btn" onclick="retryChatQuery(\'' + retryAttr + '\', this)">&#8634; Retry</button>';
-    }
-  } else if (type === 'result') {
-    var content = data.content || '';
-    contentHtml = '<div class="message-content">';
-    if (data.function) {
-      contentHtml += '<div style="margin-bottom:4px"><span style="font-family:var(--font-mono);color:var(--accent-green);font-size:12px">' +
-        escHtml(data.function) + '()</span> completed</div>';
-    }
-    contentHtml += renderMd(content);
-    contentHtml += '</div>';
-
-    if (data.context_tree && (data.context_tree.path || data.context_tree.name)) {
-      var ct = data.context_tree;
-      contentHtml += renderInlineTree(ct, 'itree_' + (data.function || 'result').replace(/[^a-zA-Z0-9]/g, '_'));
-      var rootKey = ct.path || ct.name;
-      var idx = trees.findIndex(function(t) { return t.path === rootKey || t.name === ct.name; });
-      if (idx >= 0) { trees[idx] = ct; } else { trees.push(ct); }
-      expandedNodes.add(rootKey);
-    }
-  }
-
-  if (data.function) {
-    targetEl.setAttribute('data-function', data.function);
-  }
-  // Stamp msg_id so the hover copy/retry/branch bar can target the
-  // right server message. Server broadcasts data.msg_id = the user
-  // turn id; our /api/chat/retry endpoint walks back to the nearest
-  // user message anyway, so stamping the user id on the assistant
-  // bubble is correct.
-  if (data.msg_id) {
-    targetEl.setAttribute('data-msg-id', data.msg_id);
-    // Stamp reply time so the action bar's timestamp badge shows up
-    // live, without needing a conversation reload.
-    if (!targetEl.hasAttribute('data-created-at')) {
-      targetEl.setAttribute('data-created-at', String(Date.now()));
-    }
-    if (typeof window.ensureMessageActions === 'function') {
-      window.ensureMessageActions(targetEl);
-    }
-  }
-
-  // If the bubble already has a streamed scaffold (thinking/tools/text were
-  // being populated live), keep those sections and only refresh the final
-  // text block with the authoritative content. Wiping innerHTML here would
-  // throw away all the folded thinking/tool blocks the user just watched.
-  var existingScaffold = targetEl.querySelector('.chat-stream-body');
-  if (type === 'result' && existingScaffold) {
-    if (!targetEl.querySelector('.message-header')) {
-      var hdr = document.createElement('div');
-      hdr.className = 'message-header';
-      hdr.innerHTML =
-        '<div class="message-avatar bot-avatar">A</div>' +
-        '<div class="message-sender">Agentic</div>';
-      targetEl.insertBefore(hdr, targetEl.firstChild);
-    }
-    var finalText = existingScaffold.querySelector('.chat-text');
-    if (finalText) {
-      finalText.innerHTML = renderMd(data.content || '');
-      delete finalText.dataset.streamText;
-    }
-  } else {
-    targetEl.innerHTML =
-      '<div class="message-header">' +
-        '<div class="message-avatar bot-avatar">A</div>' +
-        '<div class="message-sender">Agentic</div>' +
-      '</div>' +
-      contentHtml;
-  }
-  scrollToBottom();
+  // Phase 3: plain-chat replies are rendered by React <AssistantBubble />
+  // (chat-stream reducer). Legacy DOM renderer retired — no-op.
 }
