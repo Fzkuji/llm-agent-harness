@@ -45,6 +45,10 @@ export interface SlashMenuHook {
   /** Move the highlight by `delta`, wrapping around the list. */
   move: (delta: number) => void;
   close: () => void;
+  /** Tell the menu whether the composer textarea is focused — the menu
+   *  is only shown while focused, and re-appears on re-focus if the
+   *  input still holds a `/…` query. */
+  setFocused: (focused: boolean) => void;
   runCommand: (text: string) => boolean;
 }
 
@@ -55,6 +59,7 @@ export function useSlashMenu({ input, textareaRef, send }: UseSlashMenuArgs): Sl
 
   const [query, setQuery] = useState<string | null>(null);
   const [closing, setClosing] = useState(false);
+  const [focused, setFocused] = useState(false);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const open = useCallback((q: string) => {
@@ -78,16 +83,19 @@ export function useSlashMenu({ input, textareaRef, send }: UseSlashMenuArgs): Sl
     }, ANIM_MS);
   }, []);
 
-  // Open / close based on what the user is currently typing.
+  // The menu is shown only while the textarea is focused AND the input
+  // holds a bare `/…` query. Re-runs on focus changes too, so clicking
+  // back into a textarea that still contains `/foo` re-opens it, and
+  // clicking away closes it.
   useEffect(() => {
     const v = input.trim();
-    if (v.startsWith("/") && !v.includes(" ")) {
+    if (focused && v.startsWith("/") && !v.includes(" ")) {
       open(v.toLowerCase());
     } else if (query !== null) {
       close();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [input]);
+  }, [input, focused]);
 
   const matches = useMemo<SlashCommand[]>(() => {
     if (query === null) return [];
@@ -152,6 +160,7 @@ export function useSlashMenu({ input, textareaRef, send }: UseSlashMenuArgs): Sl
     activeIndex: Math.min(activeIndex, Math.max(0, matches.length - 1)),
     move,
     close,
+    setFocused,
     runCommand,
   };
 }

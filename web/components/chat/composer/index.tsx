@@ -302,12 +302,6 @@ export function Composer() {
     selectSlashCommand(cmd);
   }
 
-  // Dismiss the slash menu when the textarea loses focus (the user
-  // clicked away). Menu-item clicks preventDefault their mousedown so
-  // they don't trigger this before the click registers.
-  function onTextareaBlur() {
-    if (slash.query !== null) slash.close();
-  }
 
   /* ---- Function form submit ---------------------------------------- */
 
@@ -486,7 +480,8 @@ export function Composer() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={onKeyDown}
-              onBlur={onTextareaBlur}
+              onFocus={() => slash.setFocused(true)}
+              onBlur={() => slash.setFocused(false)}
             />
           </div>
         )}
