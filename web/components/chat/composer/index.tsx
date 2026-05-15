@@ -635,7 +635,7 @@ const ThinkingEffortPill = React.forwardRef<
     return (
       <div
         ref={ref}
-        className="inline-flex h-[32px] items-center rounded-full pl-[14px] pr-[18px] text-[14px] text-text-primary select-none whitespace-nowrap"
+        className="inline-flex h-[32px] items-center rounded-full pl-[14px] pr-[14px] text-[14px] text-text-primary select-none whitespace-nowrap"
         style={{ backgroundColor: "var(--effort-off-bg)" }}
       >
         <span>Effort: {capEffort(options[0].value)}</span>
