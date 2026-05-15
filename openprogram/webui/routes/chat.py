@@ -94,7 +94,6 @@ def register(app):
                 "runtime": None,
                 "provider_name": src.get("provider_name"),
                 "messages": _copy.deepcopy(msgs[: pivot_idx + 1]),
-                "function_trees": [],
                 "created_at": time.time(),
                 "branched_from": session_id,
                 "branched_at_msg": pivot_id,

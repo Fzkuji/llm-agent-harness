@@ -62,10 +62,10 @@ _SERVER_START_TIME = time.time()
 # the TUI decides how many rows fit for the current terminal size.
 WELCOME_STATS_SESSION_LIMIT = 48
 
-# Conversation storage (in-memory). The conv dict still owns
-# runtime / root_context / function_trees / metadata, but the
-# ``messages`` array is now a derived view of SessionDB's active
-# branch — see _get_messages / _invalidate_messages below.
+# Conversation storage (in-memory). The conv dict owns runtime +
+# metadata; the ``messages`` array is a derived view of SessionDB's
+# active branch — see _get_messages / _invalidate_messages below.
+# Execution traces are DAG nodes in SessionDB, not a conv field.
 _sessions: dict[str, dict] = {}
 
 # Last (provider, model) the user picked from the chat ModelBadge
@@ -416,7 +416,6 @@ def _restore_sessions():
                     "provider_override": provider_override,
                     "model_override": model_override,
                     "messages": msgs,
-                    "function_trees": data.get("function_trees", []),
                     "created_at": data.get("created_at", time.time()),
                     "_titled": data.get("_titled", True),
                     "_chat_usage": data.get("_chat_usage"),
@@ -574,13 +573,6 @@ def _log(text: str):
         pass
 
 
-def _get_full_tree() -> list[dict]:
-    """Tree visualisation now reads the DAG directly off SessionDB —
-    no in-process snapshot list anymore. Returns empty until the new
-    DAG-based viewer is wired in."""
-    return []
-
-
 def _cleanup_session_resources(session_id: str, conv: dict):
     """Clean up all resources associated with a deleted conversation."""
     # Clean up follow-up queues and running tasks
@@ -676,7 +668,6 @@ def _get_or_create_session(session_id: str = None,
                 "provider_override": _inherit_prov,
                 "model_override": _inherit_model,
                 "messages": _hydrated,
-                "function_trees": [],
                 "created_at": ((_sess or {}).get("created_at") if isinstance(_sess, dict) else None)
                               or time.time(),
                 "head_id": _hydrated_head,
@@ -1224,28 +1215,12 @@ def _execute_in_context(session_id: str, msg_id: str, action: str,
                     })
                 exec_rt.on_stream = _on_stream
 
-                # Reserve the func_idx + attempt slot and open its JSONL file
-                # so live events can append and refresh shows progress.
-                if "function_trees" not in conv:
-                    conv["function_trees"] = []
-                _run_func_idx = len(conv["function_trees"])
-                _run_attempt_idx = 0
-                _run_placeholder_tree = {
-                    "path": func_name,
-                    "name": func_name,
-                    "params": {k: v for k, v in call_kwargs.items() if k != "runtime"},
-                    "status": "running",
-                    "start_time": time.time(),
-                    "children": [],
-                    "_in_progress": True,
-                }
-                conv["function_trees"].append(_run_placeholder_tree)
                 _save_session(session_id)
 
                 # Live tree updates: retired together with the tree-Context
                 # event system. The function's DAG nodes are already written
                 # to SessionDB by the @agentic_function decorator; UI viewers
-                # query that directly.
+                # query that directly via /api/sessions/{id}/dag-tree.
                 with _web_follow_up(session_id, msg_id, func_name, tree_cb=None):
                     try:
                         result = _format_result(loaded_func(**call_kwargs), action=func_name)
@@ -1276,8 +1251,9 @@ def _execute_in_context(session_id: str, msg_id: str, action: str,
                     conv["_last_exec_cumulative_usage"] = _cum
 
                 # tree Context retired — surface the minimal tree dict the
-                # frontend currently expects. The execution's actual trace
-                # lives in SessionDB as DAG nodes and is fetched separately.
+                # frontend currently expects on the assistant reply. The
+                # execution's actual trace lives in SessionDB as DAG nodes,
+                # fetched separately via /api/sessions/{id}/dag-tree.
                 tree_dict = {
                     "path": func_name,
                     "name": func_name,
@@ -1285,15 +1261,6 @@ def _execute_in_context(session_id: str, msg_id: str, action: str,
                     "output": result,
                     "status": "success",
                 }
-
-                # Replace the placeholder reserved before execution with the
-                # final tree (see `_run_func_idx` above).
-                if "function_trees" not in conv:
-                    conv["function_trees"] = []
-                if 0 <= _run_func_idx < len(conv["function_trees"]):
-                    conv["function_trees"][_run_func_idx] = tree_dict
-                else:
-                    conv["function_trees"].append(tree_dict)
 
                 _log(f"[exec] {func_name} completed, result length: {len(str(result))}")
 
@@ -1534,10 +1501,11 @@ async def _websocket_handler(ws):
     with _ws_lock:
         _ws_connections.append(ws)
     try:
-        # Send current state on connect
-        tree = _get_full_tree()
+        # Send current state on connect. ``full_tree`` is kept as an
+        # empty payload for protocol compatibility — execution traces
+        # are now DAG nodes fetched via /api/sessions/{id}/dag-tree.
         await ws.send_text(json.dumps(
-            {"type": "full_tree", "data": tree}, default=str
+            {"type": "full_tree", "data": []}, default=str
         ))
         functions = _discover_functions()
         await ws.send_text(json.dumps(

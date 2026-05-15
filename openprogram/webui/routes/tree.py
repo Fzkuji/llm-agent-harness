@@ -1,7 +1,7 @@
-"""Read-only catalog endpoints: function tree, token stats, programs meta.
+"""Read-only catalog endpoints: DAG tree, token stats, programs meta.
 
 These routes are mostly thin DB wrappers (SessionDB + MODELS registry)
-plus a couple of server-helper calls (_get_full_tree, _discover_functions).
+plus a ``_discover_functions`` server-helper call.
 """
 from __future__ import annotations
 
@@ -12,11 +12,6 @@ from fastapi.responses import JSONResponse
 
 
 def register(app):
-    @app.get("/api/tree")
-    async def get_tree():
-        from openprogram.webui import server as _s
-        return JSONResponse(content=_s._get_full_tree())
-
     @app.get("/api/sessions/{session_id}/dag-tree")
     async def get_session_dag_tree(session_id: str):
         """Return one session's ``@agentic_function`` execution forest

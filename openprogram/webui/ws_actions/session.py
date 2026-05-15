@@ -161,7 +161,6 @@ async def handle_load_session(ws, cmd: dict):
                 "graph": graph,
                 "head_id": head,
                 "context_tree": tree_data,
-                "function_trees": conv.get("function_trees", []),
                 "provider_info": _s._get_provider_info(session_id),
                 "context_stats": conv.get("_last_context_stats"),
                 "channel": conv.get("channel"),

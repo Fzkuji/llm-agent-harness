@@ -21,8 +21,7 @@ def _run_turn_with_history(agent, session_id: str, message: str) -> str:
     from openprogram.webui import persistence as _persist
 
     data = _persist.load_session(agent.id, session_id) or {}
-    meta = {k: v for k, v in data.items()
-            if k not in ("messages", "function_trees")}
+    meta = {k: v for k, v in data.items() if k != "messages"}
     messages: list = list(data.get("messages") or [])
     if not meta:
         meta = {

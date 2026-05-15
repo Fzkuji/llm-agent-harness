@@ -200,11 +200,6 @@ async def handle_retry_overwrite(ws, cmd: dict):
     conv["messages"] = new_messages
     _s._set_active_head(session_id, new_messages[-1]["id"] if new_messages else None)
 
-    conv["function_trees"] = [
-        ft for ft in conv.get("function_trees", [])
-        if ft.get("name") != func_name and ft.get("path") != func_name
-    ]
-
     msg_id = str(uuid.uuid4())[:8]
     original_content = cmd.get("original_content", text)
 
@@ -283,14 +278,6 @@ async def handle_switch_attempt(ws, cmd: dict):
             session_id,
             new_msgs_for_attempt[-1]["id"] if new_msgs_for_attempt else None,
         )
-
-        selected_tree = attempts[attempt_idx].get("tree")
-        if selected_tree:
-            func_trees = conv.get("function_trees", [])
-            for ti, ft in enumerate(func_trees):
-                if ft.get("name") == func_name or ft.get("path") == func_name:
-                    func_trees[ti] = selected_tree
-                    break
 
         _s._save_session(session_id)
         await ws.send_text(json.dumps({
