@@ -50,10 +50,15 @@ def derive_thinking_fields(
     variant = override.get("thinking_variant")
 
     if levels is None and reasoning:
+        # The gpt-5.5 family dropped the `minimal` reasoning level —
+        # OpenAI's API rejects it ("Supported values are: none, low,
+        # medium, high, xhigh"). Earlier gpt-5 / o-series models still
+        # accept it, so only the 5.5 ids are excluded.
+        minimal = [] if "gpt-5.5" in model_id else ["minimal"]
         if supports_xhigh:
-            levels = ["minimal", "low", "medium", "high", "xhigh"]
+            levels = minimal + ["low", "medium", "high", "xhigh"]
         else:
-            levels = ["minimal", "low", "medium", "high"]
+            levels = minimal + ["low", "medium", "high"]
     if levels is None:
         levels = []
     if default is None and levels:
