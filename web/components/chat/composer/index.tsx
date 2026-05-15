@@ -634,20 +634,22 @@ const ThinkingEffortPill = React.forwardRef<
     maxIndex > 0
       ? Math.round(10 + (valueIndex / maxIndex) * 8)
       : 10;
-  // Lightened warm hue per effort level. The raw accent tokens are
-  // fairly dark (`--accent-orange` is a brownish #b8651f), so each
-  // one is pre-mixed with white to lift it to a brighter, airier
-  // tone — orange gets the most white since it reads darkest.
-  // `off` stays neutral bright-white. Everything below derives from
-  // this single hue so the collapsed tint / range / bolt all agree.
+  // Warm hue per effort level. NOT the project `--accent-*` tokens —
+  // those are deliberately muted/earthy (`--accent-orange` is a
+  // brownish #b8651f, `--accent-yellow` reads as dirt-yellow), which
+  // looked drab in the slider. These are vivid pure-hue oranges /
+  // yellows / red instead, each softened slightly with white so it
+  // stays airy rather than neon. `off` keeps neutral bright-white.
+  // Everything below derives from this single hue so the collapsed
+  // tint / range / bolt all agree.
   const warmHue =
     {
       off: "var(--text-bright)",
-      minimal: "color-mix(in srgb, var(--accent-yellow) 80%, white)",
-      low: "color-mix(in srgb, var(--accent-yellow) 80%, white)",
-      medium: "color-mix(in srgb, var(--accent-orange) 70%, white)",
-      high: "color-mix(in srgb, var(--accent-orange) 70%, white)",
-      xhigh: "color-mix(in srgb, var(--accent-red) 76%, white)",
+      minimal: "color-mix(in srgb, #ffd24d 88%, white)",
+      low: "color-mix(in srgb, #ffd24d 88%, white)",
+      medium: "color-mix(in srgb, #ff9d2e 86%, white)",
+      high: "color-mix(in srgb, #ff9d2e 86%, white)",
+      xhigh: "color-mix(in srgb, #ff5c5c 88%, white)",
     }[value] ?? "var(--text-bright)";
 
   // Effort-level tint for the COLLAPSED pill — `warmHue` at low
