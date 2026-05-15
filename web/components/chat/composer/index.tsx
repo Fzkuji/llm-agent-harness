@@ -643,11 +643,11 @@ const ThinkingEffortPill = React.forwardRef<
   const warmHue =
     {
       off: "var(--text-bright)",
-      minimal: "color-mix(in srgb, var(--accent-yellow) 62%, white)",
-      low: "color-mix(in srgb, var(--accent-yellow) 62%, white)",
-      medium: "color-mix(in srgb, var(--accent-orange) 50%, white)",
-      high: "color-mix(in srgb, var(--accent-orange) 50%, white)",
-      xhigh: "color-mix(in srgb, var(--accent-red) 58%, white)",
+      minimal: "color-mix(in srgb, var(--accent-yellow) 80%, white)",
+      low: "color-mix(in srgb, var(--accent-yellow) 80%, white)",
+      medium: "color-mix(in srgb, var(--accent-orange) 70%, white)",
+      high: "color-mix(in srgb, var(--accent-orange) 70%, white)",
+      xhigh: "color-mix(in srgb, var(--accent-red) 76%, white)",
     }[value] ?? "var(--text-bright)";
 
   // Effort-level tint for the COLLAPSED pill — `warmHue` at low
