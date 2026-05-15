@@ -91,6 +91,10 @@
   --user-msg-bg: #2a2a28;
   --assistant-msg-bg: #232322;
   --shadow: 0 2px 8px rgba(0,0,0,0.3);
+  /* Collapsed `off` effort-pill chip. Lighter than --bg-hover so it
+     reads as a distinct chip on the dark composer rather than blending
+     into the surface. */
+  --effort-off-bg: #535350;
   color-scheme: dark;
 }
 
@@ -114,6 +118,8 @@
   --user-msg-bg: #e8e6dc;
   --assistant-msg-bg: #f0eee6;
   --shadow: 0 2px 8px rgba(0,0,0,0.08);
+  /* Collapsed `off` effort-pill chip — light-theme counterpart. */
+  --effort-off-bg: #e8e6dc;
   /* Deeper orange in light mode — the default `#d19a66` reads as a
      wash against the cream background; this burnt-orange has enough
      contrast for the function-name token + the user / pg-card icons

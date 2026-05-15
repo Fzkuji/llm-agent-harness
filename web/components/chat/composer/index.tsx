@@ -654,12 +654,11 @@ const ThinkingEffortPill = React.forwardRef<
   // Effort-level tint for the COLLAPSED pill — `warmHue` at low
   // opacity so it sits softly on the panel surface. `off` is special:
   // a neutral grey chip with no hue. It uses the solid theme-aware
-  // `--bg-hover` token (no transparency) — that token is already a
-  // soft "raised surface" grey on both themes, so the chip reads
-  // balanced light and dark without any opacity tricks.
+  // `--effort-off-bg` token (dark #535350 / light #e8e6dc) — a flat
+  // colour, no transparency.
   const collapsedTint =
     value === "off"
-      ? "var(--bg-hover)"
+      ? "var(--effort-off-bg)"
       : `color-mix(in srgb, ${warmHue} 16%, transparent)`;
 
   // Active hue for the slider's filled elements (range bar, filled
