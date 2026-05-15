@@ -28,10 +28,26 @@ export interface AgenticFunction {
   params_detail?: FnParam[];
 }
 
+/** One tool call inside an assistant turn — the React port of the
+ *  legacy `.chat-tool` card. `status` drives the header badge
+ *  ("running…" while live, "done"/"error" once the result lands). */
+export interface ChatToolCall {
+  id: string;                  // tool_call_id (server) or local fallback
+  tool: string;                // tool name
+  input: string;               // raw args string
+  result?: string;             // result text, once tool_result arrives
+  isError?: boolean;
+  status: "running" | "done" | "error";
+}
+
 export interface ChatMsg {
   id: string;                  // msg_id from server, or local generated for user msgs
   role: "user" | "assistant" | "system";
-  content: string;
+  content: string;             // final assistant text / user text
+  /** Reasoning tokens streamed under a collapsible "Thinking" block. */
+  thinking?: string;
+  /** Tool calls made during this assistant turn, in emit order. */
+  tools?: ChatToolCall[];
   status?: MessageStatus;
   function?: string;           // if this was /run
   display?: "runtime" | "normal";
