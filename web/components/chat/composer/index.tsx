@@ -645,8 +645,8 @@ const ThinkingEffortPill = React.forwardRef<
   const warmHue =
     {
       off: "var(--text-bright)",
-      minimal: "color-mix(in srgb, #ffd24d 88%, white)",
-      low: "color-mix(in srgb, #ffd24d 88%, white)",
+      minimal: "color-mix(in srgb, #fbbf24 94%, white)",
+      low: "color-mix(in srgb, #fbbf24 94%, white)",
       medium: "color-mix(in srgb, #ff9d2e 86%, white)",
       high: "color-mix(in srgb, #ff9d2e 86%, white)",
       xhigh: "color-mix(in srgb, #ff5c5c 88%, white)",
