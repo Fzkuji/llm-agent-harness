@@ -1082,7 +1082,6 @@ function newSession() {
   var sessBadge = document.getElementById('sessionBadge');
   if (sessBadge) { sessBadge.textContent = 'no session'; sessBadge.title = ''; }
   loadProviders();
-  loadModelPills();
   loadAgentSettings();
   // Reset session-scoped chips that aren't covered by loadAgentSettings:
   // status badge (was showing previous session's "WeChat (xxx) · ...")
