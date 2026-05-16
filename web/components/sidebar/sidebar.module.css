@@ -22,3 +22,62 @@
   text-align: center;
 }
 .clearAll:hover { color: var(--accent-red); }
+
+/* Confirm dialog (Claude-style modal) — was app/styles/03-settings.css. */
+.confirmOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.confirmOverlay.visible { opacity: 1; }
+.confirmDialog {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px;
+  min-width: 320px;
+  max-width: 400px;
+  transform: scale(0.95);
+  transition: transform 0.15s ease;
+}
+.confirmOverlay.visible .confirmDialog { transform: scale(1); }
+.confirmTitle {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-bright);
+  margin-bottom: 8px;
+}
+.confirmMessage {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin-bottom: 20px;
+}
+.confirmActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.confirmBtn {
+  padding: 8px 20px;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-primary);
+  transition: background 0.1s;
+  font-family: var(--font-sans);
+}
+.confirmBtn:hover { background: var(--bg-hover); }
+.confirmBtnDanger {
+  background: var(--accent-red);
+  color: #fff;
+  border-color: var(--accent-red);
+}
+.confirmBtnDanger:hover { background: #c9413a; }

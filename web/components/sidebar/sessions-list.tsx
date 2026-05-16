@@ -31,8 +31,7 @@ function wsSend(payload: unknown): void {
   }
 }
 
-/** Modal confirm — React port of legacy `_showConfirm`. Reuses the
- *  `.confirm-overlay` / `.confirm-dialog` CSS so it looks identical. */
+/** Modal confirm — React port of legacy `_showConfirm`. */
 function ConfirmDialog({
   title,
   message,
@@ -47,20 +46,20 @@ function ConfirmDialog({
   if (typeof document === "undefined") return null;
   return createPortal(
     <div
-      className="confirm-overlay visible"
+      className={`${styles.confirmOverlay} ${styles.visible}`}
       onClick={(e) => {
         if (e.target === e.currentTarget) onCancel();
       }}
     >
-      <div className="confirm-dialog">
-        <div className="confirm-title">{title}</div>
-        <div className="confirm-message">{message}</div>
-        <div className="confirm-actions">
-          <button className="confirm-btn" onClick={onCancel}>
+      <div className={styles.confirmDialog}>
+        <div className={styles.confirmTitle}>{title}</div>
+        <div className={styles.confirmMessage}>{message}</div>
+        <div className={styles.confirmActions}>
+          <button className={styles.confirmBtn} onClick={onCancel}>
             Cancel
           </button>
           <button
-            className="confirm-btn confirm-btn-danger"
+            className={`${styles.confirmBtn} ${styles.confirmBtnDanger}`}
             onClick={onConfirm}
           >
             Delete
