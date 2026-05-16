@@ -128,36 +128,5 @@
   flex-shrink: 0;
 }
 
-/* ============ Capability badges (Vision / Tools / Reasoning / Ctx) ============ */
-
-.cap-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  padding: 0 5px;
-  height: 18px;
-  border-radius: 4px;
-  font-size: 12px;
-  line-height: 1;
-  color: var(--text-muted);
-  background: var(--bg-tertiary);
-}
-.cap-badge.vision    { color: var(--accent-cyan); }
-.cap-badge.reasoning { color: var(--accent-purple); }
-.cap-badge.tools     { color: var(--accent-green); }
-.cap-badge.ctx       { color: var(--text-secondary); }
-
-.cap-badge .cap-icon {
-  width: 12px;
-  height: 12px;
-  flex-shrink: 0;
-  display: block;
-}
-.cap-badge .cap-icon path,
-.cap-badge .cap-icon circle {
-  stroke-width: 1.8;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  fill: none;
-}
+/* `.cap-badge` / `.cap-icon` removed — the model-row capability chips
+   are the shadcn <Badge> component now (branch-menu / channel-menu). */

@@ -18,6 +18,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { useSessionStore } from "@/lib/session-store";
+import { Badge } from "@/components/ui/badge";
 
 interface ChannelAccount {
   channel: string;
@@ -199,9 +200,14 @@ export function ChannelMenu({
               >
                 <span className="model-dd-name">{r.account_id}</span>
                 {meta ? (
-                  <span className="model-dd-caps">
-                    <span className="cap-badge ctx">{meta}</span>
-                  </span>
+                  <div className="model-dd-caps">
+                    <Badge
+                      variant="secondary"
+                      className="h-[18px] rounded-[4px] px-[5px] py-0 text-[12px] font-normal text-[var(--text-secondary)]"
+                    >
+                      {meta}
+                    </Badge>
+                  </div>
                 ) : null}
               </div>
             );

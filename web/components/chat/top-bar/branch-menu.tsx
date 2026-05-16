@@ -16,6 +16,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { useSessionStore } from "@/lib/session-store";
+import { Badge } from "@/components/ui/badge";
 
 interface BranchRow {
   head_msg_id: string;
@@ -172,8 +173,9 @@ function BranchRowItem({
         </span>
       )}
       {branch.active && !hovered ? (
-        <span
-          className="cap-badge ctx branch-head"
+        <Badge
+          variant="secondary"
+          className="branch-head rounded-[4px] text-[12px] font-normal text-[var(--text-secondary)]"
           style={{
             position: "absolute",
             right: 8,
@@ -188,7 +190,7 @@ function BranchRowItem({
           }}
         >
           HEAD
-        </span>
+        </Badge>
       ) : null}
       {hovered && !editing ? (
         <>
