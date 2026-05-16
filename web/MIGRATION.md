@@ -46,14 +46,20 @@ teardown),它的 `dispatch()` 函数分发每一种消息类型。
 
 ## 还剩什么(slice F 余下部分)
 
+### 进度
+
+- **F1 已完成**(commit `b2d5236`)— send 路径归 React。`legacy-send.ts`
+  直接发 `chat` WS payload,chat.js 删掉 `sendMessage` + bubble 构造函数。
+- **F2 已完成**(commit `7d91297`)— chat-ws.js 精简成纯记账。删了 5 个
+  no-op 桩 + `_handleInboundUserMessage` + legacy retry tree-push。
+- **F3 起未做** —— 下面从「conversations.js 数据层」继续。
+
 ### 剩余 legacy 文件
 
 ```
-public/js/chat/chat.js      367  sendMessage / retry 系列 / submitFollowUp
-                                 / buildRuntimeBlockHtml / addUserMessage 等
-public/js/chat/chat-ws.js   324  handleChatResponse 分发 + 终结记账
-                                 / _handleContextStats / _handleStatusResponse
-                                 / _handleFollowUpQuestion / _handleInboundUserMessage
+public/js/chat/chat.js      176  retry 系列 / submitFollowUp / addAssistantMessage
+public/js/chat/chat-ws.js   178  handleChatResponse 记账 + _handleContextStats
+                                 / _handleStatusResponse / _handleFollowUpQuestion
 public/js/chat/init.js      257  _wsHandleChatAck/ChatResponse/Status
                                  / _handleSessionsList / _handleRunningTask
                                  / setRunActive / _rehydrateToolsUI IIFE
