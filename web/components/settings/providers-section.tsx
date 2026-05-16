@@ -14,6 +14,7 @@ import styles from "./settings-page.module.css";
 import { ProviderIcon } from "./provider-icon";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 interface Provider {
   id: string;
@@ -507,9 +508,9 @@ export function ApiKey({
         </span>
       </div>
       <div className={styles.detailRow}>
-        <input
+        <Input
           ref={inputRef}
-          className={styles.input}
+          className="h-9 flex-1 font-mono"
           type={showText ? "text" : "password"}
           placeholder={envVar}
           value={value}
@@ -560,8 +561,8 @@ function BaseUrl({
         <span className={styles.modelCountSummary}>{baseDefault}</span>
       </div>
       <div className={styles.detailRow}>
-        <input
-          className={styles.input}
+        <Input
+          className="h-9 flex-1 font-mono"
           type="text"
           placeholder={provider.default_base_url || "https://..."}
           value={value}

@@ -190,29 +190,8 @@
   color: var(--text-bright);
 }
 
-.input {
-  background: var(--bg-primary);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0 10px;
-  height: 28px;
-  line-height: 26px;
-  font-size: 14px;
-  color: var(--text-primary);
-  font-family: var(--font-mono);
-  width: 280px;
-  box-sizing: border-box;
-  transition: border-color 0.15s;
-}
-.input:hover {
-  border-color: var(--text-muted);
-}
-.input:focus {
-  outline: none;
-  border-color: var(--accent-blue);
-}
-
-/* `.btn` — settings action buttons are the shadcn <Button> now. */
+/* `.input` — the API-key / base-URL fields are the shadcn <Input> now.
+   `.btn` — settings action buttons are the shadcn <Button> now. */
 
 .iconBtn {
   background: var(--bg-tertiary);
