@@ -21,39 +21,8 @@ function setRunActive(active) {
 // see them start.
 window.setRunActive = setRunActive;
 
-function connect() {
-  var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  ws = new WebSocket(proto + '//' + location.host + '/ws');
-
-  ws.onopen = function() {
-    updateStatus('connected');
-    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null;
-    }
-    // currentSessionId already derived from URL in state.js — send agent_settings
-    // with that value so badges reflect the correct conversation from the start.
-    loadAgentSettings();
-    ws.send(JSON.stringify({ action: 'list_sessions' }));
-    if (currentSessionId) {
-      ws.send(JSON.stringify({ action: 'load_session', session_id: currentSessionId }));
-    }
-  };
-
-  ws.onmessage = function(e) {
-    try {
-      var msg = JSON.parse(e.data);
-      handleMessage(msg);
-    } catch(err) {
-      console.error('[ws.onmessage] error:', err);
-    }
-  };
-
-  ws.onclose = function() {
-    updateStatus('disconnected');
-    reconnectTimer = setTimeout(connect, 2000);
-  };
-
-  ws.onerror = function() { ws.close(); };
-}
+// WebSocket lifecycle (connect / reconnect) is owned by the React
+// `useWS` hook now — see web/lib/use-ws.ts.
 
 function handleMessage(msg) {
   // Phase 3: mirror chat envelopes into the React message store. The
@@ -389,12 +358,7 @@ function togglePanel() {}
 // Enter / Escape / Cmd-Enter handling is in those components; init.js
 // no longer wires anything to the input wrapper.
 
-// ===== Keepalive =====
-setInterval(function() {
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send('ping');
-  }
-}, 30000);
+// Keepalive ping is owned by the React `useWS` hook now.
 
 // ===== Lifecycle =====
 window.addEventListener('beforeunload', function() {
@@ -403,7 +367,7 @@ window.addEventListener('beforeunload', function() {
 });
 
 // ===== Init =====
-connect();
+// (socket opened by the React `useWS` hook)
 loadProviders();
 // Only show welcome on /new, not on /c/{id}
 if (!window.location.pathname.match(/^\/s\//)) {

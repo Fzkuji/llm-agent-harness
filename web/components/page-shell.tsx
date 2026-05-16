@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 
 import { usePendingRunFunction } from "@/lib/use-pending-run-function";
+import { useWS } from "@/lib/use-ws";
 
 type Page = "chat" | "settings" | "programs" | "chats";
 
@@ -248,6 +249,12 @@ export function PageShell({ page }: { page: Page }) {
   // SPA hand-off from /programs → /chat lives in its own hook —
   // see lib/use-pending-run-function.ts.
   usePendingRunFunction(pathname);
+
+  // Own the chat WebSocket lifecycle (slice A of the WS-layer
+  // migration). PageShell is only ever instantiated as the chat shell,
+  // and mounted once for the session, so this opens exactly one
+  // socket. The legacy `init.js` no longer calls `connect()`.
+  useWS();
 
   useEffect(() => {
     if (page !== "chat") return;
