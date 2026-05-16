@@ -1,5 +1,6 @@
-/* App stylesheet — split into modules under ./styles/. See each file for scope. */
-@import "./styles/01-base.css";
-@import "./styles/05-chat.css";
-@import "./styles/06-detail.css";
-@import "./styles/09-right-dock.css";
+/* App-global stylesheet — split by area under ./styles/. Order matters
+   for the cascade: base (tokens / reset / layout) loads first. */
+@import "./styles/base.css";
+@import "./styles/chat.css";
+@import "./styles/detail.css";
+@import "./styles/right-dock.css";

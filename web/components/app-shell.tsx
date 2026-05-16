@@ -16,13 +16,13 @@ import { legacyConvToChatMsgs } from "@/lib/legacy-conv-map";
 import { useColResize } from "@/lib/use-col-resize";
 // Migrated legacy modules — imported for side effects (they install
 // their `window.*` bridges for the still-legacy scripts).
-import "@/lib/state";
-import "@/lib/helpers";
-import "@/lib/ui";
-import "@/lib/providers";
-import "@/lib/programs-panel";
-import "@/lib/history-graph";
-import { initOverlayScrollbars } from "@/lib/scrollbar";
+import "@/lib/legacy/state";
+import "@/lib/legacy/helpers";
+import "@/lib/legacy/ui";
+import "@/lib/legacy/providers";
+import "@/lib/legacy/programs-panel";
+import "@/lib/legacy/history-graph";
+import { initOverlayScrollbars } from "@/lib/legacy/scrollbar";
 
 // Scripts shared by every page — loaded once on shell mount and kept alive for
 // the whole session. Page-specific scripts live in PageShell. Files sit in
