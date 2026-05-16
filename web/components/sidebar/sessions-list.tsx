@@ -58,16 +58,27 @@ function ConfirmDialog({
         if (!o) onCancel();
       }}
     >
-      <DialogContent className="max-w-[400px]">
+      <DialogContent
+        className="max-w-[400px] border-0"
+        onOpenAutoFocus={(e) => e.preventDefault()}
+      >
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{message}</DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button variant="outline" onClick={onCancel}>
+          <Button
+            variant="secondary"
+            onClick={onCancel}
+            className="rounded-full bg-[var(--bg-selected)] text-[var(--text-bright)] transition-[filter] hover:bg-[var(--bg-selected)] hover:brightness-125"
+          >
             Cancel
           </Button>
-          <Button variant="destructive" onClick={onConfirm}>
+          <Button
+            variant="destructive"
+            onClick={onConfirm}
+            className="rounded-full hover:bg-[#c9413a]"
+          >
             Delete
           </Button>
         </DialogFooter>
