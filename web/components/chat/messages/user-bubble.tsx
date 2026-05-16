@@ -4,36 +4,128 @@
  * User message bubble — React port of legacy `addUserMessage` markup.
  * Plain text content (escaped); user turns are never markdown-rendered.
  *
- * The legacy hover action bar (copy / edit / retry / branch) is still
- * vanilla — `ensureMessageActions` wires it onto the bubble's DOM node
- * after mount, reusing the legacy implementation.
+ * The hover action bar is the React <MessageActions />; the pencil
+ * swaps the content into an inline editor that POSTs `/api/chat/edit`
+ * (a React port of legacy `message-actions-edit.js`).
  */
-import { useEffect, useRef } from "react";
+import { useRef, useState } from "react";
 
-import type { ChatMsg } from "@/lib/session-store";
+import { useSessionStore, type ChatMsg } from "@/lib/session-store";
 
-export function UserBubble({ msg }: { msg: ChatMsg }) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const ensure = (window as unknown as {
-      ensureMessageActions?: (el: HTMLElement) => void;
-    }).ensureMessageActions;
-    if (ensure && ref.current) {
-      try {
-        ensure(ref.current);
-      } catch {
-        /* ignore */
-      }
-    }
-  }, [msg.id]);
+import { MessageActions } from "./message-actions";
+
+function EditBox({
+  msg,
+  onDone,
+}: {
+  msg: ChatMsg;
+  onDone: () => void;
+}) {
+  const sessionId = useSessionStore((s) => s.currentSessionId);
+  const [value, setValue] = useState(msg.content || "");
+  const [submitting, setSubmitting] = useState(false);
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  function save() {
+    const text = value.trim();
+    if (!text || !sessionId || !msg.id) return;
+    setSubmitting(true);
+    fetch("/api/chat/edit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        session_id: sessionId,
+        msg_id: msg.id,
+        content: text,
+      }),
+    })
+      .then((r) => {
+        if (!r.ok) {
+          return r.json().then((e) => {
+            throw new Error(e.error || r.statusText);
+          });
+        }
+        return r.json();
+      })
+      .then(() => {
+        (
+          window as unknown as { setRunActive?: (a: boolean) => void }
+        ).setRunActive?.(true);
+        const w = window as Window & { ws?: WebSocket };
+        if (w.ws && w.ws.readyState === WebSocket.OPEN) {
+          w.ws.send(
+            JSON.stringify({ action: "load_session", session_id: sessionId }),
+          );
+        }
+        onDone();
+      })
+      .catch((err) => {
+        setSubmitting(false);
+        console.error("[message-edit] submit failed:", err);
+      });
+  }
 
   return (
-    <div className="message user" data-msg-id={msg.id} ref={ref}>
+    <>
+      <textarea
+        ref={ref}
+        autoFocus
+        className="message-edit-textarea"
+        rows={Math.max(2, Math.min(20, value.split("\n").length + 1))}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+            e.preventDefault();
+            save();
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            onDone();
+          }
+        }}
+      />
+      <div className="message-edit-actions">
+        <button
+          type="button"
+          className="message-edit-btn message-edit-cancel"
+          onClick={onDone}
+          disabled={submitting}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="message-edit-btn message-edit-save"
+          onClick={save}
+          disabled={submitting}
+        >
+          {submitting ? "Submitting…" : "Save & resend"}
+        </button>
+      </div>
+    </>
+  );
+}
+
+export function UserBubble({ msg }: { msg: ChatMsg }) {
+  const [editing, setEditing] = useState(false);
+
+  return (
+    <div
+      className={"message user" + (editing ? " is-editing" : "")}
+      data-msg-id={msg.id}
+    >
       <div className="message-header">
         <div className="message-avatar user-avatar">U</div>
         <div className="message-sender">You</div>
+        <MessageActions msg={msg} onEdit={() => setEditing(true)} />
       </div>
-      <div className="message-content">{msg.content}</div>
+      <div className="message-content">
+        {editing ? (
+          <EditBox msg={msg} onDone={() => setEditing(false)} />
+        ) : (
+          msg.content
+        )}
+      </div>
     </div>
   );
 }

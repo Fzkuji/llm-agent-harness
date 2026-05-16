@@ -63,6 +63,13 @@ export interface ChatMsg {
   /** Provider usage for the runtime block footer. Opaque — passed
    *  straight to the legacy `formatUsageFooterLabel`. */
   usage?: unknown;
+  /** Sibling-version navigator state (the `< N/M >` strip). Populated
+   *  from a loaded conversation when the turn has been retried/edited;
+   *  the prev/next ids are what `/api/chat/checkout` targets. */
+  siblingIndex?: number;
+  siblingTotal?: number;
+  prevSiblingId?: string;
+  nextSiblingId?: string;
 }
 
 export interface ConvSummary {

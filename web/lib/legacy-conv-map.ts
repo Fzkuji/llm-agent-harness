@@ -42,6 +42,20 @@ interface LegacyMsg {
   attempts?: LegacyAttempt[];
   current_attempt?: number;
   tool_calls?: LegacyBlock[];
+  sibling_index?: number;
+  sibling_total?: number;
+  prev_sibling_id?: string;
+  next_sibling_id?: string;
+}
+
+/** Sibling-version fields shared by user + assistant turns. */
+function siblingFields(m: LegacyMsg) {
+  return {
+    siblingIndex: m.sibling_index,
+    siblingTotal: m.sibling_total,
+    prevSiblingId: m.prev_sibling_id,
+    nextSiblingId: m.next_sibling_id,
+  };
 }
 
 export function legacyConvToChatMsgs(messages: LegacyMsg[]): ChatMsg[] {
@@ -59,6 +73,7 @@ export function legacyConvToChatMsgs(messages: LegacyMsg[]): ChatMsg[] {
         display: m.display === "runtime" ? "runtime" : undefined,
         status: "done",
         timestamp: ts,
+        ...siblingFields(m),
       });
       return;
     }
@@ -103,6 +118,7 @@ export function legacyConvToChatMsgs(messages: LegacyMsg[]): ChatMsg[] {
         usage: m.usage,
         attempts: m.attempts as never[] | undefined,
         current_attempt: m.current_attempt,
+        ...siblingFields(m),
       });
       return;
     }

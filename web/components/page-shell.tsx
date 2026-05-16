@@ -23,7 +23,6 @@ const JS_FILES_BY_PAGE: Record<Page, string[]> = {
     // (tree DATA layer + exec-log / attempt-nav), pending the WS slice.
     "chat/tree.js", "chat/tree-log.js",
     "chat/chat.js", "chat/chat-ws.js",
-    "chat/message-actions.js", "chat/message-actions-edit.js", "chat/message-actions-nav.js",
     "chat/init.js",
   ],
   settings: [],
