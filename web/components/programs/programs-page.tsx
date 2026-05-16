@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import styles from "./programs-page.module.css";
+import { Button } from "@/components/ui/button";
 
 interface Program {
   name: string;
@@ -455,12 +456,13 @@ export function ProgramsPage() {
                 { value: "favorites", label: "Favorites" },
               ]}
             />
-            <button
-              className={styles.toolbarBtn}
+            <Button
+              variant="outline"
+              size="sm"
               onClick={() => setView((v) => (v === "grid" ? "list" : "grid"))}
             >
               {view === "grid" ? "List" : "Grid"}
-            </button>
+            </Button>
           </div>
         </div>
 

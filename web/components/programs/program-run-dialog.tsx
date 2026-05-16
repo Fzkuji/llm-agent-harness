@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { X, Play, Eye, Loader2, Folder } from "lucide-react";
 import type { AgenticFunction, FunctionParamDetail } from "@/lib/types";
 import { api } from "@/lib/api";
+import { Button } from "@/components/ui/button";
 
 interface Props {
   fn: AgenticFunction;
@@ -142,42 +143,22 @@ export function ProgramRunDialog({ fn, onClose }: Props) {
           className="flex justify-end gap-2 border-t px-5 py-3"
           style={{ borderColor: "var(--border)" }}
         >
-          <button
-            onClick={onClose}
-            className="h-8 rounded-md border px-3 text-[13px]"
-            style={{
-              background: "transparent",
-              borderColor: "var(--border)",
-              color: "var(--text-primary)",
-            }}
-          >
+          <Button variant="outline" size="sm" onClick={onClose}>
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={runInline}
             disabled={running}
-            className="flex h-8 items-center gap-1 rounded-md border px-3 text-[13px]"
-            style={{
-              background: "transparent",
-              borderColor: "var(--border)",
-              color: "var(--text-primary)",
-            }}
           >
-            {running ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Eye className="h-3.5 w-3.5" />
-            )}
+            {running ? <Loader2 className="animate-spin" /> : <Eye />}
             Run inline
-          </button>
-          <button
-            onClick={runInChat}
-            className="flex h-8 items-center gap-1 rounded-md px-3 text-[13px] text-white"
-            style={{ background: "var(--accent-blue)" }}
-          >
-            <Play className="h-3.5 w-3.5" />
+          </Button>
+          <Button size="sm" onClick={runInChat}>
+            <Play />
             Run in chat
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -280,8 +261,11 @@ function ParamInput({
               color: "var(--text-primary)",
             }}
           />
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="sm"
+            className="shrink-0"
             onClick={async () => {
               try {
                 const r = await fetch("/api/pick-folder", { method: "POST" });
@@ -291,16 +275,10 @@ function ParamInput({
                 alert("Folder picker unavailable: " + String(e));
               }
             }}
-            className="flex h-8 shrink-0 items-center gap-1 rounded-md border px-2 text-[12px]"
-            style={{
-              background: "transparent",
-              borderColor: "var(--border)",
-              color: "var(--text-primary)",
-            }}
           >
-            <Folder className="h-3.5 w-3.5" />
+            <Folder />
             Browse
-          </button>
+          </Button>
         </div>
       ) : (
         <input

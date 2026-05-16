@@ -5,6 +5,7 @@ import { useState } from "react";
 import { X, Save, Loader2, FileCode } from "lucide-react";
 import type { AgenticFunction } from "@/lib/types";
 import { api } from "@/lib/api";
+import { Button } from "@/components/ui/button";
 
 interface Props {
   fn: AgenticFunction;
@@ -86,19 +87,10 @@ export function SourceModal({ fn, onClose }: Props) {
             )}
           </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={save}
-              disabled={!dirty || saving}
-              className="flex h-7 items-center gap-1 rounded-md px-3 text-[12px] text-white disabled:opacity-50"
-              style={{ background: "var(--accent-blue)" }}
-            >
-              {saving ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
-              ) : (
-                <Save className="h-3 w-3" />
-              )}
+            <Button size="sm" onClick={save} disabled={!dirty || saving}>
+              {saving ? <Loader2 className="animate-spin" /> : <Save />}
               Save
-            </button>
+            </Button>
             <button onClick={onClose}>
               <X className="h-4 w-4" style={{ color: "var(--text-muted)" }} />
             </button>
