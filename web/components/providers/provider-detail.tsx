@@ -87,17 +87,14 @@ export function ProviderDetail({ provider }: Props) {
                 : "Subscription required"}
           </p>
         </div>
-        <button
+        <Button
+          variant="outline"
+          size="sm"
+          className="shrink-0"
           onClick={() => setWizardOpen(true)}
-          className="h-8 shrink-0 rounded-md border px-3 text-[12px]"
-          style={{
-            background: "transparent",
-            borderColor: "var(--border)",
-            color: "var(--text-primary)",
-          }}
         >
           Setup wizard
-        </button>
+        </Button>
       </header>
 
       {wizardOpen && (

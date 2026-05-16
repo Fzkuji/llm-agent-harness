@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { X, Check, AlertCircle, HelpCircle, ArrowRight, Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 interface StepResult {
   status: "ok" | "error" | "needs_input";
@@ -188,17 +189,9 @@ export function SetupWizard({ providerId, onClose }: Props) {
           className="flex justify-end border-t px-5 py-3"
           style={{ borderColor: "var(--border)" }}
         >
-          <button
-            onClick={onClose}
-            className="h-8 rounded-md border px-3 text-[13px]"
-            style={{
-              background: "transparent",
-              borderColor: "var(--border)",
-              color: "var(--text-primary)",
-            }}
-          >
+          <Button variant="outline" size="sm" onClick={onClose}>
             {idx >= (schema?.steps.length ?? 0) ? "Done" : "Cancel"}
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -282,26 +275,12 @@ function StepRow({
               </code>
             </div>
             <div className="mt-2 flex gap-2">
-              <button
-                onClick={onRetry}
-                className="h-7 rounded-md border px-3 text-[12px]"
-                style={{
-                  borderColor: "var(--border)",
-                  color: "var(--text-primary)",
-                }}
-              >
+              <Button variant="outline" size="sm" onClick={onRetry}>
                 Retry
-              </button>
-              <button
-                onClick={onClose}
-                className="h-7 rounded-md border px-3 text-[12px]"
-                style={{
-                  borderColor: "var(--border)",
-                  color: "var(--text-primary)",
-                }}
-              >
+              </Button>
+              <Button variant="outline" size="sm" onClick={onClose}>
                 Close
-              </button>
+              </Button>
             </div>
           </>
         )}
@@ -364,13 +343,9 @@ function NeedsInputForm({
           }}
         />
       )}
-      <button
-        onClick={() => onSubmit(value)}
-        className="h-7 rounded-md px-3 text-[12px] text-white"
-        style={{ background: "var(--accent-blue)" }}
-      >
+      <Button size="sm" onClick={() => onSubmit(value)}>
         Continue
-      </button>
+      </Button>
     </div>
   );
 }
