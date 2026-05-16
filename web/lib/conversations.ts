@@ -120,10 +120,12 @@ export function channelIcon(plat: string): string {
   const letter = ((plat || "?")[0] || "?").toUpperCase();
   const letterSpan = '<span class="provider-icon-letter">' + letter + "</span>";
   if (!url) return letterSpan;
+  // Guard `parentNode`: if the icon errors after the menu closed the
+  // <img> is detached and setting outerHTML throws NoModificationAllowed.
   return (
     '<img src="' +
     url +
-    '" alt="" onerror="this.outerHTML=&quot;' +
+    '" alt="" onerror="if(this.parentNode)this.outerHTML=&quot;' +
     letterSpan.replace(/"/g, "&amp;quot;") +
     '&quot;">'
   );
