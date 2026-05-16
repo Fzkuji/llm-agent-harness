@@ -17,6 +17,7 @@ import { useColResize } from "@/lib/use-col-resize";
 // Migrated legacy modules — imported for side effects (they install
 // their `window.*` bridges for the still-legacy scripts).
 import "@/lib/providers";
+import "@/lib/programs-panel";
 
 // Scripts shared by every page — loaded once on shell mount and kept alive for
 // the whole session. Page-specific scripts live in PageShell. Files sit in
@@ -29,7 +30,6 @@ import "@/lib/providers";
 const SHARED_JS = [
   "shared/state.js",
   "shared/helpers.js",
-  "shared/programs-panel.js",
   "shared/ui.js",
   "shared/scrollbar.js",
   // `shared/right-dock.js` is no longer loaded — `<RightSidebar />`
