@@ -342,10 +342,25 @@ class GraphStore:
                     (text, self.session_id, node.id),
                 )
 
-            conn.execute(
-                "UPDATE sessions SET last_node_id = ?, updated_at = ? WHERE id = ?",
-                (node.id, time.time(), self.session_id),
-            )
+            # ``last_node_id`` is the conversation HEAD — what get_branch
+            # walks back from. Only top-level nodes (chat messages, with
+            # no ``called_by``) may advance it. Nodes written *inside* an
+            # @agentic_function run — the code Call and its nested
+            # ModelCalls, all carrying ``called_by`` — are execution
+            # detail, not conversation turns; letting them move the head
+            # leaves it stranded on an internal node, so get_branch
+            # threads the chat through code nodes and the renderer
+            # mis-reports finished runs as "Execution interrupted".
+            if node.called_by:
+                conn.execute(
+                    "UPDATE sessions SET updated_at = ? WHERE id = ?",
+                    (time.time(), self.session_id),
+                )
+            else:
+                conn.execute(
+                    "UPDATE sessions SET last_node_id = ?, updated_at = ? WHERE id = ?",
+                    (node.id, time.time(), self.session_id),
+                )
             conn.commit()
 
     def update(self, node_id: str, **fields: Any) -> None:

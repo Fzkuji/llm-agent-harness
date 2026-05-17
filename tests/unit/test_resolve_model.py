@@ -57,10 +57,14 @@ def test_partial_dict_falls_through_safely() -> None:
 
 
 def test_codex_55_exposes_full_thinking_levels() -> None:
-    """Runtime-injected Codex models must keep the full abstract picker set."""
+    """Runtime-injected Codex models keep the abstract picker set.
+
+    gpt-5.5 dropped ``minimal`` (the API 400s on it), so its picker is
+    low/medium/high/xhigh — see ``thinking_catalog.supports_minimal_effort``.
+    """
     import openprogram.providers.openai_codex.runtime  # noqa: F401
 
     m = get_model("openai-codex", "gpt-5.5")
     assert m is not None
-    assert m.thinking_levels == ["minimal", "low", "medium", "high", "xhigh"]
+    assert m.thinking_levels == ["low", "medium", "high", "xhigh"]
     assert m.default_thinking_level == "xhigh"

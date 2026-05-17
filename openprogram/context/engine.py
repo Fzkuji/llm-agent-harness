@@ -140,7 +140,7 @@ class DefaultContextEngine(ContextEngine):
 
     Thresholds (overridable via constructor):
         RECOMMEND_PCT  = 0.70   surface "context filling up" event
-        AUTO_COMPACT_PCT = 0.85 inline compaction before next LLM call
+        AUTO_COMPACT_PCT = 0.80 inline compaction before next LLM call
     """
 
     name = "default"

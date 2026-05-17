@@ -103,6 +103,16 @@ openprogram web
 
 ---
 
+## 支持的项目
+
+OpenProgram 自带三个 agent 应用,位于 `openprogram/programs/applications/`——每个都是基于 `@agentic_function` 范式构建的完整 agent:
+
+| 项目 | 功能 |
+|------|------|
+| [GUI&nbsp;Agent&nbsp;Harness](https://github.com/Fzkuji/GUI-Agent-Harness) | 自主 GUI agent——通过视觉操控桌面应用(及 OSWorld 虚拟机):observe → plan → act → verify。Python 控制循环,LLM 仅在被要求时推理。 |
+| [Research&nbsp;Agent&nbsp;Harness](https://github.com/Fzkuji/Research-Agent-Harness) | 自主研究 agent——文献调研 → idea → 实验 → 论文写作 → 跨模型审稿。从选题到投稿全流程。 |
+| [Wiki&nbsp;Agent&nbsp;Harness](https://github.com/Fzkuji/Wiki-Agent-Harness) | 自主 wiki 构建——把笔记、文档、对话整理成结构化的、兼容 Obsidian 的知识库,带 `[[wikilinks]]`。 |
+
 ## 为什么选择 Agentic Programming?
 
 <p align="center">
@@ -113,8 +123,8 @@ openprogram web
 |------|------|
 | **确定性流程** | Python 控制 `if/else/for/while`。执行路径是保证的，不是建议的。 |
 | **最少 LLM 调用** | 只在需要推理时调用 LLM。2 次调用，不是 10 次。 |
-| **Docstring = Prompt** | 改函数的 docstring，就改了 LLM 的行为。不需要单独的 prompt 文件。 |
-| **自我演化** | 函数在运行时生成、修复和改进自身。 |
+| **指令写在代码里** | 每次调用的 prompt 写在函数体的 `runtime.exec(content=...)` 里，不散落在单独的 prompt 文件中。 |
+| **自我演化** | 函数由 agent 直接编写、修复、改进——遵循 `agentic-program` skill。 |
 
 <details>
 <summary><strong>当前框架的问题</strong></summary>
@@ -179,35 +189,11 @@ result = deep_work(
 
 Agent 先确认需求，然后完全自主工作——执行、自我评估、修订，直到通过质量审查。状态持久化到磁盘，中断的工作可以从断点恢复。
 
-### 自我演化代码
+### 函数编写函数
 
-函数可以生成新函数、修复损坏的函数、搭建完整的应用——全部在运行时完成：
+编写、修复、搭建 `@agentic_function` 本身也是 agent 的工作——用普通文件编辑工具直接完成，遵循 **`agentic-program` skill**（`skills/agentic-program/SKILL.md`）。没有专门的 `create()` / `fix()` 框架调用：它们以前也只是包了一次 LLM 调用加一次文件写入,agent 自己就能做。
 
-```python
-from openprogram.programs.functions.meta import create, create_app, fix
-
-# 从描述生成函数
-sentiment = create("Analyze text sentiment", runtime=runtime, name="sentiment")
-sentiment(text="I love this!")  # → "positive"
-
-# 生成包含 main() 的完整可运行应用
-create_app("Summarize articles from URLs", runtime=runtime, name="summarizer")
-# → openprogram/programs/applications/summarizer.py
-
-# 修复损坏的函数——自动读取源码和错误历史，运行 check → generate → verify 循环
-fixed = fix(fn=broken_fn, runtime=runtime, instruction="return JSON, not plain text")
-```
-
-`create → run → fail → fix → run` 循环意味着程序在使用中自我改进。
-
-## 生态系统
-
-OpenProgram 附带两个预装应用，位于 `openprogram/programs/applications/`：
-
-| 项目 | 描述 |
-|------|------|
-| [GUI&nbsp;Agent&nbsp;Harness](https://github.com/Fzkuji/GUI-Agent-Harness) | 通过视觉 + agentic 函数操控桌面应用的自主 GUI agent。Python 控制 observe→plan→act→verify 循环；LLM 仅在被要求时进行推理。 |
-| [Research&nbsp;Agent&nbsp;Harness](https://github.com/Fzkuji/Research-Agent-Harness) | 自主研究 agent：文献调研 → idea 生成 → 实验 → 论文写作 → 跨模型审稿。从选题到投稿的全流程自动化。 |
+skill 是完整规范——文件放哪、装饰器元数据、docstring 与 `content` 的分工、校验清单、冒烟测试。`write → run → fail → fix` 循环依然意味着程序在使用中自我改进。
 
 ## API 参考
 
@@ -215,20 +201,13 @@ OpenProgram 附带两个预装应用，位于 `openprogram/programs/applications
 
 | 导入 | 功能 |
 |------|------|
-| `from openprogram import agentic_function` | 装饰器。将执行记录到 Context 树 |
-| `from openprogram import Runtime` | LLM 运行时。`exec()` 调用 LLM 并自动注入上下文 |
-| `from openprogram import Context` | 执行树。`tree()`、`save()`、`traceback()` |
+| `from openprogram import agentic_function` | 装饰器。每次调用记录为 session DAG 的一个节点 |
+| `from openprogram import Runtime` | LLM 运行时。`exec()` 调用 LLM，上下文从 DAG 自动算出 |
 | `from openprogram import create_runtime` | 创建 Runtime，支持自动检测或指定提供方 |
 
-### 元函数
+### 编写函数
 
-| 导入 | 功能 |
-|------|------|
-| `from openprogram.programs.functions.meta import create` | 从描述生成新的 `@agentic_function` |
-| `from openprogram.programs.functions.meta import create_app` | 生成包含 `main()` 的完整可运行应用 |
-| `from openprogram.programs.functions.meta import fix` | 通过多轮 LLM 分析修复损坏的函数（check → generate → verify 循环） |
-| `from openprogram.programs.functions.meta import improve` | 根据目标优化现有函数 |
-| `from openprogram.programs.functions.meta import create_skill` | 生成用于 agent 发现的 SKILL.md |
+没有 `create()` / `fix()` 这类元函数——编写、修改、校验 `@agentic_function` 直接用普通文件编辑工具完成，遵循 **`agentic-program` skill**（`skills/agentic-program/SKILL.md`）。该 skill 是完整规范:文件布局、装饰器元数据、docstring 与 `content` 的分工、校验清单。
 
 ### 内置函数
 
@@ -257,23 +236,24 @@ OpenProgram 附带两个预装应用，位于 `openprogram/programs/applications
 
 ```
 openprogram/
-├── __init__.py                      # agentic_function, Runtime, Context, create_runtime
+├── __init__.py                      # agentic_function, Runtime, create_runtime
 ├── cli.py                           # `openprogram` 命令入口
 ├── agentic_programming/             # 范式引擎
 │   ├── function.py                  #   @agentic_function 装饰器
-│   ├── runtime.py                   #   Runtime（exec + retry + context 注入）
-│   ├── context.py                   #   Context 树
-│   ├── events.py                    #   流式事件
-│   └── persistence.py               #   加载 / 保存轨迹
+│   ├── runtime.py                   #   Runtime（exec + retry + DAG 上下文）
+│   ├── session.py                   #   会话生命周期
+│   └── skills.py                    #   SKILL.md 发现
+├── context/                         # 扁平 DAG 上下文模型 — nodes / storage / render / compute_reads
 ├── providers/                       # Anthropic、OpenAI、Gemini、Claude Code、Codex、Gemini CLI
 ├── programs/
 │   ├── functions/
-│   │   ├── meta/                    #   create / create_app / edit / fix / create_skill
+│   │   ├── registry.py              #   显式注册的函数列表
 │   │   ├── buildin/                 #   deep_work / agent_loop / general_action / wait / ask_user
-│   │   └── third_party/             #   通过 `openprogram create` 生成的用户函数
+│   │   └── third_party/             #   通用函数（含 pdf/）
 │   └── applications/                # 基于 OpenProgram 构建的完整应用
-│       ├── GUI-Agent-Harness/       #   自主 GUI agent（预装）
-│       └── Research-Agent-Harness/  #   自主研究 agent（预装）
+│       ├── GUI-Agent-Harness/       #   自主 GUI agent
+│       ├── Research-Agent-Harness/  #   自主研究 agent
+│       └── Wiki-Agent-Harness/      #   自主 wiki 构建 agent
 └── webui/                           # `openprogram web` 浏览器 UI
 skills/                              # 用于 agent 集成的 SKILL.md 文件
 examples/                            # 可运行的示例

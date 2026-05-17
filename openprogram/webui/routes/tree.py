@@ -93,6 +93,26 @@ def register(app):
 
         return JSONResponse(content=stats)
 
+    @app.get("/api/sessions/{session_id}/context-range")
+    async def get_context_range(session_id: str, head_id: str | None = None):
+        """Node ids the next chat message's LLM call will carry as context.
+
+        That is the active branch — from root (or the most recent
+        compaction summary) up to the head — which the dispatcher loads
+        via ``get_branch`` and feeds to the context engine. The WebUI
+        dims DAG nodes outside this set so the user can see, before
+        sending, roughly how much history the next message will include.
+        """
+        from openprogram.agent.session_db import default_db
+
+        branch = default_db().get_branch(session_id, head_id) or []
+        node_ids = [m["id"] for m in branch if m.get("id")]
+        return JSONResponse(content={
+            "session_id": session_id,
+            "node_ids": node_ids,
+            "count": len(node_ids),
+        })
+
     @app.get("/api/programs/meta")
     async def get_programs_meta():
         from openprogram.webui import server as _s

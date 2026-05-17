@@ -15,7 +15,6 @@ import time
 
 import pytest
 
-from openprogram.agentic_programming.context import Context, _current_ctx
 from openprogram.programs.functions.buildin.ask_user import (
     FollowUp,
     ask_user,
@@ -301,41 +300,6 @@ class TestWebFollowUp:
         set_ask_user(None)
 
         assert result_holder[0] == "green-99"
-
-    def test_context_handler_takes_priority(self):
-        """Handler on Context takes priority over global handler."""
-        global_called = []
-        context_called = []
-
-        set_ask_user(lambda q: (global_called.append(q), "global")[1])
-
-        # Create a context with its own handler
-        ctx = Context(name="test")
-        ctx.ask_user_handler = lambda q: (context_called.append(q), "context")[1]
-
-        token = _current_ctx.set(ctx)
-        try:
-            result = ask_user("test question")
-            assert result == "context"
-            assert len(context_called) == 1
-            assert len(global_called) == 0
-        finally:
-            _current_ctx.reset(token)
-            set_ask_user(None)
-
-    def test_handler_bubbles_up_context_tree(self):
-        """ask_user walks up the context tree to find a handler."""
-        root = Context(name="root")
-        root.ask_user_handler = lambda q: f"root answered: {q}"
-        child = Context(name="child", parent=root)
-        # child has no handler — should bubble to root
-
-        token = _current_ctx.set(child)
-        try:
-            result = ask_user("question")
-            assert result == "root answered: question"
-        finally:
-            _current_ctx.reset(token)
 
     def test_no_handler_returns_none_in_noninteractive(self):
         """With no handler and non-TTY stdin, ask_user returns None."""

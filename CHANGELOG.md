@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **`@agentic_function` docstring restored to the rendered context** — the tree-Context → DAG refactor dropped the function docstring from the prompt. It is now stored on the function's DAG `Call` node (`metadata.doc`) and rendered into the context of the LLM calls made inside the function, so the model sees what the function does.
+- **`@agentic_function(system=...)` now reaches the model** — the decorator's system prompt was stored on the function object but never applied. It is now stamped onto the injected runtime for the duration of the call (saved/restored so a caller's own `system` survives).
+- **`_retry_choice` buildin module restored** — `parse_args`'s retry path imported a module deleted in the DAG refactor, so any failed parse crashed with `ModuleNotFoundError` instead of retrying.
+- **Agent runtime bugs** — `wiki_agent` passed a bare string to `runtime.exec` and imported a non-existent `legacy_providers`; `research_agent`'s `_stage_step` called `parse_args` with the pre-rewrite API (dict in, tuple out).
+
+### Changed — agent functions
+- **Docstring / `content` split applied to wiki / research / gui agents** — per-call instructions and output schemas moved out of docstrings into `runtime.exec(content=...)`, so they reach the model as the operative prompt rather than as background description.
+- **PDF tooling** — added `extract_pdf_figures` / `extract_pdf_tables` agentic functions (LLM-guided figure/table extraction from any PDF).
+
 ### Changed — Rebrand to **OpenProgram**
 - **Package renamed**: `agentic-programming` → `openprogram` (PyPI), `agentic/` → `openprogram/` (import path).
 - **Repository renamed**: `Agentic-Programming` → `OpenProgram`.

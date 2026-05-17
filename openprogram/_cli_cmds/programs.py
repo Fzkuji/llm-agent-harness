@@ -11,12 +11,6 @@ def _get_runtime(provider=None, model=None):
     return create_runtime(provider=provider, model=model)
 
 
-def _get_functions_dir() -> str:
-    import openprogram
-    pkg = os.path.dirname(openprogram.__file__)
-    return os.path.join(pkg, "programs", "functions", "third_party")
-
-
 def _cmd_configure(provider: str | None):
     """Interactive provider-setup. Drives openprogram.providers.configuration."""
     from openprogram.providers import configuration
@@ -97,55 +91,32 @@ def _cmd_configure(provider: str | None):
 
 
 def _cmd_list():
-    """List all saved third-party functions."""
-    functions_dir = _get_functions_dir()
-    if not os.path.exists(functions_dir):
-        print("No functions created yet.")
+    """List the registered agentic functions (functions/registry.py)."""
+    from openprogram.programs.functions import iter_function_files
+
+    entries: list[tuple[str, str]] = []
+    for subpkg in ("buildin", "third_party"):
+        for _dotted, filepath in iter_function_files(subpkg):
+            name = os.path.basename(filepath)[:-3]
+            desc = ""
+            try:
+                with open(filepath) as f:
+                    content = f.read()
+                if '"""' in content:
+                    start = content.index('"""') + 3
+                    end = content.index('"""', start)
+                    desc = content[start:end].strip().split("\n")[0]
+            except OSError:
+                pass
+            entries.append((name, desc))
+
+    if not entries:
+        print("No functions registered.")
         return
 
-    files = [f[:-3] for f in os.listdir(functions_dir)
-             if f.endswith(".py") and f != "__init__.py"]
-    if not files:
-        print("No functions created yet.")
-        return
-
-    print(f"Functions ({len(files)}):\n")
-    for name in sorted(files):
-        filepath = os.path.join(functions_dir, f"{name}.py")
-        with open(filepath) as f:
-            content = f.read()
-        desc = ""
-        if '"""' in content:
-            start = content.index('"""') + 3
-            end = content.index('"""', start)
-            desc = content[start:end].strip().split("\n")[0]
-        print(f"  {name:20s}  {desc}")
-
-
-_REMOVED_MSG = (
-    "This subcommand has been removed. Authoring agentic functions now goes\n"
-    "through the `agentic-program` skill — load it in a chat session and let\n"
-    "the agent write/edit .py files directly using its file-editing tools.\n"
-    "See skills/agentic-program/SKILL.md for the full spec."
-)
-
-
-def _cmd_create(description, name, as_skill, provider=None, model=None):
-    """Deprecated — use the agentic-program skill."""
-    print(_REMOVED_MSG)
-    sys.exit(2)
-
-
-def _cmd_create_app(description, name, provider=None, model=None):
-    """Deprecated — use the agentic-program skill."""
-    print(_REMOVED_MSG)
-    sys.exit(2)
-
-
-def _cmd_edit(name, instruction, provider=None, model=None):
-    """Deprecated — use the agentic-program skill."""
-    print(_REMOVED_MSG)
-    sys.exit(2)
+    print(f"Functions ({len(entries)}):\n")
+    for name, desc in sorted(entries):
+        print(f"  {name:24s}  {desc}")
 
 
 def _cmd_run(name, arg_list, provider=None, model=None):
@@ -184,9 +155,3 @@ def _cmd_run(name, arg_list, provider=None, model=None):
 
     result = loaded_func(**kwargs)
     print(result)
-
-
-def _cmd_create_skill(name, provider=None, model=None):
-    """Deprecated — use the agentic-program skill."""
-    print(_REMOVED_MSG)
-    sys.exit(2)

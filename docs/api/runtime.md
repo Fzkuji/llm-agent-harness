@@ -1,8 +1,8 @@
 # Runtime
 
-> Source: [`agentic/runtime.py`](../../agentic/runtime.py)
+> Source: [`openprogram/agentic_programming/runtime.py`](../../openprogram/agentic_programming/runtime.py)
 
-LLM 运行时。封装 LLM provider，自动处理 Context 注入和记录。
+LLM 运行时。封装 LLM provider,自动从 session DAG 算上下文、调用 LLM、把回复写回 DAG。
 
 ---
 
@@ -36,24 +36,24 @@ class Runtime(call=None, model="default")
 Runtime.exec(content, context=None, response_format=None, model=None) -> str
 ```
 
-调用 LLM，自动注入 Context。
+调用 LLM,上下文从 session DAG 自动算出。
 
-**在 `@agentic_function` 内部调用时：**
-1. 从 Context 树生成 execution context（调用 `summarize()`）
-2. 把 context 作为第一个 text block 插入 content 列表
+**在 `@agentic_function` 内部调用时:**
+1. 从当前函数的 DAG 节点出发,`compute_reads` 按 `expose` / `render_range` 算出本次要读哪些历史节点
+2. `render_dag_messages` 把这些节点渲染成 messages
 3. 调用 `_call()` 发送请求
-4. 把回复记录到当前 Context 节点的 `raw_reply`
+4. 把回复写成一个新的 `llm` 节点 append 到 DAG
 
-**在 `@agentic_function` 外部调用时：** 直接调用 LLM，不注入 context，不记录。
+**在 `@agentic_function` 外部调用时:** 直接调用 LLM,不算上下文、不写 DAG(退化成单轮调用)。
 
-**每个 `@agentic_function` 最多调用一次 `exec()`。** 第二次调用会抛 `RuntimeError`。
+一个 `@agentic_function` 可以多次调用 `exec()`,每次都是 DAG 上的一个新 `llm` 节点。
 
 #### 参数
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `content` | `list[dict]` | *(必填)* | 内容块列表（见下方格式） |
-| `context` | `str \| None` | `None` | 手动覆盖自动生成的 context。`None` = 自动 |
+| `context` | `str \| None` | `None` | 手动覆盖自动算出的上下文。`None` = 从 DAG 自动算 |
 | `response_format` | `dict \| None` | `None` | 输出格式约束（JSON schema），传给 `_call()` |
 | `model` | `str \| None` | `None` | 覆盖默认模型 |
 
@@ -207,30 +207,14 @@ rt = Runtime(call=my_llm, max_retries=5)
 
 | 情况 | 处理 |
 |------|------|
-| API 调用成功 | 返回结果，并把 `{attempt, reply, error}` 记录到当前 Context 节点 |
+| API 调用成功 | 返回结果 |
 | API 抛出异常（非 `TypeError` / `NotImplementedError`） | 记录失败 attempt，然后继续重试，直到达到 `max_retries` |
 | `TypeError` 或 `NotImplementedError` | 立即抛出，不重试（通常是 provider 实现或调用方式的问题） |
 | 所有重试均失败 | 抛出 `RuntimeError`，并附上完整 attempt 报告 |
 
-### Context 中的 attempts
-
-每次 `exec()` / `async_exec()` 都会把尝试历史写入 `ctx.attempts`：
-
-```python
-[
-    {"attempt": 1, "reply": None, "error": "ConnectionError: timeout"},
-    {"attempt": 2, "reply": "ok", "error": None},
-]
-```
-
-这有两个直接用途：
-
-1. `Context.save()` 能把 retry 历史落盘，方便排查线上问题。
-2. `fix(fn=...)` 能直接读取这些 attempts，把失败上下文带给 LLM 做定向修复。
-
 ### 错误报告格式
 
-当所有重试耗尽时，抛出的 `RuntimeError` 包含每次尝试的错误信息：
+当所有重试耗尽时,抛出的 `RuntimeError` 包含每次尝试的错误信息:
 
 ```
 RuntimeError: exec() failed after 3 attempts in observe():
@@ -239,11 +223,9 @@ Attempt 2: RateLimitError: 429 Too Many Requests
 Attempt 3: ConnectionError: timeout
 ```
 
-这样可以在 Context 树中看到完整的失败史，方便调试。
+### 重试的边界
 
-### 与 `fix()` 的配合
-
-推荐模式：让 `Runtime(max_retries=N)` 先处理短暂 API 波动（网络超时、速率限制等临时错误）；如果函数本身逻辑或输出格式有问题，再用 `fix()` 做结构性修复。两者是互补的——`max_retries` 处理 API 层面的瞬态故障，`fix()` 处理代码层面的结构性问题。
+`max_retries` 只处理 API 层面的瞬态故障(网络超时、速率限制等)。如果是函数本身的逻辑或输出格式有问题,重试解决不了——直接修改函数代码,参见 [`skills/agentic-program/SKILL.md`](../../skills/agentic-program/SKILL.md)。
 
 ```python
 runtime = Runtime(call=my_llm, max_retries=3)

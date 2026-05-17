@@ -1,6 +1,6 @@
 ---
 name: agentic-program
-description: "Write, edit, validate, and save Agentic Programming functions (@agentic_function) directly with your own file-editing tools. No dedicated meta functions — just follow the rules in this skill. Triggers: 'write an agentic_function', 'create a function', 'edit a function', 'improve a function', 'fix this function', 'add a function that', 'add a tool that', '写一个 agentic function', '改一下这个函数', '帮我创建一个函数'."
+description: "Write, edit, validate, save, and run Agentic Programming functions (@agentic_function) directly with your own file-editing tools. No dedicated meta functions — just follow the rules in this skill. Triggers: 'write an agentic_function', 'create a function', 'edit a function', 'improve a function', 'fix this function', 'add a function that', 'add a tool that', 'run a function', '写一个 agentic function', '改一下这个函数', '帮我创建一个函数', '怎么运行这个函数'."
 ---
 
 # Agentic Programming — author, edit, validate, save
@@ -52,7 +52,7 @@ Don't decorate a function just to "make it discoverable"; the decorator implies 
 
 ## 3. Function metadata specification
 
-The framework's components (WebUI, catalog menus, provider-native `tools=[...]`, meta tooling) all read metadata from the same places. Use these as the **only** sources:
+The framework's components (WebUI, catalog menus, provider-native `tools=[...]`) all read metadata from the same places. Use these as the **only** sources:
 
 | Information | Where it lives | How it's read |
 |---|---|---|
@@ -85,10 +85,10 @@ These two channels have **different responsibilities**. Neither replaces the oth
 
 | Channel | Scope | What goes here |
 |---|---|---|
-| docstring | Whole-function level. Read by humans, catalog menus, tool_use specs, meta tooling. | One-line summary (required). Optionally a body describing what each LLM call does, expected outputs, edge cases. As detailed as is useful for readers. |
+| docstring | Whole-function level. Read by humans, catalog menus, tool_use specs. | One-line summary (required). Optionally a body describing what each LLM call does, expected outputs, edge cases. As detailed as is useful for readers. |
 | `runtime.exec(content=[...])` | One specific LLM call inside the function. A function may make several with different prompts. | The actual prompt + data for *this* call: the task, output format, constraints, plus the data to operate on. **Required even if the docstring already explains the same thing.** |
 
-**Documentation in the docstring does not propagate into the LLM call.** The framework sends the docstring as descriptive context (rendered in the call tree); some providers (codex CLI / chatgpt subscription) will not read it as authoritative instruction and will respond conversationally to whatever's in `content`. Always write the per-call prompt inside `content`.
+**The docstring reaches the model — but as description, not as the operative instruction.** The framework stores the docstring on the function's DAG node and renders it into the context of the LLM calls made inside the function; it also becomes the tool `description` when the function is exposed via `tools=[fn]`. So the model *sees* it. But it arrives as descriptive context, and some providers (codex CLI / chatgpt subscription) respond conversationally to whatever is in `content`, treating the rest as background. The operative per-call prompt — task, output format, constraints — must therefore live in `content`. Rule of thumb: the docstring describes *what the function is*; `content` *instructs the call*. Write the per-call prompt in `content` even if the docstring already explains the same thing.
 
 ## 5. Recommended style (new code must use this)
 
@@ -169,8 +169,8 @@ Walk through every rule. If any fails, fix it before writing the file.
 | 4 | Every parameter has a type annotation; the return has an annotation. | Eyeball signature. |
 | 5 | The function has a docstring whose first paragraph is a one-line summary. | Eyeball. |
 | 6 | No `async def`. | Eyeball. |
-| 7 | All `import` / `from ... import` modules are either `openprogram.*` or one of the allowed stdlib modules: `os, os.path, sys, json, re, math, datetime, pathlib, collections, itertools, functools, textwrap, string, io, csv, hashlib, base64, time, random, copy, glob, shutil, tempfile, urllib, urllib.parse, urllib.request, typing, dataclasses, enum, abc, statistics, decimal, fractions`. | Read import lines. |
-| 8 | If you need a stdlib module not in the list, ask the user before adding it. | — |
+| 7 | Every `import` / `from ... import` actually resolves in this environment. There is no import sandbox — any installed package works — but prefer the stdlib and `openprogram.*` so the function stays dependency-free and portable. | Read import lines; the §9 smoke test catches anything that doesn't resolve. |
+| 8 | If you pull in a third-party package (not stdlib, not `openprogram.*`), confirm it's already installed and tell the user it's a new dependency. | Check / `pip show <pkg>`. |
 | 9 | Code parses as Python (no syntax error). | Mentally compile; if unsure run `python -c "import ast; ast.parse(open('<path>').read())"`. |
 
 ### 6.2 `runtime.exec` call-site rules (every `runtime.exec(...)` call)
@@ -255,7 +255,36 @@ rt.close()
 
 If it crashes, read the traceback and fix before declaring done. For functions whose output is hard to verify automatically (free-form text), the smoke test only proves "didn't crash" — write a real `pytest` test in `tests/` for anything important.
 
-## 10. Generating a `SKILL.md` for a function
+## 10. Running an existing function
+
+Once a function is saved, there are two ways to run it.
+
+**CLI** — for functions discoverable under `openprogram/programs/functions/`:
+
+```bash
+openprogram programs list                       # see what's available
+openprogram programs run <name> --arg key=value  # --arg is repeatable
+```
+
+The CLI run path auto-injects a `Runtime` for functions that need one, so
+you don't pass `runtime=` yourself. `--provider` / `--model` override the
+LLM if the function calls one.
+
+**Python** — import and call directly (any function, anywhere):
+
+```python
+from openprogram.programs.functions.third_party.<name> import <name>
+from openprogram import create_runtime
+
+rt = create_runtime()
+result = <name>(..., runtime=rt)   # pass runtime= only if the signature has it
+rt.close()
+```
+
+Direct calls do *not* auto-inject a runtime — construct one with
+`create_runtime()` and pass it. This is also the §9 smoke-test shape.
+
+## 11. Generating a `SKILL.md` for a function
 
 To make a function agent-discoverable, write a `SKILL.md` next to it:
 
@@ -274,16 +303,16 @@ description: "<one-sentence summary including 4-8 trigger phrases an agent might
 
 After the frontmatter, write a short body covering when to use this skill, brief usage example, and one or two natural-language triggers. Keep it concise — agents read this every message.
 
-## 11. Sanity checks if something looks wrong
+## 12. Sanity checks if something looks wrong
 
 | Symptom | Likely cause |
 |---|---|
 | Generated function returns the wrong thing when run | Per-call prompt isn't in `content=[...]` — only in docstring. Codex / chatgpt subscription will reply conversationally. Move the instruction into `content`. |
 | WebUI doesn't show your function | Filename starts with `_`, or the file isn't under one of the discovery roots. |
-| Function crashes with `ImportError` on a stdlib module | The module isn't in the allowlist (see §6.1 rule 7). Talk to the user about whether to allow it. |
+| Function crashes with `ImportError` | The imported package isn't installed in this environment. Install it, or rewrite using a stdlib / `openprogram.*` equivalent (see §6.1 rule 7). |
 | Same function works on one provider, fails on another | Provider treats the rendered context tree differently. Make sure `content=[...]` is self-sufficient — the test should be: would this work if the function had no docstring at all? If yes, you're good. |
 
-## 12. Quick-reference: the absolute minimum
+## 13. Quick-reference: the absolute minimum
 
 If you remember nothing else from this skill, remember these:
 

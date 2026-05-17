@@ -147,32 +147,19 @@ def main():
     sub = parser.add_subparsers(dest="command", help="Subcommand")
 
     # ---- programs ---------------------------------------------------------
+    # Authoring (new / edit / app) lives in the `agentic-program` skill now —
+    # the agent writes .py files directly. Only run / list remain as CLI.
     p_programs = sub.add_parser(
         "programs",
-        help="Manage agentic programs (new, edit, run, list, app)",
+        help="Manage agentic programs (run, list)",
     )
     programs_sub = p_programs.add_subparsers(dest="programs_verb", metavar="verb")
-    p_p_new = programs_sub.add_parser("new", help="Create a new program from description")
-    p_p_new.add_argument("name", help="Program name")
-    p_p_new.add_argument("description", help="What the program should do")
-    p_p_new.add_argument("--as-skill", action="store_true",
-        help="Also create a SKILL.md for the program")
-    _add_provider_args(p_p_new)
-    p_p_edit = programs_sub.add_parser("edit", help="Edit an existing program")
-    p_p_edit.add_argument("name", help="Program name to edit")
-    p_p_edit.add_argument("--instruction", "-i", default=None, help="What to change")
-    _add_provider_args(p_p_edit)
     p_p_run = programs_sub.add_parser("run", help="Run a program")
     p_p_run.add_argument("name", help="Program name to run")
     p_p_run.add_argument("--arg", "-a", action="append", default=[],
         help="Program arg as key=value (repeatable)")
     _add_provider_args(p_p_run)
     programs_sub.add_parser("list", help="List all saved programs")
-    p_p_app = programs_sub.add_parser("app",
-        help="Export a complete runnable app (runtime + functions + main)")
-    p_p_app.add_argument("description", help="What the app should do")
-    p_p_app.add_argument("--name", "-n", default="app", help="App name (default: app)")
-    _add_provider_args(p_p_app)
 
     # ---- skills -----------------------------------------------------------
     p_skills = sub.add_parser("skills", help="Manage SKILL.md registry")
@@ -188,10 +175,6 @@ def main():
     p_sk_inst.add_argument("--target", "-t", default=None,
         choices=["claude", "gemini"],
         help="Target CLI (default: auto-detect)")
-    p_sk_new = skills_sub.add_parser("new",
-        help="Create a SKILL.md for an existing program")
-    p_sk_new.add_argument("name", help="Program name")
-    _add_provider_args(p_sk_new)
 
     # ---- sessions ---------------------------------------------------------
     p_sessions = sub.add_parser("sessions",
@@ -488,15 +471,8 @@ def main():
         verb = getattr(args, "programs_verb", None)
         if verb == "list":
             _cmd_list()
-        elif verb == "new":
-            _cmd_create(args.description, args.name, args.as_skill,
-                        args.provider, args.model)
-        elif verb == "edit":
-            _cmd_edit(args.name, args.instruction, args.provider, args.model)
         elif verb == "run":
             _cmd_run(args.name, args.arg, args.provider, args.model)
-        elif verb == "app":
-            _cmd_create_app(args.description, args.name, args.provider, args.model)
         else:
             p_programs.print_help()
         return
@@ -509,8 +485,6 @@ def main():
             sys.exit(_cmd_skills_doctor(args.dir))
         elif verb == "install":
             _cmd_install_skills(args.target)
-        elif verb == "new":
-            _cmd_create_skill(args.name, args.provider, args.model)
         else:
             p_skills.print_help()
         return
@@ -824,14 +798,9 @@ def main():
 
 from openprogram._cli_cmds.programs import (  # noqa: E402,F401
     _get_runtime,
-    _get_functions_dir,
     _cmd_configure,
     _cmd_list,
-    _cmd_create,
-    _cmd_create_app,
-    _cmd_edit,
     _cmd_run,
-    _cmd_create_skill,
 )
 from openprogram._cli_cmds.skills import (  # noqa: E402,F401
     _cmd_skills_list,

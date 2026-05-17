@@ -93,7 +93,7 @@ class TestAgentLoop:
             return step_responses[-1]  # repeat last
         return mock
 
-    def test_done_on_first_step(self):
+    def test_done_on_first_step(self, tmp_path):
         """agent_loop stops when LLM reports done=true."""
         from openprogram.programs.functions.buildin.agent_loop import agent_loop
         from openprogram.agentic_programming.runtime import Runtime
@@ -101,11 +101,11 @@ class TestAgentLoop:
         rt = Runtime(call=self._mock_call([
             '{"done": true, "action": "wrote paper", "result": "complete", "next": null, "error": null}',
         ]))
-        result = agent_loop(goal="write a paper", runtime=rt, max_steps=10, state_dir="/tmp/ap-test-state")
+        result = agent_loop(goal="write a paper", runtime=rt, max_steps=10, state_dir=str(tmp_path))
         assert result["done"] is True
         assert result["steps"] == 1
 
-    def test_multi_step(self):
+    def test_multi_step(self, tmp_path):
         """agent_loop runs multiple steps until done."""
         from openprogram.programs.functions.buildin.agent_loop import agent_loop
         from openprogram.agentic_programming.runtime import Runtime
@@ -115,11 +115,11 @@ class TestAgentLoop:
             '{"done": false, "action": "write intro", "result": "drafted", "next": "finalize", "error": null}',
             '{"done": true, "action": "finalize", "result": "complete", "next": null, "error": null}',
         ]))
-        result = agent_loop(goal="write survey", runtime=rt, max_steps=10, state_dir="/tmp/ap-test-state")
+        result = agent_loop(goal="write survey", runtime=rt, max_steps=10, state_dir=str(tmp_path))
         assert result["done"] is True
         assert result["steps"] == 3
 
-    def test_max_steps_reached(self):
+    def test_max_steps_reached(self, tmp_path):
         """agent_loop stops at max_steps."""
         from openprogram.programs.functions.buildin.agent_loop import agent_loop
         from openprogram.agentic_programming.runtime import Runtime
@@ -127,12 +127,12 @@ class TestAgentLoop:
         rt = Runtime(call=self._mock_call([
             '{"done": false, "action": "work", "result": "progress", "next": "more", "error": null}',
         ]))
-        result = agent_loop(goal="infinite task", runtime=rt, max_steps=3, state_dir="/tmp/ap-test-state")
+        result = agent_loop(goal="infinite task", runtime=rt, max_steps=3, state_dir=str(tmp_path))
         assert result["done"] is False
         assert result["steps"] == 3
         assert "max_steps" in result.get("error", "")
 
-    def test_callback_can_cancel(self):
+    def test_callback_can_cancel(self, tmp_path):
         """Returning False from callback stops the loop."""
         from openprogram.programs.functions.buildin.agent_loop import agent_loop
         from openprogram.agentic_programming.runtime import Runtime
@@ -140,12 +140,12 @@ class TestAgentLoop:
         rt = Runtime(call=self._mock_call([
             '{"done": false, "action": "work", "result": "ok", "next": "more", "error": null}',
         ]))
-        result = agent_loop(goal="task", runtime=rt, max_steps=100, state_dir="/tmp/ap-test-state", callback=lambda r: False)
+        result = agent_loop(goal="task", runtime=rt, max_steps=100, state_dir=str(tmp_path), callback=lambda r: False)
         assert result["done"] is True
         assert result.get("cancelled") is True
         assert result["steps"] == 1
 
-    def test_handles_exception(self):
+    def test_handles_exception(self, tmp_path):
         """agent_loop records errors and continues."""
         from openprogram.programs.functions.buildin.agent_loop import agent_loop
         from openprogram.agentic_programming.runtime import Runtime
@@ -164,7 +164,7 @@ class TestAgentLoop:
             return '{"done": true, "action": "retry", "result": "ok", "next": null, "error": null}'
 
         rt = Runtime(call=mock, max_retries=1)
-        result = agent_loop(goal="fragile task 3", runtime=rt, max_steps=5, state_dir="/tmp/ap-test-state")
+        result = agent_loop(goal="fragile task 3", runtime=rt, max_steps=5, state_dir=str(tmp_path))
         assert result["done"] is True
         assert result["steps"] == 2
         assert "error" in result["history"][0]["error"].lower()

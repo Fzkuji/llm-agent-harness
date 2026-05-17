@@ -41,7 +41,7 @@ Then chat with it — either in the terminal or the browser:
 openprogram                                         # full-screen TUI
 ```
 
-For the web UI, just open your browser at **http://localhost:8100** — `openprogram setup` starts the worker in the background (frontend on 8100, FastAPI backend on 8109) so the page is already live.
+For the web UI, just open your browser at **http://localhost:3000** — `openprogram setup` starts the worker in the background (frontend on 3000, FastAPI backend on 8109) so the page is already live.
 
 Both surfaces share the same backend — sessions, settings, web-search defaults are persisted in `~/.agentic/` and visible from either entry point.
 
@@ -122,9 +122,19 @@ rm -f Research-Agent-Harness && ln -s "$RESEARCH_HARNESS_DIR" Research-Agent-Har
 
 </details>
 
-For platform-builder topics — `Runtime` retry semantics, the `fix()` repair loop, the full `agentic_function` decorator API — see [docs/API.md](docs/API.md) and the per-topic notes under [docs/api/](docs/api/).
+For platform-builder topics — `Runtime` retry semantics, the full `agentic_function` decorator API, the flat-DAG context model — see [docs/API.md](docs/API.md) and the per-topic notes under [docs/api/](docs/api/).
 
 ---
+
+## Supported Projects
+
+Three agent applications ship with OpenProgram, under `openprogram/programs/applications/` — each a full agent built on the `@agentic_function` paradigm:
+
+| Project | What it does |
+|---------|--------------|
+| [GUI&nbsp;Agent&nbsp;Harness](https://github.com/Fzkuji/GUI-Agent-Harness) | Autonomous GUI agent — operates desktop apps (and OSWorld VMs) by vision: observe → plan → act → verify. Python drives the loop, the LLM only reasons when asked. |
+| [Research&nbsp;Agent&nbsp;Harness](https://github.com/Fzkuji/Research-Agent-Harness) | Autonomous research agent — literature survey → idea → experiments → paper writing → cross-model review. Full pipeline from topic to submission-ready paper. |
+| [Wiki&nbsp;Agent&nbsp;Harness](https://github.com/Fzkuji/Wiki-Agent-Harness) | Autonomous wiki builder — ingests notes, documents and conversations into a structured, Obsidian-compatible knowledge vault with `[[wikilinks]]`. |
 
 ## Why Agentic Programming?
 
@@ -136,8 +146,8 @@ For platform-builder topics — `Runtime` retry semantics, the `fix()` repair lo
 |-----------|-----|
 | **Deterministic flow** | Python controls `if/else/for/while`. Execution is guaranteed, not suggested. |
 | **Minimal LLM calls** | Call the LLM only when reasoning is needed. 2 calls, not 10. |
-| **Docstring = Prompt** | Change the docstring, change the LLM's behavior. No separate prompt files. |
-| **Self-evolving** | Functions generate, fix, and improve themselves at runtime. |
+| **Prompt in code** | The per-call prompt lives in the function body (`runtime.exec(content=...)`), not in scattered prompt files. |
+| **Self-evolving** | Agents author, fix and improve functions directly — guided by the `agentic-program` skill. |
 
 <details>
 <summary><strong>The problem with current frameworks</strong></summary>
@@ -199,36 +209,11 @@ result = deep_work(
 
 The agent clarifies requirements upfront, then works fully autonomously — executing, self-evaluating, and revising until the output passes quality review. State is persisted to disk, so interrupted work resumes where it left off.
 
-### Self-Evolving Code
+### Functions that author functions
 
-Functions can generate new functions, fix broken ones, and scaffold complete apps — all at runtime:
+Writing, fixing and scaffolding `@agentic_function`s is itself agent work — done with ordinary file-editing tools, guided by the **`agentic-program` skill** (`skills/agentic-program/SKILL.md`). There are no dedicated `create()` / `fix()` framework calls: they only ever wrapped one LLM call plus a file write, which an agent does directly.
 
-```python
-from openprogram.programs.functions.meta import create, create_app, fix
-
-# Generate a function from description
-sentiment = create("Analyze text sentiment", runtime=runtime, name="sentiment")
-sentiment(text="I love this!")  # → "positive"
-
-# Generate a complete app (runtime + argparse + main)
-create_app("Summarize articles from URLs", runtime=runtime, name="summarizer")
-# → openprogram/programs/applications/summarizer.py
-
-# Fix a broken function — auto-reads source & error history
-# Runs a clarify → generate → verify loop (up to max_rounds=5 by default)
-fixed = fix(fn=broken_fn, runtime=runtime, instruction="return JSON, not plain text")
-```
-
-The `create → run → fail → fix → run` cycle means programs improve themselves through use.
-
-## Ecosystem
-
-OpenProgram ships with two built-in apps under `openprogram/programs/applications/`:
-
-| App | Description |
-|-----|-------------|
-| [GUI&nbsp;Agent&nbsp;Harness](https://github.com/Fzkuji/GUI-Agent-Harness) | Autonomous GUI agent that operates desktop apps via vision + agentic functions. Python controls observe→plan→act→verify loops; the LLM only reasons when asked. |
-| [Research&nbsp;Agent&nbsp;Harness](https://github.com/Fzkuji/Research-Agent-Harness) | Autonomous research agent: literature survey → idea → experiments → paper writing → cross-model review. Full pipeline from topic to submission-ready paper. |
+The skill is the complete spec — where the file goes, the decorator's metadata, the docstring vs `content` split, a rule-based validation checklist, and a smoke test. An agent reads it, writes the function, validates it, runs it; the `write → run → fail → fix` cycle still means programs improve through use.
 
 ## API Reference
 
@@ -236,19 +221,18 @@ OpenProgram ships with two built-in apps under `openprogram/programs/application
 
 | Import | What it does |
 |--------|-------------|
-| `from openprogram import agentic_function` | Decorator. Records execution into Context tree |
-| `from openprogram import Runtime` | LLM runtime. `exec()` calls the LLM with auto-context |
-| `from openprogram import Context` | Execution tree. `tree()`, `save()`, `traceback()` |
+| `from openprogram import agentic_function` | Decorator. Records each call as a node in the session DAG |
+| `from openprogram import Runtime` | LLM runtime. `exec()` calls the LLM with DAG-derived context |
 | `from openprogram import create_runtime` | Create a Runtime with auto-detection or explicit provider (`create_runtime()` checks API keys and CLIs in priority order) |
 
-### Meta Functions
+### Authoring functions
 
-| Import | What it does |
-|--------|-------------|
-| `from openprogram.programs.functions.meta import create` | Generate a new `@agentic_function` from description |
-| `from openprogram.programs.functions.meta import create_app` | Generate a complete runnable app with `main()` |
-| `from openprogram.programs.functions.meta import fix` | Fix broken functions via multi-round LLM analysis (clarify → generate → verify loop, up to `max_rounds`) |
-| `from openprogram.programs.functions.meta import create_skill` | Generate a SKILL.md for agent discovery |
+There are no `create()` / `fix()` meta-functions — writing, editing and
+validating `@agentic_function`s is done directly with ordinary
+file-editing tools, guided by the **`agentic-program` skill**
+(`skills/agentic-program/SKILL.md`). That skill is the complete spec:
+file layout, the decorator's metadata, the docstring vs `content` split,
+and a rule-based validation checklist.
 
 ### Built-in Functions
 
@@ -265,10 +249,8 @@ Six built-in providers: Anthropic, OpenAI, Gemini (API), Claude Code, Codex, Gem
 
 ### API Docs by Topic
 
-- [agentic_function](docs/api/agentic_function.md) — decorator behavior, context injection, auto-save
+- [agentic_function](docs/api/agentic_function.md) — decorator behavior, DAG node recording, the docstring / `content` split
 - [Runtime](docs/api/runtime.md) — `exec()`, retries, response formats, provider wiring
-- [Context](docs/api/context.md) — execution tree, `tree()`, `save()`, traceback views
-- [Meta Functions](docs/api/meta_function.md) — `create()`, `create_app()`, `fix()`, `create_skill()`
 - [Providers](docs/api/providers.md) — built-in runtimes, detection order, CLI vs API tradeoffs
 
 ## Integration
@@ -285,23 +267,24 @@ Six built-in providers: Anthropic, OpenAI, Gemini (API), Claude Code, Codex, Gem
 
 ```
 openprogram/
-├── __init__.py                      # agentic_function, Runtime, Context, create_runtime
+├── __init__.py                      # agentic_function, Runtime, create_runtime
 ├── cli.py                           # `openprogram` command entry point
 ├── agentic_programming/             # engine — paradigm-essential primitives
 │   ├── function.py                  #   @agentic_function decorator
-│   ├── runtime.py                   #   Runtime (exec + retry + context injection)
-│   ├── context.py                   #   Context tree
-│   ├── events.py                    #   streaming events
-│   └── persistence.py               #   load / save traces
+│   ├── runtime.py                   #   Runtime (exec + retry + DAG context)
+│   ├── session.py                   #   session lifecycle
+│   └── skills.py                    #   SKILL.md discovery
+├── context/                         # flat-DAG context model — nodes, storage, render, compute_reads
 ├── providers/                       # Anthropic, OpenAI, Gemini, Claude Code, Codex, Gemini CLI
 ├── programs/
 │   ├── functions/
-│   │   ├── meta/                    #   create / create_app / edit / fix / create_skill
+│   │   ├── registry.py              #   explicit list of exposed functions
 │   │   ├── buildin/                 #   deep_work / agent_loop / general_action / wait / ask_user
-│   │   └── third_party/             #   user-generated via `openprogram create`
+│   │   └── third_party/             #   general-purpose functions (incl. pdf/)
 │   └── applications/                # full apps built on OpenProgram
-│       ├── GUI-Agent-Harness/       #   symlink → GUI agent repo (checked out separately)
-│       └── Research-Agent-Harness/  #   symlink → Research agent repo (checked out separately)
+│       ├── GUI-Agent-Harness/       #   GUI agent (separate repo, checked out here)
+│       ├── Research-Agent-Harness/  #   Research agent (separate repo)
+│       └── Wiki-Agent-Harness/      #   Wiki agent (separate repo)
 └── webui/                           # `openprogram web` — browser UI
 skills/                              # SKILL.md files for agent integration
 examples/                            # runnable demos

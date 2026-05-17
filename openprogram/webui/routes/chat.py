@@ -123,6 +123,26 @@ def register(app):
         session_id = conv["id"]
         msg_id = str(uuid.uuid4())[:8]
 
+        # Anchor the run into the conversation branch with a command
+        # message — same as the WS `chat` / REST `/api/chat` run paths.
+        # Without this the run's assistant reply (parent_id=msg_id) and
+        # the @agentic_function DAG nodes (called_by=msg_id) point at a
+        # message that never existed, so the run lands orphaned in a
+        # detached view instead of connected to the conversation.
+        cmd_parts = ["run", function_name]
+        for k, v in kwargs.items():
+            if k in ("_work_dir", "runtime", "callback"):
+                continue
+            cmd_parts.append(f"{k}={v!r}" if " " in str(v) else f"{k}={v}")
+        _s._append_msg(conv, {
+            "role": "user",
+            "id": msg_id,
+            "content": " ".join(cmd_parts),
+            "display": "runtime",
+            "timestamp": time.time(),
+            "source": "web",
+        })
+
         threading.Thread(
             target=_s._execute_in_context,
             args=(session_id, msg_id, "run"),

@@ -81,12 +81,12 @@ Under the hood, `ClaudeCodeRuntime`:
 
 ```
 Your Python code
-    → @agentic_function decorator (records context)
-        → runtime.exec() (builds prompt with context)
+    → @agentic_function decorator (records a DAG node)
+        → runtime.exec() (builds the prompt from the DAG)
             → claude -p "..." (CLI call)
                 → Claude API (via subscription)
             ← response text
-        ← recorded in Context tree
+        ← reply written back as a DAG node
     ← return value
 ```
 
@@ -102,7 +102,7 @@ Your Python code
 ```python
 """
 Claude Code integration demo — no API key needed.
-Demonstrates multi-step agentic workflow with context tracking.
+Demonstrates a multi-step agentic workflow.
 """
 from openprogram import agentic_function
 from openprogram.providers import ClaudeCodeRuntime
@@ -145,8 +145,6 @@ def ideate(topic):
 if __name__ == "__main__":
     result = ideate(topic="improving developer productivity with AI")
     print(f"\n🏆 Best idea:\n{result}")
-    print(f"\n🌳 Execution tree:")
-    print(ideate.context.tree())
 ```
 
 ## Troubleshooting
@@ -244,7 +242,7 @@ runtime = ClaudeCodeRuntime(
             → claude -p "..."（CLI 调用）
                 → Claude API（通过订阅）
             ← 响应文本
-        ← 记录到 Context 树
+        ← 回复写回 DAG 节点
     ← 返回值
 ```
 
@@ -303,8 +301,6 @@ def ideate(topic):
 if __name__ == "__main__":
     result = ideate(topic="用 AI 提高开发者效率")
     print(f"\n🏆 最佳想法：\n{result}")
-    print(f"\n🌳 执行树：")
-    print(ideate.context.tree())
 ```
 
 ## 故障排查

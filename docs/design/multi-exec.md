@@ -246,16 +246,14 @@ from openprogram import agentic_function, Runtime
 rt = Runtime(call=lambda c, **kw: 'ok')
 
 @agentic_function
-def demo():
-    '''My prompt.'''
-    rt.exec('first')
-    rt.exec('second')
+def demo(runtime):
+    """My function."""
+    runtime.exec(content=[{"type": "text", "text": "first"}])
+    runtime.exec(content=[{"type": "text", "text": "second"}])
 
-demo()
-print(demo.context.tree())
-# demo
-# ├── _exec → ok
-# └── _exec → ok
+demo(runtime=rt)
+# Each runtime.exec() call becomes its own llm node in the session DAG,
+# both children of demo's code node.
 "
 ```
 

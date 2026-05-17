@@ -90,6 +90,7 @@ def _append_function_call_entry(
     expose: str,
     render_range,
     started_at,
+    docstring: str = "",
 ) -> None:
     """Append a placeholder code Call at @agentic_function entry.
 
@@ -121,6 +122,12 @@ def _append_function_call_entry(
     }
     if render_range:
         meta["render_range"] = dict(render_range)
+    # The function's docstring travels on the node so it renders into
+    # the context of any LLM call that reads this code Call — restoring
+    # the tree-Context behaviour where a function's documentation was
+    # visible to the model running inside it.
+    if docstring:
+        meta["doc"] = docstring
     node = Call(
         id=pending_id,
         created_at=started_at or time.time(),
@@ -264,6 +271,46 @@ def _inject_runtime(sig, args, kwargs):
                 break
 
     return bound.args, bound.kwargs, runtime_token, owns_runtime
+
+
+def _apply_system(system, bound_args):
+    """Apply a function's decorator ``system=`` onto its injected
+    runtime(s) for the duration of the call.
+
+    ``runtime.exec`` reads the system prompt off ``runtime.system``, so
+    the decorator's ``system=`` only reaches the model if it is stamped
+    there. Returns a restore list consumed by :func:`_restore_system`
+    so a caller's own ``system`` is not clobbered by a nested call.
+    """
+    if not system:
+        return []
+    saved = []
+    seen = set()
+    for pname in _RUNTIME_PARAMS:
+        rt = bound_args.get(pname)
+        if rt is None or id(rt) in seen:
+            continue
+        seen.add(id(rt))
+        had = hasattr(rt, "system")
+        prev = getattr(rt, "system", None)
+        try:
+            rt.system = system
+        except Exception:
+            continue
+        saved.append((rt, had, prev))
+    return saved
+
+
+def _restore_system(saved):
+    """Undo :func:`_apply_system`."""
+    for rt, had, prev in saved:
+        try:
+            if had:
+                rt.system = prev
+            else:
+                delattr(rt, "system")
+        except Exception:
+            pass
 
 
 class agentic_function:
@@ -434,11 +481,13 @@ class agentic_function:
                 expose=expose,
                 render_range=render_range,
                 started_at=_started_at,
+                docstring=inspect.getdoc(fn) or "",
             )
             # Stamp ``_call_id`` so anything further down the call
             # tree (rt.exec → ModelCall.called_by, ask_user → user
             # Call.called_by) attributes its writes to this invocation.
             _call_token = _call_id.set(_pending_call_id)
+            _system_saved = _apply_system(system, bound_args)
             output = None
             error = None
             status = "success"
@@ -454,6 +503,7 @@ class agentic_function:
                 status = "error"
                 raise
             finally:
+                _restore_system(_system_saved)
                 _update_function_call_exit(
                     pending_id=_pending_call_id,
                     output=output,
@@ -503,8 +553,13 @@ class agentic_function:
                 expose=expose,
                 render_range=render_range,
                 started_at=_started_at,
+                docstring=inspect.getdoc(fn) or "",
             )
             _call_token = _call_id.set(_pending_call_id)
+            # Apply the decorator's system= onto the injected runtime(s)
+            # for the duration of this call so nested runtime.exec()
+            # picks it up. Saved/restored so a caller's system survives.
+            _system_saved = _apply_system(system, bound_args)
             output = None
             error = None
             status = "success"
@@ -520,6 +575,7 @@ class agentic_function:
                 status = "error"
                 raise
             finally:
+                _restore_system(_system_saved)
                 _update_function_call_exit(
                     pending_id=_pending_call_id,
                     output=output,
@@ -659,6 +715,7 @@ def traced(fn):
             expose="io",
             render_range=None,
             started_at=_started_at,
+            docstring=inspect.getdoc(fn) or "",
         )
         _call_token = _call_id.set(_pending_call_id)
         output = None

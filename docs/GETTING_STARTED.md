@@ -259,10 +259,6 @@ def research(topic):
 if __name__ == "__main__":
     result = research(topic="Why Rust is gaining popularity in systems programming")
     print(f"\n📝 Summary:\n{result}")
-
-    # Print the execution tree
-    print(f"\n🌳 Execution tree:")
-    print(research.context.tree())
 ```
 
 Save this as `demo.py` and run with `python demo.py`.
@@ -273,10 +269,10 @@ Save this as `demo.py` and run with `python demo.py`.
 
 | Concept | What It Is |
 |---------|-----------|
-| `@agentic_function` | Decorator that records execution into a context tree |
-| `runtime.exec()` | Calls the LLM — auto-injects execution context |
-| `Context` | Tree of all execution records — queryable, saveable |
-| Docstring | Acts as the LLM prompt — change it to change behavior |
+| `@agentic_function` | Decorator. Records each call as a node in the session DAG |
+| `runtime.exec()` | Calls the LLM — context is computed from the DAG automatically |
+| Session DAG | Every user message / LLM call / function call is a node — see `openprogram/context/` |
+| Docstring | Documents the function; the per-call prompt lives in `runtime.exec(content=...)` |
 
 ### The Core Pattern
 
@@ -544,10 +540,6 @@ def research(topic):
 if __name__ == "__main__":
     result = research(topic="为什么 Rust 在系统编程领域越来越流行")
     print(f"\n📝 总结：\n{result}")
-
-    # 打印执行树
-    print(f"\n🌳 执行树：")
-    print(research.context.tree())
 ```
 
 保存为 `demo.py`，运行 `python demo.py`。
@@ -558,10 +550,10 @@ if __name__ == "__main__":
 
 | 概念 | 作用 |
 |------|------|
-| `@agentic_function` | 装饰器，把执行记录到上下文树 |
-| `runtime.exec()` | 调用 LLM，自动注入执行上下文 |
-| `Context` | 所有执行记录的树，可查询、可保存 |
-| Docstring | 就是 LLM 的 prompt，改注释就改行为 |
+| `@agentic_function` | 装饰器。每次调用记录为 session DAG 的一个节点 |
+| `runtime.exec()` | 调用 LLM,上下文从 DAG 自动算出 |
+| Session DAG | 每条用户消息 / LLM 调用 / 函数调用都是一个节点,见 `openprogram/context/` |
+| Docstring | 描述函数本身;本次调用的指令写在 `runtime.exec(content=...)` 里 |
 
 ### 核心模式
 

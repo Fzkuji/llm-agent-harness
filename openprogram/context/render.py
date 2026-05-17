@@ -95,6 +95,12 @@ def render_dag_messages(graph: Graph, read_ids: list[str]) -> list:
             # render_messages convention so legacy provider prompts
             # see the same shape.
             call_text = _format_call_signature(node)
+            # The function's docstring (stored on the node at entry)
+            # travels into the rendered context so the model sees what
+            # the function does, not just its name(args).
+            doc = (node.metadata or {}).get("doc")
+            if doc:
+                call_text = f"{doc}\n\n{call_text}"
             messages.append(UserMessage(
                 role="user",
                 content=[TextContent(type="text", text=call_text)],

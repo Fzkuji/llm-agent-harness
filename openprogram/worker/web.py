@@ -184,11 +184,9 @@ def start_web_frontend(
     if not _ensure_built(wd, backend_port=backend_port):
         return None
 
-    # Default frontend port is 8100 (backend is 8109) — both sit in
-    # the 8100-8109 block which is rarely squatted, unlike the
-    # 3000 / 8080 / 5000 range that Next.js / Tomcat / Flask default
-    # to. Override with OPENPROGRAM_WEB_PORT or `--web-port`.
-    port = int(web_port or os.environ.get("OPENPROGRAM_WEB_PORT", "8100"))
+    # Default frontend port is 3000. Override with OPENPROGRAM_WEB_PORT
+    # or `--web-port`.
+    port = int(web_port or os.environ.get("OPENPROGRAM_WEB_PORT", "3000"))
     _reclaim_web_port(port)
     env = dict(os.environ)
     env["OPENPROGRAM_BACKEND_URL"] = f"http://127.0.0.1:{backend_port}"

@@ -73,20 +73,9 @@ LLM 调用的运行时抽象。负责：
 
 ## 衍生概念
 
-### 元函数（meta functions）
+### LLM 也写代码
 
-LLM 不只是运行时的推理引擎，它也可以**写代码**。`create` / `edit` / `improve` 这些元函数，让 LLM 生成符合规范的 `@agentic_function`：
-
-```python
-from openprogram import create, create_runtime
-
-create(
-    description="从一段文本里抽出所有 email 地址",
-    name="extract_emails",
-    runtime=create_runtime(),
-)
-# → 生成 openprogram/programs/functions/third_party/extract_emails.py
-```
+LLM 不只是运行时的推理引擎，它也可以**写代码**——生成、修改、修复符合规范的 `@agentic_function`。这件事不需要专门的 `create()` / `fix()` 框架函数(它们以前也只是包了一次 LLM 调用加一次文件写入);agent 直接用普通的文件编辑工具完成,遵循 [`agentic-program` skill](../../skills/agentic-program/SKILL.md) 这份规范——文件放哪、装饰器元数据、docstring 与 `content` 的分工、校验清单。
 
 代码是数据，LLM 是编译器，函数是产品 —— 循环闭合。
 

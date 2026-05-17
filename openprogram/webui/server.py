@@ -1217,9 +1217,41 @@ def _execute_in_context(session_id: str, msg_id: str, action: str,
 
                 _save_session(session_id)
 
+                # Install the session's DAG GraphStore so the
+                # @agentic_function decorator and Runtime.exec invoked
+                # inside the program persist their code / llm nodes into
+                # this session's DAG — the same wiring process_user_turn
+                # does for the chat path (dispatcher.py:334). Without it
+                # `_store` is None and every DAG write inside the program
+                # silently no-ops, so a multi-step agent run collapsed to
+                # nothing in the graph.
+                from openprogram.context.storage import (
+                    GraphStore as _GraphStore,
+                    _store as _store_var,
+                )
+                from openprogram.agentic_programming.function import (
+                    _call_id as _call_id_var,
+                )
+                from openprogram.agent.session_db import default_db as _default_db
+                _store_token = None
+                _call_id_token = None
+                try:
+                    _store_token = _store_var.set(
+                        _GraphStore(_default_db().db_path, session_id)
+                    )
+                    # Anchor the program's top-level @agentic_function node
+                    # under the "run ..." command message: the decorator
+                    # reads `_call_id` for `called_by`, so setting it to the
+                    # command's id links the whole execution subtree to the
+                    # conversation instead of leaving it a floating root.
+                    _call_id_token = _call_id_var.set(msg_id)
+                except Exception:
+                    _store_token = None
+                    _call_id_token = None
+
                 # Live tree updates: retired together with the tree-Context
-                # event system. The function's DAG nodes are already written
-                # to SessionDB by the @agentic_function decorator; UI viewers
+                # event system. The function's DAG nodes are written to
+                # SessionDB by the @agentic_function decorator; UI viewers
                 # query that directly off SessionDB.
                 with _web_follow_up(session_id, msg_id, func_name, tree_cb=None):
                     try:
@@ -1228,6 +1260,16 @@ def _execute_in_context(session_id: str, msg_id: str, action: str,
                         with _running_tasks_lock:
                             _running_tasks.pop(session_id, None)
                         _unregister_active_runtime(session_id)
+                        if _call_id_token is not None:
+                            try:
+                                _call_id_var.reset(_call_id_token)
+                            except Exception:
+                                pass
+                        if _store_token is not None:
+                            try:
+                                _store_var.reset(_store_token)
+                            except Exception:
+                                pass
                     # Store session id for modify/resume before closing
                     _last_session_id = getattr(exec_rt, 'last_thread_id', None) or getattr(exec_rt, '_session_id', None)
                     # For Claude Code: keep runtime alive for modify reuse

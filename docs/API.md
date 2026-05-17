@@ -1,50 +1,42 @@
 # API Reference
 
-> Source: [`agentic/`](../agentic/)
+> Source: [`openprogram/`](../openprogram/)
 
 ## 核心组件
 
 | 组件 | 源文件 | 说明 |
 |------|--------|------|
-| [`agentic_function`](api/agentic_function.md) | `function.py` | 装饰器。把普通函数变成 Agentic Function，自动记录到 Context 树 |
-| [`Runtime`](api/runtime.md) | `runtime.py` | LLM 运行时类。处理 Context 注入、调用 LLM、记录回复 |
-| [`Context`](api/context.md) | `context.py` | 执行记录。每个函数调用一个节点，节点组成树 |
-| [`create`, `fix`, `improve`](api/meta_function.md) | `programs/functions/meta/` | Meta functions。创建、修复、优化 `@agentic_function` |
-| [`create_runtime` 与内置 providers](api/providers.md) | `providers/` | 自动检测或显式创建 Runtime，支持 Anthropic/OpenAI/Gemini/CLI providers |
+| [`agentic_function`](api/agentic_function.md) | `agentic_programming/function.py` | 装饰器。把普通函数变成 Agentic Function,每次调用记录为 session DAG 的一个节点 |
+| [`Runtime`](api/runtime.md) | `agentic_programming/runtime.py` | LLM 运行时。从 DAG 算上下文、调用 LLM、把回复写回 DAG |
+| [`create_runtime` 与内置 providers](api/providers.md) | `providers/` | 自动检测或显式创建 Runtime,支持 Anthropic / OpenAI / Gemini / CLI providers |
+
+会话上下文是一张扁平 DAG(节点 = 用户消息 / LLM 调用 / 函数调用),架构见 [`openprogram/context/README.md`](../openprogram/context/README.md)。
+
+## 编写函数
+
+没有 `create()` / `fix()` 这类 meta 函数——编写、修改、校验 `@agentic_function` 直接用普通文件编辑工具完成,遵循 [`skills/agentic-program/SKILL.md`](../skills/agentic-program/SKILL.md)。该 skill 是完整规范:文件布局、装饰器元数据、docstring 与 `content` 的分工、校验清单、冒烟测试。
 
 ## 导入
 
 ```python
-from openprogram import (
-    agentic_function,
-    Runtime,
-    Context,
-    create,
-    fix,
-    improve,
-    create_runtime,
-)
+from openprogram import agentic_function, Runtime, create_runtime
 ```
 
 ## 快速示例
 
 ```python
-from openprogram import agentic_function, Runtime
+from openprogram import agentic_function, create_runtime
 
-# 1. 创建 Runtime
-runtime = Runtime(call=my_llm_func, model="haiku")
-
-# 2. 定义函数
 @agentic_function
-def observe(task):
-    """Look at the screen."""
+def observe(task: str, runtime) -> str:
+    """Report the UI element on screen that matches a task."""
     return runtime.exec(content=[
-        {"type": "text", "text": f"Find: {task}"},
+        {"type": "text", "text": (
+            f"Find the UI element for: {task}. Reply with its label only."
+        )},
     ])
 
-# 3. 调用
-result = observe(task="login button")
-
-# 4. 查看 Context
-print(observe.context.tree())
+rt = create_runtime()
+print(observe(task="login button", runtime=rt))
+rt.close()
 ```
