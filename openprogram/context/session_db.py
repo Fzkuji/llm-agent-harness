@@ -1,8 +1,8 @@
 """DagSessionDB — SessionDB-compatible API backed by the flat-DAG store.
 
 Goal: let ``dispatcher.py`` / channels / webui keep their existing
-``SessionDB``-shaped call sites while persistence flows through
-``DagSessionManager`` underneath. Each row in the legacy ``messages``
+``SessionDB``-shaped call sites while persistence flows through the
+flat-DAG ``GraphStore`` underneath. Each row in the legacy ``messages``
 table maps to a Graph node:
 
     role="user"      → UserMessage     (content from msg["content"])
@@ -225,7 +225,7 @@ def _default_dag_db_path() -> Path:
 
 
 class DagSessionDB:
-    """SessionDB-shaped adapter over a single DagSessionManager DB file."""
+    """SessionDB-shaped adapter over a single flat-DAG SQLite file."""
 
     def __init__(self, db_path: Optional[Path] = None) -> None:
         self.db_path = Path(db_path).expanduser() if db_path else _default_dag_db_path()
