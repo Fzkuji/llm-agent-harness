@@ -1,6 +1,6 @@
 ---
 name: agentic-programming
-description: "Write, edit, validate, save, and run Agentic Programming functions (@agentic_function) directly with your own file-editing tools. Covers next-step decision making — letting the LLM pick the next function/value via decision.make or runtime.exec(choices=). No dedicated meta functions — just follow the rules in this skill. Triggers: 'write an agentic_function', 'create a function', 'edit a function', 'improve a function', 'fix this function', 'add a function that', 'add a tool that', 'run a function', 'let the model decide', 'make the model pick', 'decision.make', 'next-step decision', '写一个 agentic function', '改一下这个函数', '帮我创建一个函数', '怎么运行这个函数', '让模型做选择', '让模型决定下一步'."
+description: "Write, edit, validate, save, and run Agentic Programming functions (@agentic_function) directly with your own file-editing tools. Covers next-step decision making — letting the LLM pick the next function/value via decision.make or runtime.exec(choices=). No dedicated meta functions — just follow the rules in this skill. Triggers: 'write an agentic_function', 'create a function', 'edit a function', 'improve a function', 'fix this function', 'add a function that', 'add a tool that', 'run a function', 'let the model decide', 'make the model pick', 'decision.make', 'next-step decision'."
 ---
 
 # Agentic Programming — author, edit, validate, save
