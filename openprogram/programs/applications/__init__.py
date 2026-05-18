@@ -1,1 +1,1 @@
-# Generated apps — authored via the agentic-program skill in a chat session.
+# Generated apps — authored via the agentic-programming skill in a chat session.

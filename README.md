@@ -147,7 +147,7 @@ Three agent applications ship with OpenProgram, under `openprogram/programs/appl
 | **Deterministic flow** | Python controls `if/else/for/while`. Execution is guaranteed, not suggested. |
 | **Minimal LLM calls** | Call the LLM only when reasoning is needed. 2 calls, not 10. |
 | **Prompt in code** | The per-call prompt lives in the function body (`runtime.exec(content=...)`), not in scattered prompt files. |
-| **Self-evolving** | Agents author, fix and improve functions directly — guided by the `agentic-program` skill. |
+| **Self-evolving** | Agents author, fix and improve functions directly — guided by the `agentic-programming` skill. |
 
 <details>
 <summary><strong>The problem with current frameworks</strong></summary>
@@ -211,7 +211,7 @@ The agent clarifies requirements upfront, then works fully autonomously — exec
 
 ### Functions that author functions
 
-Writing, fixing and scaffolding `@agentic_function`s is itself agent work — done with ordinary file-editing tools, guided by the **`agentic-program` skill** (`skills/agentic-program/SKILL.md`). There are no dedicated `create()` / `fix()` framework calls: they only ever wrapped one LLM call plus a file write, which an agent does directly.
+Writing, fixing and scaffolding `@agentic_function`s is itself agent work — done with ordinary file-editing tools, guided by the **`agentic-programming` skill** (`skills/agentic-programming/SKILL.md`). There are no dedicated `create()` / `fix()` framework calls: they only ever wrapped one LLM call plus a file write, which an agent does directly.
 
 The skill is the complete spec — where the file goes, the decorator's metadata, the docstring vs `content` split, a rule-based validation checklist, and a smoke test. An agent reads it, writes the function, validates it, runs it; the `write → run → fail → fix` cycle still means programs improve through use.
 
@@ -229,8 +229,8 @@ The skill is the complete spec — where the file goes, the decorator's metadata
 
 There are no `create()` / `fix()` meta-functions — writing, editing and
 validating `@agentic_function`s is done directly with ordinary
-file-editing tools, guided by the **`agentic-program` skill**
-(`skills/agentic-program/SKILL.md`). That skill is the complete spec:
+file-editing tools, guided by the **`agentic-programming` skill**
+(`skills/agentic-programming/SKILL.md`). That skill is the complete spec:
 file layout, the decorator's metadata, the docstring vs `content` split,
 and a rule-based validation checklist.
 

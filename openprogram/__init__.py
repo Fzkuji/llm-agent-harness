@@ -14,7 +14,7 @@ OpenProgram — Agentic Programming 理念的产品化实现。
     Runtime             LLM 调用的运行时基类
     Context             执行上下文树
     ask_user            在函数里向用户提问
-    新建 / 编辑 / 改进函数走 skill ``agentic-program``，由 agent 直接
+    新建 / 编辑 / 改进函数走 skill ``agentic-programming``，由 agent 直接
     用 Read / Write / Edit 工具操作 .py 文件，不再有专门的 meta 函数。
 """
 

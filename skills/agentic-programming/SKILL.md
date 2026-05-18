@@ -1,5 +1,5 @@
 ---
-name: agentic-program
+name: agentic-programming
 description: "Write, edit, validate, save, and run Agentic Programming functions (@agentic_function) directly with your own file-editing tools. No dedicated meta functions — just follow the rules in this skill. Triggers: 'write an agentic_function', 'create a function', 'edit a function', 'improve a function', 'fix this function', 'add a function that', 'add a tool that', 'run a function', '写一个 agentic function', '改一下这个函数', '帮我创建一个函数', '怎么运行这个函数'."
 ---
 
@@ -155,6 +155,50 @@ def review_essay(
 
 The docstring stays one line + maybe a body paragraph. **No `Args:` or `Returns:` sections.** If the return shape matters to downstream callers, encode it with a structured return type (`TypedDict` / `dataclass`).
 
+## 5b. Next-step decision making
+
+When a function needs the LLM to **decide what to do next** — pick one of several follow-up functions or values — do not hand-roll it (render a menu, parse JSON, branch on the result). Use the framework's decision primitive. Two entry points, same options, same resolution:
+
+| Entry | Use when |
+|---|---|
+| `decision.make(prompt, options)` | Pure decision — the model picks straight away, no work first. |
+| `runtime.exec(..., choices=options)` | The model does a full turn (reasoning, tool calls) and only the *finish* is the pick. |
+
+The function still declares `runtime: Runtime` like any agentic function that calls the LLM (the decorator uses it to set up context). You just do not pass `runtime=` as an argument to `decision.make` — it reads the ambient runtime itself.
+
+```python
+from openprogram.agentic_programming import agentic_function, decision
+from openprogram.agentic_programming.runtime import Runtime
+
+
+@agentic_function
+def route_message(msg: str, runtime: Runtime) -> dict:
+    """Decide how to handle an incoming message."""
+    return decision.make(f"Pick how to handle this message:\n{msg}", {
+        "analyze":  analyze_sentiment,        # function option — runs it, returns its result
+        "fallback": fallback_reply,           # function option
+        "done":     {"action": "ignored"},    # value option — returns the value as-is
+    })
+
+
+@agentic_function
+def handle_ticket(ticket: str, runtime: Runtime) -> dict:
+    """Investigate a ticket, then decide which workflow to route it to."""
+    return runtime.exec(
+        f"Handle this ticket:\n{ticket}",
+        toolset="default",          # the model does the work with tools first
+        choices={                   # the final return must be one of these
+            "refund":   issue_refund,
+            "escalate": escalate_to_human,
+            "close":    {"status": "closed"},
+        },
+    )
+```
+
+Option forms — `options` / `choices` is a dict `{name: handler}` (handler is a callable for a function option, or any value for a value option; `{name: (value, "description")}` to add a description) or a list of callables / option tuples. The resolution leaves **no `if` for you to write**: a picked function is run and its return value handed back; a picked value is returned as-is. The decision *is* the branch.
+
+Rule: if you find yourself writing `runtime.exec(...)` followed by `if "..." in reply:` to route on what the model said, replace it with `decision.make` / `exec(choices=)`.
+
 ## 6. Rule-based validation — run this before declaring done
 
 Walk through every rule. If any fails, fix it before writing the file.
@@ -180,7 +224,7 @@ Walk through every rule. If any fails, fix it before writing the file.
 | 10 | `content=` is a `list[dict]`. | Eyeball. |
 | 11 | Each item in `content` is a dict literal — **never a bare string**. `content=[text]` is wrong; `content=[{"type":"text","text":text}]` is correct. | Eyeball. |
 | 12 | Each dict has `"type"`: `"text"` (with `"text"`) or `"image"` / `"audio"` / `"file"` (with `"path"`). | Eyeball. |
-| 13 | Allowed kwargs only: `content, response_format, model, tools, toolset, tools_source, tools_allow, tools_deny, tool_choice, parallel_tool_calls, max_iterations`. | Eyeball. |
+| 13 | Allowed kwargs only: `content, response_format, model, tools, toolset, tools_source, tools_allow, tools_deny, tool_choice, parallel_tool_calls, max_iterations, choices`. | Eyeball. |
 | 14 | **No `system=` kwarg.** System instruction comes from the decorator (`system="..."`) or the docstring, never from a runtime.exec kwarg. | Eyeball. |
 | 15 | The per-call instruction lives inside the `content` text, not only in the docstring (see §4). | Eyeball — the text in content should describe the task. |
 

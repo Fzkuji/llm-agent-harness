@@ -400,7 +400,8 @@ class Runtime:
         tool_choice: Any = "auto",
         parallel_tool_calls: bool = True,
         max_iterations: int = 20,
-    ) -> str:
+        choices: Any = None,
+    ) -> Any:
         """
         Call the LLM. Appends a ModelCall node to the DAG.
 
@@ -437,8 +438,21 @@ class Runtime:
 
             max_iterations:   safety cap on the tool loop (default 20).
 
+            choices:          When set, constrains how the turn *finishes*.
+                              The model runs the normal turn (reasoning,
+                              tool calls — whatever ``tools`` allows), but
+                              its final reply must pick one option from
+                              ``choices``. The pick is then resolved: a
+                              picked function is run and its return value
+                              handed back, a picked value is returned
+                              as-is. Same option forms as
+                              ``decision.make`` — a dict ``{name: handler}``
+                              or a list of callables / option tuples.
+
         Returns:
-            str — the LLM's reply text.
+            ``str`` — the LLM's reply text. When ``choices`` is set,
+            returns the resolved decision instead (a function option's
+            return value, or a value option's value).
         """
         if self._closed:
             raise RuntimeError("Runtime is closed. Create a new runtime instance.")
@@ -450,6 +464,23 @@ class Runtime:
         # Handle plain string input
         if isinstance(content, str):
             content = [{"type": "text", "text": content}]
+
+        # --- Choice-constrained finish ---
+        # When `choices` is set, the model runs a normal turn but must end
+        # with a pick from the menu. Append the menu + finish instruction
+        # to the prompt now; the reply is resolved against it below.
+        _decision_menu = _decision_values = None
+        if choices is not None:
+            from openprogram.agentic_programming.decision import (
+                DECISION_FINISH_INSTRUCTION,
+                _normalize_options,
+                render_options,
+            )
+            _decision_menu, _decision_values = _normalize_options(choices)
+            content = list(content) + [{
+                "type": "text",
+                "text": DECISION_FINISH_INSTRUCTION + render_options(_decision_menu),
+            }]
 
         use_model = model or self.model
         content_text = "\n".join(b["text"] for b in content if b.get("type") == "text")
@@ -488,6 +519,7 @@ class Runtime:
             _current_tool_policy.set({**(_current_tool_policy.get(None) or {}), **_policy_kwargs})
             if _policy_kwargs else None
         )
+        reply = None
         try:
             errors: list[str] = []
             for attempt in range(self.max_retries):
@@ -498,7 +530,7 @@ class Runtime:
                         model=use_model,
                         content_text=content_text,
                     )
-                    return reply
+                    break
                 except (TypeError, NotImplementedError):
                     raise  # Programming errors — don't retry
                 except Exception as e:
@@ -515,6 +547,16 @@ class Runtime:
                 _current_tools.reset(tools_token)
             if policy_token is not None:
                 _current_tool_policy.reset(policy_token)
+
+        # No choices — the raw reply text is the result.
+        if choices is None:
+            return reply
+
+        # Choice-constrained finish — resolve the reply against the menu.
+        # parse_args' own re-pick path issues fresh choice-free exec()
+        # calls, so the tool/policy tokens above are already reset.
+        from openprogram.agentic_programming.decision import resolve_decision
+        return resolve_decision(reply, _decision_menu, _decision_values, self)
 
     async def async_exec(
         self,

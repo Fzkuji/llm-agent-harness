@@ -167,7 +167,7 @@ def register(app):
                 "type": "error",
                 "content": (
                     "The /edit endpoint has been removed. Open the chat "
-                    "and load the agentic-program skill — the agent will "
+                    "and load the agentic-programming skill — the agent will "
                     "edit .py files directly using its file-editing tools."
                 ),
             })
@@ -209,7 +209,7 @@ def register(app):
                 "type": "error",
                 "content": (
                     "The /create endpoint has been removed. Open the chat "
-                    "and load the agentic-program skill — the agent will "
+                    "and load the agentic-programming skill — the agent will "
                     "create the .py file directly using its file-editing tools."
                 ),
             })

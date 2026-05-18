@@ -33,7 +33,10 @@ class Runtime(call=None, model="default")
 ### `exec()`
 
 ```python
-Runtime.exec(content, context=None, response_format=None, model=None) -> str
+Runtime.exec(content, context=None, response_format=None, model=None,
+             tools=None, toolset=None, tools_source=None, tools_allow=None,
+             tools_deny=None, tool_choice="auto", parallel_tool_calls=True,
+             max_iterations=20, choices=None) -> Any
 ```
 
 调用 LLM,上下文从 session DAG 自动算出。
@@ -56,6 +59,12 @@ Runtime.exec(content, context=None, response_format=None, model=None) -> str
 | `context` | `str \| None` | `None` | 手动覆盖自动算出的上下文。`None` = 从 DAG 自动算 |
 | `response_format` | `dict \| None` | `None` | 输出格式约束（JSON schema），传给 `_call()` |
 | `model` | `str \| None` | `None` | 覆盖默认模型 |
+| `tools` | `list \| None` | `None` | 本次调用 LLM 可用的工具。设了就跑工具循环直到模型返回纯文本 |
+| `toolset` / `tools_source` / `tools_allow` / `tools_deny` | — | `None` | 工具集与策略过滤 |
+| `tool_choice` | `str \| dict` | `"auto"` | `"auto"` / `"required"` / `"none"` / 强制某工具 |
+| `parallel_tool_calls` | `bool` | `True` | 允许一轮多个工具调用 |
+| `max_iterations` | `int` | `20` | 工具循环安全上限 |
+| `choices` | `dict \| list \| None` | `None` | 设了则约束 turn 的**收尾**:模型跑完整 turn 后,最终回复必须从 `choices` 里选一个;`exec` 解析并返回该选择的结果。详见 [next-step-decision](../design/next-step-decision.md) |
 
 #### Content block 格式
 
@@ -68,7 +77,7 @@ Runtime.exec(content, context=None, response_format=None, model=None) -> str
 
 #### 返回值
 
-`str` — LLM 的回复文本。
+`str` — LLM 的回复文本。带 `choices` 时返回解析后的决策结果(选中函数的返回值,或选中值本身)。
 
 #### 异常
 
@@ -225,7 +234,7 @@ Attempt 3: ConnectionError: timeout
 
 ### 重试的边界
 
-`max_retries` 只处理 API 层面的瞬态故障(网络超时、速率限制等)。如果是函数本身的逻辑或输出格式有问题,重试解决不了——直接修改函数代码,参见 [`skills/agentic-program/SKILL.md`](../../skills/agentic-program/SKILL.md)。
+`max_retries` 只处理 API 层面的瞬态故障(网络超时、速率限制等)。如果是函数本身的逻辑或输出格式有问题,重试解决不了——直接修改函数代码,参见 [`skills/agentic-programming/SKILL.md`](../../skills/agentic-programming/SKILL.md)。
 
 ```python
 runtime = Runtime(call=my_llm, max_retries=3)

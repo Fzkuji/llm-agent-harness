@@ -147,7 +147,7 @@ def main():
     sub = parser.add_subparsers(dest="command", help="Subcommand")
 
     # ---- programs ---------------------------------------------------------
-    # Authoring (new / edit / app) lives in the `agentic-program` skill now —
+    # Authoring (new / edit / app) lives in the `agentic-programming` skill now —
     # the agent writes .py files directly. Only run / list remain as CLI.
     p_programs = sub.add_parser(
         "programs",
