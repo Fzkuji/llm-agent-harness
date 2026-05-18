@@ -1,7 +1,7 @@
 """Shared utilities for built-in agentic functions.
 
-Just JSON extraction. The options-menu / choice mechanism that used to
-live here moved into the framework at ``openprogram.agentic_programming.choice``.
+Just JSON extraction. The options-menu / decision mechanism that used to
+live here moved into the framework at ``openprogram.agentic_programming.decision``.
 """
 
 from __future__ import annotations
