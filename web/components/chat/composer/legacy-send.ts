@@ -57,7 +57,8 @@ export function sendChatMessage({
 
   const sessionId = w.currentSessionId ?? null;
 
-  if (/^run\s/i.test(text)) w._lastRunCommand = text;
+  const isRun = /^run\s/i.test(text);
+  if (isRun) w._lastRunCommand = text;
 
   // Hide the welcome panel right away — before the ack round-trip.
   w.setWelcomeVisible?.(false);
@@ -67,7 +68,12 @@ export function sendChatMessage({
     text,
     session_id: sessionId,
     thinking_effort: thinking,
-    exec_thinking_effort: w._execThinkingEffort,
+    // For a `/run`, the LLM work happens in the function's exec
+    // runtime — so the effort the user picked in the composer drives
+    // exec, not the chat side. (A plain chat keeps the agent-settings
+    // exec effort.) Without this the run ignored the picker and fell
+    // back to the provider default — xhigh for codex.
+    exec_thinking_effort: isRun ? thinking : w._execThinkingEffort,
     tools: toolsEnabled,
     web_search: webSearchEnabled,
   };

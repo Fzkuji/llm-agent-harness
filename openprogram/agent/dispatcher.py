@@ -186,7 +186,12 @@ def process_user_turn(
     started_at = time.time()
     on_event = on_event or _noop
     user_msg_id = req.user_msg_id or uuid.uuid4().hex[:12]
-    assistant_msg_id = user_msg_id + "_a"
+    # Suffix matches the `/run` path (server.py) and the webui React
+    # client's `replyId()` — all three mint the assistant reply id as
+    # ``<user_msg_id>_reply`` so the live streaming bubble's
+    # ``data-msg-id`` matches the persisted DAG node id without a
+    # reload. (Was ``_a``, which only the post-refresh view resolved.)
+    assistant_msg_id = user_msg_id + "_reply"
 
     # Lazy imports — dispatcher is imported by webui at startup; the
     # agent_loop chain pulls in providers + httpx + many heavy deps

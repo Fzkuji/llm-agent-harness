@@ -45,6 +45,9 @@ from openprogram.webui._pause_stop import (
 from openprogram.agentic_programming.function import CancelledError as _CancelledError
 from openprogram.webui.messages import get_store as _get_message_store
 from openprogram.webui._stream_bridge import StreamBridge
+from openprogram.webui._exec_dag import (
+    build_exec_dag, live_progress, reconcile_interrupted_runs,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1059,7 +1062,7 @@ def _execute_in_context(session_id: str, msg_id: str, action: str,
                 _log(f"[exec] query completed, result length: {len(str(result))}")
 
                 # Dispatcher persisted the assistant message itself
-                # (with id=msg_id+'_a'). Hydrate the in-memory mirror
+                # (with id=msg_id+'_reply'). Hydrate the in-memory mirror
                 # from SessionDB so subsequent webui readers
                 # (load_session, retry, etc.) see it.
                 _hydrate_messages_from_db(session_id)
@@ -1188,14 +1191,22 @@ def _execute_in_context(session_id: str, msg_id: str, action: str,
                 # Check if function has no_tools flag (pure text, no shell/tools)
                 _no_tools = getattr(loaded_func, 'no_tools', False)
                 exec_rt = _get_exec_runtime(no_tools=_no_tools)
-                _apply_thinking_effort(exec_rt, exec_thinking_effort)
+                # Exec-side reasoning effort. When the caller didn't pick
+                # one, fall back to "medium" — NOT the model's catalog
+                # default, which for xhigh-capable models (gpt-5.5 …) is
+                # "xhigh". An autonomous @agentic_function fires many
+                # exec calls in a loop; xhigh on each turns a run into a
+                # multi-minute-per-step crawl. medium still reasons,
+                # without that cost. An explicit choice always wins.
+                _exec_effort = exec_thinking_effort or "medium"
+                _apply_thinking_effort(exec_rt, _exec_effort)
                 if _work_dir:
                     _work_dir = os.path.abspath(os.path.expanduser(_work_dir))
                     os.makedirs(_work_dir, exist_ok=True)
                     exec_rt.set_workdir(_work_dir)
                     conv.setdefault("last_workdirs", {})[func_name] = _work_dir
                     _log(f"[exec] workdir: {_work_dir}")
-                _log(f"[exec] new runtime: provider={type(exec_rt).__name__}, no_tools={_no_tools}, id={id(exec_rt)}, thinking={exec_thinking_effort}")
+                _log(f"[exec] new runtime: provider={type(exec_rt).__name__}, no_tools={_no_tools}, id={id(exec_rt)}, thinking={_exec_effort}")
                 _register_active_runtime(session_id, exec_rt)
                 _inject_runtime(loaded_func, call_kwargs, exec_rt)
 
@@ -1249,11 +1260,13 @@ def _execute_in_context(session_id: str, msg_id: str, action: str,
                     _store_token = None
                     _call_id_token = None
 
-                # Live tree updates: retired together with the tree-Context
-                # event system. The function's DAG nodes are written to
-                # SessionDB by the @agentic_function decorator; UI viewers
-                # query that directly off SessionDB.
-                with _web_follow_up(session_id, msg_id, func_name, tree_cb=None):
+                # Live progress: a long @agentic_function run would
+                # otherwise show nothing but a spinner until it ends.
+                # `live_progress` (webui/_exec_dag.py) polls the DAG
+                # while the run executes and pushes tree_update +
+                # branches_list so the UI fills in node by node.
+                with live_progress(session_id, msg_id, func_name), \
+                        _web_follow_up(session_id, msg_id, func_name, tree_cb=None):
                     try:
                         result = _format_result(loaded_func(**call_kwargs), action=func_name)
                     finally:
@@ -1292,11 +1305,12 @@ def _execute_in_context(session_id: str, msg_id: str, action: str,
                 if _cum:
                     conv["_last_exec_cumulative_usage"] = _cum
 
-                # tree Context retired — surface the minimal tree dict the
-                # frontend currently expects on the assistant reply. The
-                # execution's actual trace lives in SessionDB as DAG nodes,
-                # read directly off SessionDB.
-                tree_dict = {
+                # Execution Tree — rebuilt from the DAG nodes the run
+                # wrote to SessionDB (nested function + LLM calls), so
+                # the inline tree matches the right-rail graph. Falls
+                # back to a flat single-node stub if the run left no
+                # nodes (e.g. an expose="hidden" function).
+                tree_dict = build_exec_dag(session_id, func_name, msg_id) or {
                     "path": func_name,
                     "name": func_name,
                     "params": {k: v for k, v in call_kwargs.items() if k != "runtime"},
@@ -1660,6 +1674,17 @@ def create_app():
     async def _capture_loop():
         global _loop
         _loop = asyncio.get_running_loop()
+
+    @app.on_event("startup")
+    async def _reconcile_interrupted_runs():
+        """Flip DAG nodes frozen at status='running' (a previous worker
+        was killed mid-run) to 'error'. See webui/_exec_dag.py."""
+        try:
+            n = reconcile_interrupted_runs()
+            if n:
+                _log(f"[startup] reconciled {n} interrupted run node(s)")
+        except Exception as e:  # noqa: BLE001
+            _log(f"[startup] reconcile_interrupted_runs failed: {e}")
 
     @app.on_event("startup")
     async def _rehydrate_message_store():

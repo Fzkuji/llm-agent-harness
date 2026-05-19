@@ -1,0 +1,242 @@
+"""Execution-DAG: reconstruction, live streaming, run-state repair.
+
+Three concerns, all over the flat DAG that ``@agentic_function`` and
+the runtime write into SessionDB as a ``/run`` executes:
+
+  ``build_exec_dag()`` — turn a run's DAG subtree into the TNode dict
+      the inline Execution DAG renders (``web/.../execution-dag.tsx``).
+  ``live_progress()``  — context manager: while a run executes, poll
+      the DAG and push ``tree_update`` + ``branches_list`` envelopes so
+      the UI fills in node by node instead of only after the run ends.
+  ``reconcile_interrupted_runs()`` — on worker startup, flip nodes left
+      frozen at ``status="running"`` (their executing process died) to
+      ``error``, so the UI shows a failed run, not an eternal spinner.
+
+This is the WebUI-side replacement for the retired tree-Context event
+pipeline (commit "cut over to DAG, drop tree-Context event pipeline").
+That pipeline forwarded partial trees live; dropping it left a run
+showing nothing but a spinner until completion. The poller restores
+the live view by reading the DAG — the single source of truth — rather
+than re-introducing an event system.
+"""
+from __future__ import annotations
+
+import json
+import sqlite3
+import threading
+from contextlib import contextmanager
+from typing import Optional
+
+
+# ── Tree reconstruction ──────────────────────────────────────────────
+
+def build_exec_dag(session_id: str, func_name: str,
+                    user_turn_id: str) -> Optional[dict]:
+    """Reconstruct a run's execution DAG from its DAG nodes.
+
+    Returns a TNode dict rooted at the ``func_name`` call this run
+    triggered, with its nested function / LLM calls as children.
+
+    Works both *after* a run (the top ``func_name`` node is persisted)
+    and *mid-run*: the ``@agentic_function`` wrapper persists a node
+    only on return, so while the top function is still looping its node
+    does not exist yet — but its nested calls (``gui_step`` etc.) are
+    already persisted, pointing at the top node's allocated-but-
+    unwritten id. In that case a synthetic ``running`` root is returned.
+    None if the run left no nodes at all.
+    """
+    try:
+        from openprogram.context.storage import GraphStore
+        from openprogram.agent.session_db import default_db
+        graph = GraphStore(default_db().db_path, session_id).load()
+    except Exception:
+        return None
+    nodes = sorted(graph, key=lambda n: n.seq)
+    by_id = {n.id: n for n in nodes}
+    kids: dict[str, list] = {}
+    for n in nodes:
+        if n.called_by:
+            kids.setdefault(n.called_by, []).append(n)
+
+    # Root: the func_name code call this run's user turn triggered.
+    # Last match wins so a re-run picks the most recent invocation.
+    root = None
+    for n in nodes:
+        if n.is_code() and n.name == func_name and n.called_by == user_turn_id:
+            root = n
+
+    def _to_tnode(n) -> dict:
+        meta = n.metadata or {}
+        status = meta.get("status") or "success"
+        tn: dict = {
+            "path": n.id,
+            "name": n.name or (n.role or "node"),
+            "status": status,
+        }
+        dur = meta.get("duration_seconds")
+        if dur is not None:
+            try:
+                tn["duration_ms"] = int(float(dur) * 1000)
+            except (TypeError, ValueError):
+                pass
+        if status == "error":
+            tn["error"] = str(n.output or meta.get("error") or "")
+        if n.is_llm():
+            # exec rows render params._content (prompt) + raw_reply.
+            tn["node_type"] = "exec"
+            inp = n.input
+            if isinstance(inp, (list, dict)):
+                inp = json.dumps(inp, default=str)
+            tn["params"] = {"_content": str(inp or "")}
+            tn["raw_reply"] = str(n.output or "")
+        else:
+            if isinstance(n.input, dict):
+                tn["params"] = {k: v for k, v in n.input.items()
+                                if k not in ("runtime", "callback")}
+            out = n.output
+            tn["output"] = (out if isinstance(out, str)
+                            else json.dumps(out, default=str))
+        children = [_to_tnode(c)
+                    for c in sorted(kids.get(n.id, []), key=lambda x: x.seq)]
+        if children:
+            tn["children"] = children
+        return tn
+
+    if root is not None:
+        return _to_tnode(root)
+
+    # Mid-run: the top func_name node isn't persisted yet. Its direct
+    # children already carry its allocated id in ``called_by`` — so they
+    # look like orphans (called_by → an id not in the graph). Collect
+    # them, but only ones created at/after this run's user turn, so
+    # stale orphans from old deleted branches aren't swept in.
+    turn = by_id.get(user_turn_id)
+    floor = (turn.created_at or 0.0) if turn else 0.0
+    orphan_children = [
+        n for n in nodes
+        if n.called_by and n.called_by not in by_id
+        and not n.is_user()
+        and (n.created_at or 0.0) >= floor
+    ]
+    if not orphan_children:
+        return None
+    children = [_to_tnode(c)
+                for c in sorted(orphan_children, key=lambda x: x.seq)]
+    return {
+        "path": user_turn_id + "_run",
+        "name": func_name,
+        "status": "running",
+        "children": children,
+    }
+
+
+# ── Live progress streaming ──────────────────────────────────────────
+
+def _poll(session_id: str, msg_id: str, func_name: str,
+          stop: threading.Event) -> None:
+    """Poll the DAG every ~1.2s and push two live streams until
+    ``stop`` is set: ``tree_update`` (inline Execution DAG) and
+    ``branches_list`` (right-rail History graph). Both are
+    signature-deduped so an idle tick sends nothing."""
+    from openprogram.webui import server as _s
+    from openprogram.webui.ws_actions.branch import build_branches_payload
+
+    last_tree = None
+    last_graph = None
+    while not stop.wait(1.2):
+        try:
+            tree = build_exec_dag(session_id, func_name, msg_id)
+            if tree is not None:
+                sig = json.dumps(tree, default=str, sort_keys=True)
+                if sig != last_tree:
+                    last_tree = sig
+                    _s._broadcast_chat_response(session_id, msg_id, {
+                        "type": "tree_update",
+                        "tree": tree,
+                        "function": func_name,
+                    })
+        except Exception:
+            pass
+        try:
+            payload = build_branches_payload(session_id)
+            gsig = json.dumps(payload.get("graph"), default=str, sort_keys=True)
+            if gsig != last_graph:
+                last_graph = gsig
+                _s._broadcast(json.dumps(
+                    {"type": "branches_list", "data": payload}, default=str))
+        except Exception:
+            pass
+
+
+@contextmanager
+def live_progress(session_id: str, msg_id: str, func_name: str):
+    """Stream a run's progress to the UI for the duration of the block.
+
+    Usage::
+
+        with live_progress(session_id, msg_id, func_name):
+            result = loaded_func(**call_kwargs)
+
+    A daemon poller thread starts on enter and stops on exit (success
+    or exception), so a long ``@agentic_function`` run shows its
+    Execution DAG + History graph filling in live.
+    """
+    stop = threading.Event()
+    thread = threading.Thread(
+        target=_poll, args=(session_id, msg_id, func_name, stop),
+        daemon=True, name=f"live-progress-{session_id}")
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+
+
+# ── Interrupted-run repair ───────────────────────────────────────────
+
+def reconcile_interrupted_runs() -> int:
+    """Flip every DAG node still at ``status="running"`` to ``"error"``.
+
+    The ``@agentic_function`` wrapper stamps a node ``running`` on entry
+    and ``success`` / ``error`` in its ``finally``. If the process
+    executing it dies first — worker restart, crash, SIGKILL — the
+    ``finally`` never runs and the node is frozen at ``running``. The UI
+    then spins forever, waiting on a terminal event from a process that
+    no longer exists.
+
+    Call once on worker startup: a fresh worker has nothing running, so
+    any ``running`` node is a zombie from a dead process. Returns the
+    count fixed.
+    """
+    from openprogram.agent.session_db import default_db
+
+    db_path = default_db().db_path
+    fixed = 0
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT session_id, id, data_json FROM nodes"
+        ).fetchall()
+        for r in rows:
+            try:
+                data = json.loads(r["data_json"])
+            except (TypeError, ValueError):
+                continue
+            meta = data.get("metadata") or {}
+            if meta.get("status") != "running":
+                continue
+            meta["status"] = "error"
+            meta.setdefault(
+                "error",
+                "Interrupted — the worker stopped before this run finished",
+            )
+            data["metadata"] = meta
+            conn.execute(
+                "UPDATE nodes SET data_json = ? "
+                "WHERE session_id = ? AND id = ?",
+                (json.dumps(data, default=str), r["session_id"], r["id"]),
+            )
+            fixed += 1
+        if fixed:
+            conn.commit()
+    return fixed

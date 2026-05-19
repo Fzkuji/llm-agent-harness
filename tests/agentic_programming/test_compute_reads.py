@@ -58,18 +58,32 @@ def test_empty_graph_returns_empty_list():
     assert compute_reads(g) == []
 
 
-# ── Inside a frame: pre + in_frame both visible by default ─────────
+# ── Inside a frame: in-frame hidden by default (siblings → 0) ──────
 
 
-def test_in_frame_includes_pre_and_in_frame():
+def test_in_frame_hidden_by_default():
+    """A frame does NOT auto-pull its own in-frame sub-calls — the
+    default ``siblings`` is 0, so only pre-frame survives."""
     g = Graph()
     u = _user(g, "q")
     m = _llm(g, "a")
-    # imagine a function entered here: entry_seq is the seq of `m`
+    entry = m.seq
+    _llm(g, "step1")
+    _llm(g, "step2")
+    reads = compute_reads(g, frame_entry_seq=entry)
+    assert reads == [u.id, m.id]
+
+
+def test_siblings_uncapped_shows_all_in_frame():
+    """``siblings=-1`` opts back into seeing every in-frame node."""
+    g = Graph()
+    u = _user(g, "q")
+    m = _llm(g, "a")
     entry = m.seq
     in1 = _llm(g, "step1")
     in2 = _llm(g, "step2")
-    reads = compute_reads(g, frame_entry_seq=entry)
+    reads = compute_reads(g, frame_entry_seq=entry,
+                          render_range={"siblings": -1})
     assert reads == [u.id, m.id, in1.id, in2.id]
 
 
@@ -80,7 +94,7 @@ def test_depth_zero_isolates_in_frame():
     entry = g.last().seq
     s1 = _llm(g, "s1")
     reads = compute_reads(g, frame_entry_seq=entry,
-                          render_range={"depth": 0})
+                          render_range={"depth": 0, "siblings": -1})
     assert reads == [s1.id]
 
 
@@ -92,9 +106,10 @@ def test_depth_keeps_recent_pre_frame_only():
     d = _llm(g, "4")
     entry = d.seq
     s = _llm(g, "step")
-    # depth=2 → keep most recent 2 pre-frame (c, d) + all in-frame (s)
+    # depth=2 → keep most recent 2 pre-frame (c, d); siblings=-1 → all
+    # in-frame (s).
     reads = compute_reads(g, frame_entry_seq=entry,
-                          render_range={"depth": 2})
+                          render_range={"depth": 2, "siblings": -1})
     assert reads == [c.id, d.id, s.id]
 
 
@@ -167,6 +182,7 @@ def test_head_seq_limits_chain_inside_frame_too():
     s1 = _llm(g, "1")
     s2 = _llm(g, "2")
     s3 = _llm(g, "3")
-    reads = compute_reads(g, head_seq=s2.seq, frame_entry_seq=entry)
+    reads = compute_reads(g, head_seq=s2.seq, frame_entry_seq=entry,
+                          render_range={"siblings": -1})
     assert reads == [u.id, s1.id, s2.id]
     assert s3.id not in reads

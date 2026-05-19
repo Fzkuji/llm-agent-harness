@@ -29,9 +29,12 @@ interface BranchWindow {
   _branchLaneColorMap?: Record<string, string>;
 }
 
+// Fallback palette — kept in sync with history-graph.ts LANE_COLORS.
+// Normally the per-branch colour comes from `_branchLaneColorMap`.
 const LANE_COLORS = [
-  "#4f8ef7", "#5aad4e", "#d4843a", "#9d6fe0", "#e0445a",
-  "#2db3d5", "#d96d2d", "#35b89a", "#6b8dd6", "#2ec4b6",
+  "#4f8ef7", "#5aad4e", "#d4843a", "#9d6fe0", "#e0445a", "#2db3d5",
+  "#e0b020", "#35b89a", "#e066b3", "#6b8dd6", "#8fbf3f", "#d9694f",
+  "#52c4c4", "#b08be0", "#c79a4a", "#e08a3a", "#6fae6f", "#d05fa0",
 ];
 
 function wsSend(payload: unknown): void {

@@ -326,6 +326,8 @@ class agentic_function:
         expose:     What outside observers see of me after I complete. [DEFAULT: "io"]
 
                     "io"     — only name + return value (internals hidden)
+                    "llm"    — only my LLM exchanges (my own name + return
+                               value and my nested code sub-calls hidden)
                     "full"   — docstring + params + output + LLM reply + internals
                     "hidden" — no DAG node at all
 
@@ -385,8 +387,11 @@ class agentic_function:
         no_tools: bool = False,
         system: Optional[str] = None,
     ):
-        if expose not in ("io", "full", "hidden"):
-            raise ValueError(f"expose must be 'io', 'full', or 'hidden', got {expose!r}")
+        if expose not in ("io", "llm", "full", "hidden"):
+            raise ValueError(
+                f"expose must be 'io', 'llm', 'full', or 'hidden', "
+                f"got {expose!r}"
+            )
         self.expose = expose
         self.render_range = render_range
         self.input_meta = input or {}

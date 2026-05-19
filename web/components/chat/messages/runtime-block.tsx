@@ -4,7 +4,7 @@
  * Runtime block — a `/run <fn>` turn.
  *
  * Real React now (no more delegation to the legacy `buildRuntimeBlockHtml`):
- * a collapsible header, the `return:` output, the React <ExecutionTree />,
+ * a collapsible header, the `return:` output, the React <ExecutionDag />,
  * and a footer with Retry / attempt-nav / usage. While the turn is still
  * streaming the block renders a pending placeholder carrying
  * `id="runtime_pending"` so the legacy CLI/tree stream handlers can
@@ -18,7 +18,7 @@ import { useEffect, useRef, useState } from "react";
 import { formatUsageFooterLabel } from "@/lib/format";
 import { useSessionStore, type ChatMsg } from "@/lib/session-store";
 
-import { ExecutionTree } from "./execution-tree";
+import { ExecutionDag } from "./execution-dag";
 import { renderMarkdown, useMarkdownReady } from "./markdown";
 
 interface RuntimeLegacyGlobals {
@@ -131,7 +131,7 @@ export function RuntimeBlock({ msg }: { msg: ChatMsg }) {
         <div className="runtime-block-body">
           <div className="runtime-block-content">
             {tree ? (
-              <ExecutionTree tree={tree as never} />
+              <ExecutionDag tree={tree as never} />
             ) : (
               <div className="typing-indicator">
                 <div className="dot" />
@@ -183,7 +183,7 @@ export function RuntimeBlock({ msg }: { msg: ChatMsg }) {
             className="runtime-output"
             dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
           />
-          {tree ? <ExecutionTree tree={tree as never} /> : null}
+          {tree ? <ExecutionDag tree={tree as never} /> : null}
         </div>
       </div>
       {hasFooter ? (

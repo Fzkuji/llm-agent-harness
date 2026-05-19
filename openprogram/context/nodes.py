@@ -516,22 +516,28 @@ def compute_reads(
                           Defaults to the graph's current max seq.
         frame_entry_seq:  seq value when the current ``@agentic_function``
                           started. Nodes with seq > frame_entry_seq are
-                          considered "in-frame" (always visible to this
-                          function's prompts); nodes with seq <=
-                          frame_entry_seq are "pre-frame" and subject to
-                          ``render_range["depth"]`` capping. Use -1 (the
-                          default) for top-level chat (no frame).
+                          "in-frame" (the function's own sub-calls);
+                          nodes with seq <= frame_entry_seq are
+                          "pre-frame". Use -1 (the default) for
+                          top-level chat (no frame) — siblings capping
+                          never applies there.
         render_range:     ``{"depth": int, "siblings": int}`` limits.
-                          ``depth=0`` walls off the frame from prior
-                          context entirely. ``siblings=N`` keeps only
-                          the N most recent in-frame nodes.
+                          ``depth``  — caps pre-frame; ``None``
+                            (default) uncapped, ``0`` walls off prior
+                            context, ``N`` keeps the last N.
+                          ``siblings`` — caps in-frame; ``0`` (default)
+                            a function does not auto-see its own
+                            sub-calls, ``-1`` uncapped, ``N`` keeps the
+                            last N.
 
-    Visibility filtering:
-        Whenever the chain includes a code-role Call with
-        ``metadata.expose == "io"``, llm-role Calls whose
-        ``called_by == that_code_call.id`` are dropped — the function
-        is opaque (only its summary is visible).
-        ``expose == "full"`` shows internals.
+    Visibility filtering (per-function ``metadata.expose``):
+        ``io``   (default) — drop the function's direct llm Calls;
+                  the caller sees only its input/output.
+        ``llm``  — drop the function's own node and its direct code
+                  sub-calls; the caller sees only its llm exchanges.
+        ``full`` — drop nothing; internals fully visible.
+        ``hidden`` — the function writes no node at all (the decorator
+                  enforces this; nothing to filter here).
 
     Returns:
         Node ids in seq order (oldest first), ready to be the
@@ -542,13 +548,32 @@ def compute_reads(
     if head_seq < 0:
         return []
 
+    # depth_cap → caps pre-frame (history before the frame started).
+    #   None = uncapped (the conversation stays fully visible).
+    # siblings_cap → caps in-frame (what happened since the frame
+    #   started — the function's own sub-calls).
+    #   DEFAULT 0 — a function does NOT auto-pull its own sub-calls
+    #   into its LLM prompts. Sub-results reach the caller through the
+    #   normal Python ``return``; a function that wants its in-frame
+    #   detail in-prompt must opt in with ``render_range``.
+    #   -1 = uncapped. N>=0 = keep the N most recent in-frame nodes.
     depth_cap: Optional[int] = None
-    siblings_cap: Optional[int] = None
+    siblings_cap: int = 0
     if isinstance(render_range, dict):
         if render_range.get("depth") is not None:
             depth_cap = int(render_range["depth"])
         if render_range.get("siblings") is not None:
             siblings_cap = int(render_range["siblings"])
+
+    # TODO(render_range): today render_range only expresses *distance*
+    # — depth (how far up the conversation) and siblings (how far into
+    # the current frame). It cannot pin SPECIFIC nodes. A planned but
+    # unimplemented extension: select particular functions/nodes by
+    # name or position and force them into the prompt regardless of
+    # distance, e.g. render_range={"pin": ["plan_next_action", ...]}
+    # or an explicit node-id selector on runtime.exec. Until then a
+    # function that needs a specific earlier result must thread it in
+    # by hand via runtime.exec(content=[...]).
 
     visible = [n for n in graph if n.seq <= head_seq]
     in_frame = [n for n in visible if n.seq > frame_entry_seq]
@@ -563,20 +588,40 @@ def compute_reads(
 
     chain = pre_frame + in_frame
 
-    # Expose filtering: pre-collect ``io`` code Calls that should hide
-    # their internal llm Calls.
-    suppressed_owners: set[str] = set()
+    # Expose filtering — how much of a function the caller's context
+    # sees, set per-function via ``metadata.expose``:
+    #   io   (default)  the function's own input/output; its internal
+    #                   llm exchanges are hidden.
+    #   llm             the function's llm exchanges; its own
+    #                   input/output node and its nested code
+    #                   sub-calls are hidden.
+    #   full            everything — input/output AND llm exchanges.
+    #   hidden          the function writes no node at all (enforced
+    #                   by the decorator, not here).
+    io_owners: set[str] = set()
+    llm_owners: set[str] = set()
     for n in chain:
         if n.is_code():
             ex = (n.metadata or {}).get("expose") or "io"
             if ex == "io":
-                suppressed_owners.add(n.id)
+                io_owners.add(n.id)
+            elif ex == "llm":
+                llm_owners.add(n.id)
 
-    kept = [n for n in chain
-            if not (n.is_llm() and n.called_by in suppressed_owners)]
+    kept = []
+    for n in chain:
+        # io function: hide its internal llm exchanges.
+        if n.is_llm() and n.called_by in io_owners:
+            continue
+        # llm function: hide its own input/output node and its nested
+        # code sub-calls — only its llm exchanges survive.
+        if n.id in llm_owners or (n.is_code() and n.called_by in llm_owners):
+            continue
+        kept.append(n)
 
     # siblings_cap: keep at most N in-frame nodes (most recent).
-    if siblings_cap is not None and frame_entry_seq >= 0:
+    # -1 means uncapped — skip the trim entirely.
+    if siblings_cap >= 0 and frame_entry_seq >= 0:
         in_frame_ids = {n.id for n in in_frame}
         in_frame_kept = 0
         final: list = []

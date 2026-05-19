@@ -4,9 +4,15 @@ from __future__ import annotations
 import json
 
 
-async def handle_list_branches(ws, cmd: dict):
+def build_branches_payload(session_id: str | None) -> dict:
+    """Build the ``branches_list`` data dict for a session.
+
+    Sync + side-effect-free so any thread can call it — the WS handler
+    sends it on request, and the run-path live poller broadcasts it
+    while an @agentic_function is executing (so the History graph
+    fills in node by node instead of only after the run ends).
+    """
     from openprogram.webui import server as _s
-    session_id = cmd.get("session_id")
     rows: list[dict] = []
     active_head = None
     graph: list[dict] = []
@@ -63,10 +69,14 @@ async def handle_list_branches(ws, cmd: dict):
                 })
         except Exception as e:
             _s._log(f"[list_branches] {session_id}: {e}")
-    await ws.send_text(json.dumps({
-        "type": "branches_list",
-        "data": {"session_id": session_id, "branches": rows, "active": active_head, "graph": graph},
-    }, default=str))
+    return {"session_id": session_id, "branches": rows,
+            "active": active_head, "graph": graph}
+
+
+async def handle_list_branches(ws, cmd: dict):
+    payload = build_branches_payload(cmd.get("session_id"))
+    await ws.send_text(json.dumps(
+        {"type": "branches_list", "data": payload}, default=str))
 
 
 async def handle_checkout_branch(ws, cmd: dict):

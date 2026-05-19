@@ -399,8 +399,8 @@
   color: var(--text-secondary);
 }
 .workdirBtn:hover {
-  border-color: transparent;
-  background: var(--bg-hover-contrast);
+  border-color: var(--border-light);
+  background: var(--bg-secondary);
   color: var(--text-bright);
 }
 .workdirInput {

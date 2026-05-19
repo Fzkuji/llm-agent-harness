@@ -250,8 +250,8 @@
 /* Next-message context range: nodes/edges outside the active branch
    the next chat message will carry are faded. Transition so the range
    updating after a turn reads as a soft change, not a flash. */
-.history-node.out-of-context { opacity: 0.3; transition: opacity 0.2s ease; }
-.history-edge.out-of-context { opacity: 0.15; transition: opacity 0.2s ease; }
+.history-node.out-of-context { opacity: 0.6; transition: opacity 0.2s ease; }
+.history-edge.out-of-context { opacity: 0.4; transition: opacity 0.2s ease; }
 
 /* Inline row labels — message preview / function name beside each node. */
 .history-label {

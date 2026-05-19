@@ -5,7 +5,7 @@
  * `renderTreeNode` (`public/js/chat/tree-render.js`) plus the per-node
  * retry panel (`tree-retry.js`).
  *
- * Renders the `/run` execution tree inside a runtime block: a
+ * Renders the `/run` execution DAG inside a runtime block: a
  * collapsible card whose body is a recursive node list. Each node row
  * can expand/collapse its children, be selected (opens the right-rail
  * Execution Detail via the legacy `window.showDetail`), and — for
@@ -394,7 +394,7 @@ function TreeNodeRow({ node, ctx }: { node: TNode; ctx: RowCtx }) {
 
 /* ---- tree card ----------------------------------------------------- */
 
-export function ExecutionTree({ tree }: { tree: TNode }) {
+export function ExecutionDag({ tree }: { tree: TNode }) {
   const paused = useSessionStore((s) => s.paused);
   const [collapsed, setCollapsed] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(() => {
@@ -479,7 +479,7 @@ export function ExecutionTree({ tree }: { tree: TNode }) {
           ) : (
             <span style={{ color: "var(--accent-cyan)" }}>{"◆"}</span>
           )}{" "}
-          Execution Tree
+          Execution DAG
         </span>
         <span className="inline-tree-actions">
           <button

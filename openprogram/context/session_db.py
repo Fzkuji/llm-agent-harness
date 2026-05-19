@@ -437,7 +437,14 @@ class DagSessionDB:
     # divergent endpoints, with the saved name (or None) on each.
 
     def list_branches(self, session_id: str) -> list[dict[str, Any]]:
-        # 1) Find every node with no successor → that's a branch tip.
+        # A branch tip is a CONVERSATION node with no successor.
+        #   - "no successor": nothing chains off it by ``predecessor``.
+        #   - "conversation node": ``called_by`` is empty. An
+        #     @agentic_function's internal call nodes (gui_step, the
+        #     run's LLM leaves, …) carry a ``called_by`` and are linked
+        #     by it, not ``predecessor`` — so they have no predecessor
+        #     successor and would otherwise each show up as a bogus
+        #     branch. They are execution detail, never branches.
         with sqlite3.connect(str(self.db_path)) as conn:
             conn.row_factory = sqlite3.Row
             tips = conn.execute(
@@ -445,6 +452,8 @@ class DagSessionDB:
                 SELECT n.id, n.created_at
                 FROM nodes n
                 WHERE n.session_id = ?
+                  AND COALESCE(
+                        json_extract(n.data_json, '$.called_by'), '') = ''
                   AND NOT EXISTS (
                     SELECT 1 FROM nodes c
                     WHERE c.session_id = n.session_id
@@ -501,12 +510,24 @@ class DagSessionDB:
 
     def delete_branch_tail(self, session_id: str, head_msg_id: str) -> int:
         """Delete ``head_msg_id`` plus every node downstream of it.
-        Returns the number of nodes deleted."""
-        # Build children map and BFS from head_msg_id.
+
+        Downstream is followed along *two* edges:
+
+        - ``predecessor`` — the conversation trunk (user / assistant
+          messages chained turn to turn).
+        - ``called_by`` — an ``@agentic_function``'s internal execution
+          nodes (nested function + LLM calls). These hang off the run's
+          user turn by ``called_by``, not ``predecessor``, so a
+          predecessor-only sweep would orphan them in the DB. Deleting a
+          branch now takes the whole call subtree with it.
+
+        Returns the number of nodes deleted.
+        """
         with sqlite3.connect(str(self.db_path)) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
-                "SELECT id, predecessor FROM nodes WHERE session_id = ?",
+                "SELECT id, predecessor, data_json FROM nodes "
+                "WHERE session_id = ?",
                 (session_id,),
             ).fetchall()
             children: dict[str, list[str]] = {}
@@ -515,12 +536,24 @@ class DagSessionDB:
                 ids_seen.add(r["id"])
                 if r["predecessor"]:
                     children.setdefault(r["predecessor"], []).append(r["id"])
+                # called_by lives inside data_json (it is a Call field,
+                # not a table column).
+                try:
+                    cb = (json.loads(r["data_json"]) or {}).get("called_by")
+                except (TypeError, ValueError):
+                    cb = None
+                if cb:
+                    children.setdefault(cb, []).append(r["id"])
             if head_msg_id not in ids_seen:
                 return 0
             to_delete: list[str] = []
+            seen: set[str] = set()
             stack = [head_msg_id]
             while stack:
                 cur = stack.pop()
+                if cur in seen:
+                    continue
+                seen.add(cur)
                 to_delete.append(cur)
                 stack.extend(children.get(cur, []))
             placeholders = ",".join("?" * len(to_delete))

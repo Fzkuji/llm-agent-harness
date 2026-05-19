@@ -52,17 +52,28 @@ const NODE_R = 5;
 const PAD_X = 18;
 const PAD_Y = 16;
 
+// Index 0 is the trunk colour; 1..N-1 are side-branch colours, picked
+// by a hash of the branch's leaf id. Distinct, evenly-spread hues so
+// neighbouring branches never read as the same colour.
 const LANE_COLORS = [
-  "#4f8ef7",
-  "#5aad4e",
-  "#d4843a",
-  "#9d6fe0",
-  "#e0445a",
-  "#2db3d5",
-  "#d96d2d",
-  "#35b89a",
-  "#6b8dd6",
-  "#2ec4b6",
+  "#4f8ef7", // blue        (trunk)
+  "#5aad4e", // green
+  "#d4843a", // orange
+  "#9d6fe0", // purple
+  "#e0445a", // red
+  "#2db3d5", // cyan
+  "#e0b020", // gold
+  "#35b89a", // teal
+  "#e066b3", // magenta
+  "#6b8dd6", // slate blue
+  "#8fbf3f", // lime
+  "#d9694f", // coral
+  "#52c4c4", // aqua
+  "#b08be0", // lavender
+  "#c79a4a", // tan
+  "#e08a3a", // amber
+  "#6fae6f", // sage
+  "#d05fa0", // rose
 ];
 
 let _currentHead: string | null = null;
@@ -70,6 +81,11 @@ let _contextSet: Record<string, boolean> | null = null;
 let _visibleIds: Record<string, boolean> = Object.create(null);
 let _headAncestorSet: Record<string, boolean> = Object.create(null);
 let _internalSet: Record<string, boolean> = Object.create(null);
+// internal node id → the id of the turn that owns it (the runtime
+// block / tool call it surfaces inside). Used so an internal node
+// lights up whenever its owner turn is on screen — internal nodes
+// have no chat bubble of their own to drive `_recomputeVisibility`.
+let _internalOwner: Record<string, string> = Object.create(null);
 let _tooltip: HTMLDivElement | null = null;
 let _lastSignature: string | null = null;
 let _leafOfNode: Record<string, string> = Object.create(null);
@@ -77,8 +93,20 @@ let _collapsed: Record<string, boolean> = Object.create(null);
 let _seenCollapsible: Record<string, boolean> = Object.create(null);
 let _collapseSession: string | null = null;
 
-function _laneColor(i: number): string {
-  return LANE_COLORS[i % LANE_COLORS.length];
+/** Stable per-branch colour. Lane 0 (the trunk) is always
+ *  LANE_COLORS[0]. A side branch is coloured by a hash of its leaf id
+ *  — a stable node id — NOT by its lane index. So checking out a
+ *  different branch (which reshuffles lane indices) does not repaint
+ *  the other branches: each keeps the colour tied to its identity. */
+function _branchColor(node: GNode, leafOfNode: Record<string, string>): string {
+  if ((node._lane || 0) === 0) return LANE_COLORS[0];
+  const leafId = leafOfNode[node.id] || node.id;
+  let h = 0;
+  for (let i = 0; i < leafId.length; i++) {
+    h = (h * 31 + leafId.charCodeAt(i)) | 0;
+  }
+  // Reserve index 0 for the trunk; side branches use 1..N-1.
+  return LANE_COLORS[1 + (Math.abs(h) % (LANE_COLORS.length - 1))];
 }
 
 function _signature(graph: GNode[], headId: string | null): string {
@@ -322,57 +350,69 @@ function _headAncestors(byId: Record<string, GNode>, headId: string | null): str
   return out;
 }
 
-function _branchAnchor(leaf: GNode, byId: Record<string, GNode>): GNode {
-  let cur: GNode | null = leaf;
-  while (cur) {
-    const parent: GNode | null = cur.parent_id ? byId[cur.parent_id] : null;
-    if (!parent) return cur;
-    if (parent.children!.length > 1) return cur;
-    cur = parent;
-  }
-  return leaf;
-}
-
 function _assignLanes(
   byId: Record<string, GNode>,
+  headId: string | null,
 ): { leaves: GNode[]; laneCount: number; leafOfNode: Record<string, string> } {
   const leaves: GNode[] = [];
   Object.keys(byId).forEach((id) => {
     if (!byId[id].children!.length) leaves.push(byId[id]);
   });
 
-  // Internal execution nodes (an @agentic_function's LLM / tool calls)
-  // always sort LAST, regardless of created_at. An internal call
-  // usually has an earlier seq than the conversation that continues
-  // after the run, so by raw created_at it would claim lane 0 and
-  // shove the conversation trunk onto a side lane — the trunk would
-  // change colour just by expanding a run. Forcing internal leaves to
-  // the back keeps the conversation on lane 0 and makes internal calls
-  // branch off to the side: detail hanging off the trunk, not a peer.
-  leaves.forEach((leaf) => {
-    leaf._anchor = _branchAnchor(leaf, byId);
-  });
-  leaves.sort((a, b) => {
-    const ax = a._internal ? 1 : 0;
-    const bx = b._internal ? 1 : 0;
-    if (ax !== bx) return ax - bx;
-    const dt = (a._anchor!.created_at || 0) - (b._anchor!.created_at || 0);
-    if (dt !== 0) return dt;
-    const ai = a._anchor!.id;
-    const bi = b._anchor!.id;
-    return ai < bi ? -1 : ai > bi ? 1 : 0;
-  });
-
   const leafOfNode: Record<string, string> = Object.create(null);
-  leaves.forEach((leaf, laneIdx) => {
-    leaf._lane = laneIdx;
-    let cur: GNode | null = leaf;
+  let laneCount = 1;
+
+  // ── lane 0 = the trunk = the HEAD conversation chain ───────────────
+  // The chat window shows the chain root→HEAD; that exact chain IS the
+  // main branch. Walk up from HEAD by parent_id and pin every node on
+  // it to lane 0. Everything else — @agentic_function call subtrees,
+  // diverged conversation branches — packs into lanes ≥ 1. A run's
+  // internal nodes hang OFF a trunk node (they are its children), they
+  // are never ON the trunk, so they can't land on the main branch.
+  let trunkTip: GNode | null =
+    headId && byId[headId] ? byId[headId] : null;
+  if (!trunkTip) {
+    // No HEAD — fall back to the most recent leaf.
+    trunkTip = leaves
+      .slice()
+      .sort((a, b) => (b.created_at || 0) - (a.created_at || 0))[0] || null;
+  }
+  if (trunkTip) {
+    let cur: GNode | null = trunkTip;
     while (cur) {
-      if (cur._lane === undefined) cur._lane = laneIdx;
+      cur._lane = 0;
+      leafOfNode[cur.id] = trunkTip.id;
+      cur = cur.parent_id ? byId[cur.parent_id] : null;
+    }
+  }
+
+  // ── off-trunk nodes: column = call depth ───────────────────────────
+  // A node off the trunk takes its parent's lane + 1, so its column is
+  // its depth in the call / branch tree. The graph then mirrors the
+  // indented Execution DAG: gui_step one column in from gui_agent,
+  // plan_next_action one in from gui_step, the LLM one in again.
+  // Sequential runs reuse the same columns — they sit at different
+  // rows, so they never collide.
+  function _laneDFS(node: GNode, parentLane: number): void {
+    if (node._lane === undefined) node._lane = parentLane + 1;
+    const lane = node._lane;
+    if (lane + 1 > laneCount) laneCount = lane + 1;
+    (node.children || []).forEach((c) => _laneDFS(c, lane));
+  }
+  // Roots: a trunk root keeps lane 0 (its descendants step out from
+  // there); a detached non-trunk root starts at lane 1.
+  Object.keys(byId)
+    .map((id) => byId[id])
+    .filter((n) => !n.parent_id || !byId[n.parent_id])
+    .forEach((r) => _laneDFS(r, 0));
+
+  // leafOfNode: map each node to a branch tip, for node-click checkout.
+  // Trunk nodes were already mapped above; this fills the rest.
+  leaves.forEach((leaf) => {
+    let cur: GNode | null = leaf;
+    while (cur && !(cur.id in leafOfNode)) {
       leafOfNode[cur.id] = leaf.id;
-      const parent: GNode | null = cur.parent_id ? byId[cur.parent_id] : null;
-      if (parent && parent._lane !== undefined && parent._lane !== laneIdx) break;
-      cur = parent;
+      cur = cur.parent_id ? byId[cur.parent_id] : null;
     }
   });
 
@@ -381,7 +421,7 @@ function _assignLanes(
     if (!(id in leafOfNode)) leafOfNode[id] = id;
   });
 
-  return { leaves, laneCount: leaves.length || 1, leafOfNode };
+  return { leaves, laneCount, leafOfNode };
 }
 
 function _svg(tag: string, attrs?: Record<string, string | number>): SVGElement {
@@ -410,7 +450,12 @@ function _shapeFor(node: GNode): string {
 
 function _labelFor(node: GNode): string {
   if (node.role === "tool") return node.function || node.name || "function";
-  if (node.display === "runtime") return node.function || "runtime";
+  // display=runtime: the run reply carries `function` (→ "gui_agent");
+  // the run *command* turn has none — show its text ("run gui_agent
+  // task=…") rather than the bare, uninformative word "runtime".
+  if (node.display === "runtime") {
+    return node.function || node.preview || "runtime";
+  }
   if (node.preview) return node.preview;
   if (node.role === "user") return "You";
   if (node.role === "assistant") return "Agent";
@@ -549,13 +594,15 @@ function render(graphIn: GNode[], headIdIn: string | null): void {
 
   const tree = _buildTree(graph);
   const maxDepth = _assignDepth(graph, tree.byId);
-  const lanes = _assignLanes(tree.byId);
+  const lanes = _assignLanes(tree.byId, headId);
   _leafOfNode = lanes.leafOfNode;
 
   const _colorMap: Record<string, string> = Object.create(null);
   Object.keys(tree.byId).forEach((id) => {
     const node = tree.byId[id];
-    if (node._lane !== undefined) _colorMap[id] = _laneColor(node._lane);
+    if (node._lane !== undefined) {
+      _colorMap[id] = _branchColor(node, lanes.leafOfNode);
+    }
   });
   HGW._branchLaneColorMap = _colorMap;
 
@@ -592,6 +639,7 @@ function render(graphIn: GNode[], headIdIn: string | null): void {
     }
   });
   _internalSet = internalSet;
+  _internalOwner = internalOwner;
 
   const laneArea = PAD_X + COL_W * Math.max(lanes.laneCount - 1, 0);
   const labelX = laneArea + 16;
@@ -622,7 +670,7 @@ function render(graphIn: GNode[], headIdIn: string | null): void {
     const parent = tree.byId[node.parent_id];
     const p = pos(parent);
     const c = pos(node);
-    const color = _laneColor(node._lane || 0);
+    const color = _branchColor(node, lanes.leafOfNode);
     const onHead = headAncestors[id] && headAncestors[node.parent_id];
     edgeG.appendChild(
       _svg("path", {
@@ -645,7 +693,7 @@ function render(graphIn: GNode[], headIdIn: string | null): void {
     const p = pos(node);
     const isHead = id === headId;
     const onHead = !!headAncestors[id];
-    const color = _laneColor(node._lane || 0);
+    const color = _branchColor(node, lanes.leafOfNode);
     const isCollapsible = cinfo.isCollapsible(node);
     const isFolded = isCollapsible && !!_collapsed[id];
     const g = _svg("g", {
@@ -898,6 +946,24 @@ function _recomputeVisibility(): void {
       if (single) newSet[single] = true;
     }
   }
+  // Internal execution nodes (an @agentic_function's LLM / tool
+  // calls) have no chat bubble of their own — they surface inside
+  // their owner turn's runtime block. The DOM scan above can never
+  // mark them, so they'd never get the on-screen emphasis. Propagate
+  // visibility from each owner to its internal subtree. Looped to a
+  // fixpoint so a nested run (owner is itself internal) also resolves.
+  for (let pass = 0; pass < 6; pass++) {
+    let changed = false;
+    for (const internalId in _internalOwner) {
+      if (newSet[internalId]) continue;
+      if (newSet[_internalOwner[internalId]]) {
+        newSet[internalId] = true;
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+
   _setVisibleSet(newSet);
 }
 

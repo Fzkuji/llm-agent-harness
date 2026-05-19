@@ -27,10 +27,19 @@ def register(app):
         start = os.path.abspath(os.path.expanduser(start))
         if not os.path.isdir(start):
             start = str(pathlib.Path.home())
+        # Run `choose folder` inside a `tell System Events` block and
+        # activate it first — otherwise the dialog is owned by the
+        # detached worker process and opens *behind* the browser, so
+        # the click looks like it did nothing.
+        safe_start = start.replace("\\", "\\\\").replace('"', '\\"')
         script = (
-            f'POSIX path of (choose folder with prompt '
-            f'"Select working directory" default location '
-            f'POSIX file "{start}")'
+            'tell application "System Events"\n'
+            '  activate\n'
+            '  set chosenFolder to choose folder with prompt '
+            '"Select working directory" default location '
+            f'POSIX file "{safe_start}"\n'
+            'end tell\n'
+            'return POSIX path of chosenFolder'
         )
         try:
             result = subprocess.run(
