@@ -9,44 +9,18 @@ OpenProgram — Agentic Programming 理念的产品化实现。
   - 初学者：跑我们打包好的应用（CLI / Web UI），零代码。
   - 深度用户：`from openprogram import agentic_function` 自己写。
 
-顶层 re-export：
-    agentic_function    装饰器（Agentic Programming 的入口符号）
-    Runtime             LLM 调用的运行时基类
-    Context             执行上下文树
-    ask_user            在函数里向用户提问
-    新建 / 编辑 / 改进函数走 skill ``agentic-programming``，由 agent 直接
-    用 Read / Write / Edit 工具操作 .py 文件，不再有专门的 meta 函数。
+顶层 re-export 只有 ``agentic_function`` 一个 —— 这是 Agentic Programming
+的入口符号，任何用户代码都要 ``from openprogram import agentic_function``。
+其它符号（``Runtime`` / ``ask_user`` / 各 provider helper 等）走全路径就行：
+
+    from openprogram.agentic_programming.runtime import Runtime
+    from openprogram.functions.agentics.ask_user import ask_user
+    from openprogram.providers.registry import create_runtime
+
+新建 / 编辑 / 改进 @agentic_function 走 skill ``agentic-programming``，
+agent 直接用 Read / Write / Edit 工具操作 .py 文件，不再有专门的 meta 函数。
 """
 
-from openprogram.agentic_programming import (
-    agentic_function, traced, auto_trace_module, auto_trace_package,
-    Runtime,
-)
-from openprogram.providers.registry import detect_provider, create_runtime, check_providers
-from openprogram.programs.functions.buildin.ask_user import (
-    ask_user, set_ask_user, FollowUp, run_with_follow_up,
-)
-from openprogram.programs.functions.buildin.general_action import general_action
-from openprogram.programs.functions.buildin.agent_loop import agent_loop
-from openprogram.programs.functions.buildin.wait import wait
-from openprogram.programs.functions.buildin.deep_work import deep_work
-from openprogram.programs.functions.buildin.init_research import init_research
+from openprogram.agentic_programming import agentic_function
 
-__all__ = [
-    "agentic_function",
-    "traced",
-    "auto_trace_module",
-    "auto_trace_package",
-    "Runtime",
-    "FollowUp",
-    "run_with_follow_up",
-    "ask_user",
-    "detect_provider",
-    "create_runtime",
-    "check_providers",
-    "general_action",
-    "agent_loop",
-    "wait",
-    "deep_work",
-    "init_research",
-]
+__all__ = ["agentic_function"]

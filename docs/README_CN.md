@@ -178,7 +178,7 @@ login_flow ✓ 8.8s
 对于需要持续努力和高标准的复杂任务，`deep_work` 会运行一个自主的 计划-执行-评估 循环，直到输出达到指定的质量水平：
 
 ```python
-from openprogram.programs.functions.buildin.deep_work import deep_work
+from openprogram.functions.agentics.deep_work import deep_work
 
 result = deep_work(
     task="写一篇关于 LLM agent 中上下文管理的综述论文。",
@@ -213,10 +213,10 @@ skill 是完整规范——文件放哪、装饰器元数据、docstring 与 `co
 
 | 导入 | 功能 |
 |------|------|
-| `from openprogram.programs.functions.buildin.deep_work import deep_work` | 自主计划-执行-评估循环，支持质量等级 |
-| `from openprogram.programs.functions.buildin.agent_loop import agent_loop` | 通用自主 agent 循环 |
-| `from openprogram.programs.functions.buildin.general_action import general_action` | 给 LLM 完全自由完成单个任务 |
-| `from openprogram.programs.functions.buildin.wait import wait` | LLM 根据上下文决定等待时长 |
+| `from openprogram.functions.agentics.deep_work import deep_work` | 自主计划-执行-评估循环，支持质量等级 |
+| `from openprogram.functions.agentics.agent_loop import agent_loop` | 通用自主 agent 循环 |
+| `from openprogram.functions.agentics.general_action import general_action` | 给 LLM 完全自由完成单个任务 |
+| `from openprogram.functions.agentics.wait import wait` | LLM 根据上下文决定等待时长 |
 
 ### 提供方
 

@@ -50,7 +50,7 @@ def _cmd_browser_install(target: str) -> int:
 
 def _cmd_browser_status() -> int:
     """Show what's installed, sidecar state, saved login count."""
-    from openprogram.tools.browser._chrome_bootstrap import (
+    from openprogram.functions.tools.browser._chrome_bootstrap import (
         port_file, sidecar_dir, is_port_listening,
     )
 
@@ -95,7 +95,7 @@ def _cmd_browser_status() -> int:
 
 def _cmd_browser_refresh() -> int:
     """Re-copy the real Chrome profile to the sidecar."""
-    from openprogram.tools.browser._chrome_bootstrap import (
+    from openprogram.functions.tools.browser._chrome_bootstrap import (
         sidecar_dir, port_file,
     )
 

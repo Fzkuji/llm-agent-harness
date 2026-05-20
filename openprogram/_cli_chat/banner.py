@@ -3,12 +3,12 @@ from __future__ import annotations
 
 
 def _tool_inventory() -> tuple[int, list[str]]:
-    from openprogram.tools import ALL_TOOLS, list_available
+    from openprogram.functions import list_available, list_registered_agent_tools
     names = list_available()  # only tools whose check_fn currently passes
     # Prefer the gated list; if the helper returns empty (no gating), fall
     # back to the full registry so the banner isn't misleadingly blank.
     if not names:
-        names = list(ALL_TOOLS.keys())
+        names = list_registered_agent_tools()
     return len(names), names
 
 

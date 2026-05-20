@@ -315,12 +315,31 @@ def _restore_system(saved):
 
 class agentic_function:
     """
-    Decorator that records function execution into the DAG.
+    Class decorator for functions whose body spawns an inner agent loop.
 
-    Every decorated function is unconditionally recorded. On entry a
-    placeholder code Call (``output=None``, ``status='running'``) is
-    appended to the session's GraphStore; on exit the same node is
-    updated with the return value (or error) and timing.
+    Two roles per decorated function:
+
+      1. **Python-direct-invoke**: ``research("topic")`` triggers
+         ``__call__`` → runs the wrapper → executes the function body
+         (which usually calls ``runtime.exec(...)`` to drive an inner
+         LLM round). Used when another @agentic_function composes this
+         one as a Python building block — no LLM round-trip on the
+         outer side, just nested execution.
+
+      2. **LLM tool dispatch**: every instance bridges itself into the
+         shared ``openprogram.functions._runtime._registry`` via
+         ``_register_as_tool`` (delegating to the same
+         ``_build_and_register_tool`` helper ``@function`` uses). From
+         the dispatcher's perspective the result is an ``AgentTool``
+         indistinguishable from one produced by ``@function``, so all
+         6 selection layers (``available_if`` / toolset / mode preset
+         / ``check_fn`` / deny rules / ``defer``) apply uniformly.
+
+    Both roles share one underlying ``self._wrapper`` that carries the
+    DAG-recording semantics: on entry a placeholder code Call (status
+    ``running``, ``output=None``) is appended to the GraphStore; on
+    exit the same node is updated with the return value (or error)
+    and timing. Set ``expose="hidden"`` to skip DAG recording.
 
     Args:
         expose:     What outside observers see of me after I complete. [DEFAULT: "io"]
@@ -381,11 +400,40 @@ class agentic_function:
         self,
         fn: Optional[Callable] = None,
         *,
+        # —— agentic-specific ——
         expose: str = "io",
         render_range: Optional[dict] = None,
         input: Optional[dict] = None,
         no_tools: bool = False,
         system: Optional[str] = None,
+        # —— shared with @function ——
+        # The function-calling refactor unified these names with the
+        # @function decorator so an @agentic_function and an @function
+        # produce equivalent ``AgentTool`` entries in the same
+        # ``openprogram.functions._runtime._registry``. The agentic
+        # decorator adds DAG recording + inner agent loop spawning on
+        # top of the shared registration machinery.
+        as_tool: bool = True,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        parameters: Optional[dict] = None,
+        label: Optional[str] = None,
+        toolset: tuple = (),
+        unsafe_in: tuple = (),
+        check_fn: Optional[Callable] = None,
+        requires_env: tuple = (),
+        can_use: Optional[Callable] = None,
+        max_result_chars: Optional[int] = None,
+        persist_full: bool = False,
+        head_ratio: Optional[float] = None,
+        requires_approval=None,
+        cache: bool = False,
+        cache_ttl: float = 300.0,
+        timeout: Optional[float] = None,
+        # Layer 1 + Layer 6 (same shapes as @function)
+        available_if: Optional[Callable[[], bool]] = None,
+        defer: bool = False,
+        register_globally: bool = True,
     ):
         if expose not in ("io", "llm", "full", "hidden"):
             raise ValueError(
@@ -397,31 +445,87 @@ class agentic_function:
         self.input_meta = input or {}
         self.no_tools = no_tools
         self.system = system
+        self.as_tool = as_tool
+        self.tool_name = name
+        self.tool_description = description
+        self.tool_parameters = parameters
+        self.tool_label = label
+        self.toolset = tuple(toolset)
+        self.unsafe_in = tuple(unsafe_in)
+        self.check_fn = check_fn
+        self.requires_env = tuple(requires_env)
+        self.max_result_chars = max_result_chars
+        self.persist_full = persist_full
+        self.head_ratio = head_ratio
+        self.requires_approval = requires_approval
+        self.cache = cache
+        self.cache_ttl = cache_ttl
+        self.timeout = timeout
+        self.can_use = can_use
+        self.available_if = available_if
+        self.defer = defer
+        self.register_globally = register_globally
+        # Filled in by ``_register_as_tool`` once a function is
+        # attached. Held here so callers can introspect (``fn._agent_tool``)
+        # without doing a registry lookup.
+        self._agent_tool = None
+        self._fn = None
+        self._wrapper = None
 
         if fn is not None:
-            # Used as @agentic_function without parentheses
-            self._fn = fn
-            self._wrapper = self._make_wrapper(fn)
-            functools.update_wrapper(self, fn)
-            _registry[fn.__name__] = self
-        else:
-            # Used as @agentic_function(...) with arguments
-            self._fn = None
-            self._wrapper = None
+            # Used as @agentic_function without parentheses — fn is
+            # already in hand, attach right now.
+            self._attach(fn)
 
     def __call__(self, *args, **kwargs):
+        # After attachment ``__call__`` is the Python-direct-invoke
+        # path: forward to the wrapper so ``research("topic")`` works
+        # like a regular function. The decorator-style entry path
+        # (``@agentic_function(...)`` returning the partially-built
+        # instance which is then called with the function object)
+        # routes here too, but only once — when ``_fn`` is still None.
         if self._fn is not None:
-            # @agentic_function (no parens) — self is the decorator,
-            # __call__ is invoked with the actual function arguments
             return self._wrapper(*args, **kwargs)
-        else:
-            # @agentic_function(...) — first __call__ receives the function
-            fn = args[0]
-            self._fn = fn
-            self._wrapper = self._make_wrapper(fn)
-            functools.update_wrapper(self, fn)
-            _registry[fn.__name__] = self
-            return self
+        # Decorator entry: the LHS is ``@agentic_function(...)``; the
+        # call we're handling now is the one Python makes with the
+        # decorated function as the single positional arg.
+        fn = args[0]
+        attached = self._attach(fn)
+        # If Layer 1 gated us out, ``_attach`` returns the raw fn
+        # unchanged. Return that so the module-level name points at a
+        # plain callable rather than a half-built agentic_function.
+        return attached if attached is not None else self
+
+    def _attach(self, fn: Callable):
+        """Bind ``fn`` to this instance, build wrapper, run gates, and
+        optionally register as an AgentTool.
+
+        Single attach path used by both no-parens (``__init__``) and
+        with-parens (``__call__``) decorator forms. Returns ``fn``
+        unchanged when Layer 1 (``available_if``) gates the function
+        out — callers in ``__call__`` use that to short-circuit the
+        return value; ``__init__`` ignores the return.
+
+        Layer 1 (Claude Code "conditional import" equivalent): if the
+        predicate is set and returns falsy (or raises), we skip the
+        wrapper, both registries, and the AgentTool bridge. The raw
+        fn is what callers get back, so module-level use degrades
+        gracefully to "this is just a plain function" rather than a
+        broken agentic instance.
+        """
+        if self.available_if is not None:
+            try:
+                if not self.available_if():
+                    return fn
+            except Exception:
+                return fn
+        self._fn = fn
+        self._wrapper = self._make_wrapper(fn)
+        functools.update_wrapper(self, fn)
+        _registry[fn.__name__] = self
+        if self.as_tool:
+            self._register_as_tool()
+        return None
 
     def __get__(self, obj, objtype=None):
         """Support instance methods."""
@@ -433,7 +537,7 @@ class agentic_function:
     def spec(self) -> dict:
         """JSON-schema tool spec auto-generated from signature + docstring.
 
-        Mirrors openprogram.tools.<name>.SPEC so an @agentic_function can be
+        Mirrors openprogram.functions.<name>.SPEC so an @agentic_function can be
         passed directly to runtime.exec(tools=[fn]). Runtime-injected params
         (runtime, exec_runtime, review_runtime) and any `hidden: True` entries
         in input_meta are excluded — they aren't LLM-controllable.
@@ -449,6 +553,98 @@ class agentic_function:
         converted to a string by the tool-loop driver if it isn't one already.
         """
         return self._wrapper(**kwargs)
+
+    def _register_as_tool(self) -> None:
+        """Bridge this @agentic_function into the shared AgentTool registry.
+
+        Sits next to ``@function``-decorated tools in the same
+        ``openprogram.functions._runtime._registry``, so the LLM can
+        call this function via tool_call dispatch and so all 6 gating
+        layers (available_if / toolset / mode preset / check_fn /
+        deny rules / defer) apply uniformly.
+
+        Delegates AgentTool construction + sidecar attach + register
+        to ``_build_and_register_tool`` — the same helper ``@function``
+        uses. The only piece unique to the agentic side is the
+        ``_execute`` closure that funnels the LLM-passed kwargs through
+        ``self._wrapper`` (the wrapper carries pre-invocation hooks,
+        runtime injection, DAG entry/exit, and inner agent-loop
+        spawning).
+
+        Note: the file-local ``_registry`` (line 82) is kept and
+        populated separately; ``spawn_program`` and the webui use it to
+        look up the agentic_function *instance* (for ``.expose`` /
+        ``.render_range`` / ``._fn`` / etc.) — that's distinct from
+        looking up an ``AgentTool`` for dispatcher invocation, which
+        is what the shared registry serves.
+        """
+        if self._fn is None or self._wrapper is None:
+            return  # nothing to wrap yet
+
+        # Lazy imports to avoid a hard cycle on package init —
+        # @agentic_function may be imported before openprogram.functions
+        # is fully constructed.
+        from openprogram.agent.types import AgentToolResult
+        from openprogram.functions._runtime import (
+            _build_and_register_tool,
+            _normalize_result,
+            _effective_max_chars,
+            DEFAULT_MAX_RESULT_CHARS,
+            DEFAULT_HEAD_RATIO,
+        )
+
+        name = self.tool_name or self._fn.__name__
+        # Reuse the dict-shape spec the legacy path already produced
+        # so the parameter schema stays consistent (hidden params
+        # filtered, type-hint extraction handled by the existing
+        # ``_build_agentic_tool_spec`` helper).
+        spec = _build_agentic_tool_spec(self._fn, self.input_meta)
+        parameters = self.tool_parameters or spec.get("parameters") or {
+            "type": "object", "properties": {}
+        }
+        description = (
+            self.tool_description or spec.get("description") or self._fn.__name__
+        )
+        max_chars = self.max_result_chars or DEFAULT_MAX_RESULT_CHARS
+        head_ratio = (
+            self.head_ratio if self.head_ratio is not None else DEFAULT_HEAD_RATIO
+        )
+        persist_full = self.persist_full
+        wrapper = self._wrapper
+
+        async def _execute(call_id, args, cancel, on_update):
+            # Funnel the LLM-passed kwargs through the wrapper (which
+            # carries the agentic semantics) then normalise the return
+            # value through the same truncation / persist-full path
+            # @function uses.
+            raw = wrapper(**(dict(args or {})))
+            if inspect.iscoroutine(raw):
+                raw = await raw
+            if isinstance(raw, AgentToolResult):
+                return raw
+            return _normalize_result(
+                raw,
+                call_id=call_id,
+                max_chars=_effective_max_chars(max_chars),
+                persist_full=persist_full,
+                head_ratio=head_ratio,
+            )
+
+        self._agent_tool = _build_and_register_tool(
+            name=name,
+            description=description,
+            parameters=parameters,
+            label=self.tool_label,
+            execute=_execute,
+            requires_approval=self.requires_approval,
+            check_fn=self.check_fn,
+            requires_env=self.requires_env,
+            can_use=self.can_use,
+            defer=self.defer,
+            toolsets=self.toolset,
+            unsafe_in=self.unsafe_in,
+            register_globally=self.register_globally,
+        )
 
     def _make_wrapper(self, fn: Callable) -> Callable:
         sig = inspect.signature(fn)
@@ -861,5 +1057,4 @@ def auto_trace_package(pkg_dir, pkg_name=None):
                 except Exception:
                     continue
             auto_trace_module(mod, trace_pkg=pkg_dir)
-
 

@@ -30,7 +30,7 @@ def register(app):
             info["db_error"] = f"{type(e).__name__}: {e}"
             info["status"] = "degraded"
         try:
-            from openprogram.tools import list_registered_agent_tools
+            from openprogram.functions import list_registered_agent_tools
             info["tools_registered"] = len(list_registered_agent_tools())
         except Exception:
             info["tools_registered"] = 0

@@ -323,7 +323,7 @@ LLM if the function calls one.
 **Python** — import and call directly (any function, anywhere):
 
 ```python
-from openprogram.programs.functions.third_party.<name> import <name>
+from openprogram.functions.agentics.<name> import <name>
 from openprogram import create_runtime
 
 rt = create_runtime()

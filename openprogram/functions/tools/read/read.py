@@ -1,0 +1,72 @@
+"""read function — read a file from disk and return its contents."""
+
+from __future__ import annotations
+
+import os
+
+from openprogram.functions._runtime import function
+
+
+MAX_LINES_DEFAULT = 2000
+MAX_LINE_LENGTH = 2000
+
+_DESCRIPTION = (
+    "Read a file from disk and return its contents as text, with line numbers "
+    "in `cat -n` style (1-based).\n"
+    "\n"
+    "- Paths MUST be absolute.\n"
+    "- By default reads up to 2000 lines from the top. Use `offset` and `limit` "
+    "to page through larger files.\n"
+    "- Individual lines longer than 2000 characters are truncated with an ellipsis.\n"
+    "- Binary files are not supported — use bash if you need hex dumps."
+)
+
+
+@function(
+    name="read",
+    description=_DESCRIPTION,
+    # The tool already self-bounds via offset/limit, so we don't need
+    # framework persist-to-disk on top — the LLM controls page size.
+    max_result_chars=200_000,
+    persist_full=False,
+    toolset=["core", "research"],
+)
+def read(file_path: str,
+         offset: int = 1,
+         limit: int = MAX_LINES_DEFAULT) -> str:
+    """Read a file and return its contents with line numbers.
+
+    Args:
+        file_path: Absolute path of the file to read.
+        offset: Line number to start reading from (1-based). Default 1.
+        limit: Maximum number of lines to return. Default 2000.
+    """
+    if not os.path.isabs(file_path):
+        return f"Error: file_path must be absolute, got {file_path!r}"
+    if not os.path.exists(file_path):
+        return f"Error: file not found: {file_path}"
+    if os.path.isdir(file_path):
+        return f"Error: {file_path} is a directory, not a file"
+
+    try:
+        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+    except Exception as e:
+        return f"Error reading {file_path}: {type(e).__name__}: {e}"
+
+    total = len(lines)
+    start = max(1, offset) - 1
+    end = min(total, start + max(1, limit))
+    selected = lines[start:end]
+
+    out_lines = []
+    for i, line in enumerate(selected, start=start + 1):
+        text = line.rstrip("\n")
+        if len(text) > MAX_LINE_LENGTH:
+            text = text[:MAX_LINE_LENGTH] + "…[truncated]"
+        out_lines.append(f"{i:>6}\t{text}")
+
+    header = f"# {file_path} (lines {start + 1}-{end} of {total})"
+    if not out_lines:
+        return header + "\n(empty range)"
+    return header + "\n" + "\n".join(out_lines)

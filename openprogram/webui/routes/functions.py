@@ -145,7 +145,7 @@ def register(app):
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
         with open(filepath, "w") as f:
             f.write(body["source"])
-        mod_name = f"openprogram.programs.functions.third_party.{name}"
+        mod_name = f"openprogram.functions.agentics.{name}"
         if mod_name in sys.modules:
             del sys.modules[mod_name]
         return JSONResponse(content={"saved": True, "filepath": filepath})
@@ -187,7 +187,7 @@ def register(app):
         if name in builtin_names:
             return JSONResponse(content={"error": "cannot delete built-in function"}, status_code=403)
         os.remove(filepath)
-        mod_name = f"openprogram.programs.functions.third_party.{name}"
+        mod_name = f"openprogram.functions.agentics.{name}"
         if mod_name in sys.modules:
             del sys.modules[mod_name]
         return JSONResponse(content={"deleted": True})

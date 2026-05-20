@@ -29,14 +29,14 @@ def register(app):
         Each row now also carries the catalog metadata (``name``,
         ``description``, ``tier``, ``signup_url``, ``docs_url``,
         ``setup_steps``) sourced from
-        ``openprogram.tools.web_search.catalog``. Unknown providers
+        ``openprogram.functions.tools.web_search.catalog``. Unknown providers
         fall back to a synthesised display name + empty metadata so the
         UI can still render the row.
         """
         from openprogram.webui import server as _s
-        from openprogram.tools.web_search.registry import registry as _wsr
-        from openprogram.tools.web_search import catalog as _wsc
-        import openprogram.tools.web_search.providers  # noqa: F401
+        from openprogram.functions.tools.web_search.registry import registry as _wsr
+        from openprogram.functions.tools.web_search import catalog as _wsc
+        import openprogram.functions.tools.web_search.providers  # noqa: F401
         from openprogram.setup import read_search_default_provider
         default = read_search_default_provider()
         out = []
@@ -79,8 +79,8 @@ def register(app):
         for 1 result to minimise API quota burn.
         """
         import time as _t
-        from openprogram.tools.web_search.registry import registry as _wsr
-        import openprogram.tools.web_search.providers  # noqa: F401
+        from openprogram.functions.tools.web_search.registry import registry as _wsr
+        import openprogram.functions.tools.web_search.providers  # noqa: F401
         if not _wsr.has(provider_id):
             return JSONResponse(
                 status_code=404,
@@ -127,8 +127,8 @@ def register(app):
     @app.post("/api/search-providers/default")
     async def api_set_search_providers_default(body: dict = None):
         from openprogram.setup import write_search_default_provider
-        from openprogram.tools.web_search.registry import registry as _wsr
-        import openprogram.tools.web_search.providers  # noqa: F401
+        from openprogram.functions.tools.web_search.registry import registry as _wsr
+        import openprogram.functions.tools.web_search.providers  # noqa: F401
         name = (body or {}).get("provider")
         if name in (None, "", "auto"):
             write_search_default_provider(None)

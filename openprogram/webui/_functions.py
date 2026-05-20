@@ -38,19 +38,25 @@ def _discover_functions() -> list[dict]:
     result: list[dict] = []
     base = _PKG_BASE
 
-    # Built-in + third-party functions (flat files or grouping subfolders)
-    from openprogram.programs.functions import iter_function_files
-    for subpkg, category in (("buildin", "builtin"), ("third_party", "generated")):
-        for _dotted, full_path in iter_function_files(subpkg):
-            infos = _extract_all_functions(full_path, category)
+    # All registered agentic functions live under agentics/. The
+    # ``is_harness`` flag (from the (module_name, file_override) shape
+    # of AGENTIC_MODULES) categorises an entry as a harness app vs a
+    # plain agentic function — this is what the UI uses to render the
+    # "app" landing tile differently from regular entries. There's no
+    # more buildin/third_party split; that distinction is gone after
+    # the function-calling unification.
+    from openprogram.functions._registry import iter_agentic_files
+    from openprogram.functions import agentics as _agentics_pkg
+    import os as _os
+    agentics_dir = _os.path.dirname(_agentics_pkg.__file__)
+    for mod_name, full_path, is_harness in iter_agentic_files(agentics_dir):
+        if is_harness:
+            info = _extract_function_info(full_path, None, "app")
+            if info:
+                result.append(info)
+        else:
+            infos = _extract_all_functions(full_path, "agentic")
             result.extend(infos)
-
-    # Apps — registered in programs/applications/registry.py
-    from openprogram.programs.applications.registry import iter_app_main_files
-    for main_py in iter_app_main_files():
-        info = _extract_function_info(main_py, None, "app")
-        if info:
-            result.append(info)
 
     return result
 
@@ -398,53 +404,48 @@ def _make_stub_from_file(func_name: str, filepath: str):
 def _load_function(func_name: str):
     """Load a function by name. Always reloads to pick up file changes.
 
-    Search order:
-      1. buildin/, third_party/  — modules listed in functions/registry.py
-      2. programs/applications/*/.../main.py  — app entry points (e.g. gui_agent)
+    Search target: every module listed in
+    ``openprogram.functions._registry.AGENTIC_MODULES`` (covers both
+    flat agentic functions and the harness apps, replaces the old
+    buildin/third_party + app-registry split). For each registered
+    module we import, reload, and look up ``func_name`` as a top-level
+    attribute. Harness apps go through the same path but are loaded
+    via ``spec_from_file_location`` since their external dirs have
+    hyphen names that can't be imported normally.
 
-    If a module fails to import, falls back to a stub with the source code so
-    edit() can still operate on it.
+    If a module fails to import, falls back to a stub with the source
+    code so edit() can still operate on it.
     """
     from openprogram.agentic_programming.function import auto_trace_module
-    from openprogram.programs.functions import iter_function_files
-
-    # 1: registered buildin / third_party function modules. A module may
-    # define several functions, so import each and look for func_name.
-    for subpkg in ("buildin", "third_party"):
-        for mod_name, fpath in iter_function_files(subpkg):
-            try:
-                mod = importlib.import_module(mod_name)
-                importlib.reload(mod)
-                auto_trace_module(mod, trace_pkg=os.path.dirname(os.path.abspath(fpath)))
-                fn = getattr(mod, func_name, None)
-                if fn is not None:
-                    return fn
-            except Exception:
-                stub = _make_stub_from_file(func_name, fpath)
-                if stub is not None:
-                    return stub
-
-    # 2: applications — registered main.py entry points
+    from openprogram.functions._registry import (
+        iter_agentic_files, _load_external_file,
+    )
+    from openprogram.functions import agentics as _agentics_pkg
+    agentics_dir = os.path.dirname(_agentics_pkg.__file__)
     import importlib.util as _imputil
-    from openprogram.programs.applications.registry import iter_app_main_files
-    for main_py in iter_app_main_files():
-        # Each harness expects its parent dir on sys.path so that
-        # `from gui_harness.X import ...` resolves. main.py sits at
-        # <app_root>/<pkg>/main.py, so we add <app_root> (parent of pkg).
-        harness_root = os.path.dirname(os.path.dirname(main_py))
-        if harness_root not in sys.path:
-            sys.path.insert(0, harness_root)
-        d = os.path.basename(harness_root)
+
+    for mod_name, fpath, is_harness in iter_agentic_files(agentics_dir):
+        full_mod = f"openprogram.functions.agentics.{mod_name}"
         try:
-            spec = _imputil.spec_from_file_location(
-                f"openprogram.programs.applications.{d}.main", main_py
-            )
-            mod = _imputil.module_from_spec(spec)
-            spec.loader.exec_module(mod)
-            mod = sys.modules.get(mod.__name__, mod)
-            fn = getattr(mod, func_name, None)
+            if is_harness:
+                # Re-execute the file under its registered module name
+                # so a hot-reload picks up edits the user just made.
+                _load_external_file(
+                    agentics_dir, mod_name,
+                    os.path.relpath(fpath, agentics_dir),
+                )
+                mod = sys.modules.get(full_mod)
+            else:
+                mod = importlib.import_module(full_mod)
+                importlib.reload(mod)
+                auto_trace_module(
+                    mod, trace_pkg=os.path.dirname(os.path.abspath(fpath))
+                )
+            fn = getattr(mod, func_name, None) if mod is not None else None
             if fn is not None:
                 return fn
         except Exception:
-            pass
+            stub = _make_stub_from_file(func_name, fpath)
+            if stub is not None:
+                return stub
     return None

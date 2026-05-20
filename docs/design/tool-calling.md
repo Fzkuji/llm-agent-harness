@@ -2,6 +2,11 @@
 
 本文档描述一次模型调用里,LLM 如何在每一轮"做选择"——是选一个函数去运行,还是输出文本结束。
 
+> 配套文档:[`function-calling-unification.md`](./function-calling-unification.md)
+> 描述整个 function-calling 框架的设计 —— `@function` / `@agentic_function`
+> 两个装饰器、共享注册表、6 层 gating、deferred loading 等。本文只讲
+> "选下一步" 这一步的循环机制。
+
 ## 一句话概括
 
 给 LLM 一组工具(`@agentic_function` 或工具 dict),它每轮返回一条 assistant 消息。消息内容里**有 `ToolCall` 就是选了函数**,框架去执行、把结果喂回历史、让它再选一轮;**只有文本没有 `ToolCall` 就是选了"结束"**,把文本作为最终回复返回。这个循环跑在 `openprogram/agent/agent_loop.py::_run_loop`。

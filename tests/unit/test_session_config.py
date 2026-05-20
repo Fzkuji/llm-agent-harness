@@ -47,7 +47,7 @@ def test_tools_enabled_uses_default_tool_names(
     tmp_db: SessionDB,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import openprogram.tools as tools_pkg
+    import openprogram.functions as tools_pkg
 
     monkeypatch.setattr(tools_pkg, "DEFAULT_TOOLS", ["read", "list"])
     tmp_db.create_session("c1", "main")

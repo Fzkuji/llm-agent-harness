@@ -91,24 +91,26 @@ def _cmd_configure(provider: str | None):
 
 
 def _cmd_list():
-    """List the registered agentic functions (functions/registry.py)."""
-    from openprogram.programs.functions import iter_function_files
+    """List the registered agentic functions (functions/_registry.py)."""
+    from openprogram.functions._registry import iter_agentic_files
+    from openprogram.functions import agentics as _agentics_pkg
 
     entries: list[tuple[str, str]] = []
-    for subpkg in ("buildin", "third_party"):
-        for _dotted, filepath in iter_function_files(subpkg):
-            name = os.path.basename(filepath)[:-3]
-            desc = ""
-            try:
-                with open(filepath) as f:
-                    content = f.read()
-                if '"""' in content:
-                    start = content.index('"""') + 3
-                    end = content.index('"""', start)
-                    desc = content[start:end].strip().split("\n")[0]
-            except OSError:
-                pass
-            entries.append((name, desc))
+    for mod_name, filepath, _is_harness in iter_agentic_files(
+        os.path.dirname(_agentics_pkg.__file__)
+    ):
+        name = mod_name
+        desc = ""
+        try:
+            with open(filepath) as f:
+                content = f.read()
+            if '"""' in content:
+                start = content.index('"""') + 3
+                end = content.index('"""', start)
+                desc = content[start:end].strip().split("\n")[0]
+        except OSError:
+            pass
+        entries.append((name, desc))
 
     if not entries:
         print("No functions registered.")
@@ -123,7 +125,7 @@ def _cmd_run(name, arg_list, provider=None, model=None):
     """Run an existing function."""
     import inspect
     try:
-        from openprogram.programs.functions import resolve_function_module
+        from openprogram.functions import resolve_function_module
         mod = resolve_function_module(name)
         loaded_func = getattr(mod, name)
     except (ImportError, AttributeError):

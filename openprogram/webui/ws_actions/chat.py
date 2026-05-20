@@ -32,7 +32,7 @@ async def handle_chat(ws, cmd: dict):
     #       → agent's tools list with "web_search" guaranteed
     if web_search_flag:
         try:
-            from openprogram.tools import DEFAULT_TOOLS as _DEFAULT_TOOLS
+            from openprogram.functions import DEFAULT_TOOLS as _DEFAULT_TOOLS
         except Exception:
             _DEFAULT_TOOLS = []
         if isinstance(tools_flag, list):

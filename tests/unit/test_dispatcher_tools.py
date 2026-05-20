@@ -14,7 +14,7 @@ reply on the second call. The full path exercised:
 What this catches that test_dispatcher_integration.py doesn't:
 
   * ToolCall → registry lookup wiring (was broken before — dispatcher
-    used to import ``openprogram.tools.registry`` which doesn't exist)
+    used to import ``openprogram.functions.registry`` which doesn't exist)
   * tool_use / tool_result envelope shape (TUI/web depend on these)
   * approval gate blocking (5-min timer + ApprovalRegistry)
   * char-cap truncation and persist_full disk-write actually firing
@@ -46,8 +46,8 @@ from openprogram.providers.types import (
     ToolCall,
     Usage,
 )
-from openprogram.tools import _runtime as R
-from openprogram.tools._runtime import tool
+from openprogram.functions import _runtime as R
+from openprogram.functions._runtime import function
 
 
 # ---------------------------------------------------------------------------
@@ -152,7 +152,14 @@ def stub_model_resolution(monkeypatch: pytest.MonkeyPatch):
 @pytest.fixture
 def fresh_registry(monkeypatch: pytest.MonkeyPatch):
     """Each test gets a clean tool registry to register its own probe
-    tool without interference from another test's @tool decoration."""
+    tool without interference from another test's @function decoration.
+
+    Also disables the Layer 2 exposure whitelist for the duration of
+    the test (via monkey-patching ``_exposed_set`` to return ``None``):
+    the ad-hoc probe tools tests register are never in the global
+    ``TOOLSETS["full"]["tools"]`` list, and the dispatcher path would
+    otherwise drop them at the Layer 2 filter.
+    """
     saved_reg = dict(R._registry)
     saved_ts = {k: set(v) for k, v in R._toolset_membership.items()}
     saved_unsafe = {k: set(v) for k, v in R._unsafe_in_channel.items()}
@@ -160,6 +167,8 @@ def fresh_registry(monkeypatch: pytest.MonkeyPatch):
     R._toolset_membership.clear()
     R._unsafe_in_channel.clear()
     R._cache.clear()
+    import openprogram.functions as _functions
+    monkeypatch.setattr(_functions, "_exposed_set", lambda: None)
     yield R
     R._registry.clear()
     R._toolset_membership.clear()
@@ -191,12 +200,12 @@ def _patched_run_loop(stream_fn):
 
 
 def test_resolve_tools_filters_channel_unsafe_tools(fresh_registry) -> None:
-    @tool(name="safeprobe", description="Safe")
+    @function(name="safeprobe", description="Safe")
     def safeprobe() -> str:
         """Safe probe."""
         return "ok"
 
-    @tool(name="unsafeprobe", description="Unsafe", unsafe_in=["wechat"])
+    @function(name="unsafeprobe", description="Unsafe", unsafe_in=["wechat"])
     def unsafeprobe() -> str:
         """Unsafe probe."""
         return "no"
@@ -215,14 +224,14 @@ def test_resolve_default_agent_tools_from_profile_dict(
     fresh_registry,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import openprogram.tools as tools_pkg
+    import openprogram.functions as tools_pkg
 
-    @tool(name="safeprobe", description="Safe")
+    @function(name="safeprobe", description="Safe")
     def safeprobe() -> str:
         """Safe probe."""
         return "ok"
 
-    @tool(name="unsafeprobe", description="Unsafe", unsafe_in=["wechat"])
+    @function(name="unsafeprobe", description="Unsafe", unsafe_in=["wechat"])
     def unsafeprobe() -> str:
         """Unsafe probe."""
         return "no"
@@ -261,7 +270,7 @@ def test_tool_use_event_runs_tool_and_emits_result(
     tmp_db: SessionDB, captured, collector, fresh_registry,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    @tool(name="probe", description="Echo")
+    @function(name="probe", description="Echo")
     def probe(text: str) -> str:
         """Echo input.
 
@@ -305,7 +314,7 @@ def test_oversized_tool_result_is_truncated(
     tmp_db: SessionDB, captured, collector, fresh_registry,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    @tool(name="bigprobe", description="Big",
+    @function(name="bigprobe", description="Big",
           max_result_chars=200, persist_full=False)
     def bigprobe() -> str:
         """Returns a huge string."""
@@ -346,10 +355,10 @@ def test_persist_full_writes_file(
     # ``write_text`` doesn't blow up.
     results_dir = tmp_path / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr("openprogram.tools._runtime._tool_results_dir",
+    monkeypatch.setattr("openprogram.functions._runtime._tool_results_dir",
                         lambda: results_dir)
 
-    @tool(name="persistprobe", description="Persist",
+    @function(name="persistprobe", description="Persist",
           max_result_chars=200, persist_full=True)
     def persistprobe() -> str:
         """Big payload."""
@@ -381,7 +390,7 @@ def test_approval_required_blocks_until_approved(
 ) -> None:
     fired = threading.Event()
 
-    @tool(name="dangerprobe", description="Danger", requires_approval=True)
+    @function(name="dangerprobe", description="Danger", requires_approval=True)
     def dangerprobe(target: str) -> str:
         """Pretend-dangerous tool.
 
@@ -439,7 +448,7 @@ def test_approval_denied_aborts_run(
 ) -> None:
     fired = threading.Event()
 
-    @tool(name="risky", description="Risky", requires_approval=True)
+    @function(name="risky", description="Risky", requires_approval=True)
     def risky() -> str:
         """Risky."""
         fired.set()
@@ -494,7 +503,7 @@ def test_cancel_propagates_to_tool(
     saw_cancel = threading.Event()
     cancelled_by_caller = threading.Event()
 
-    @tool(name="slowprobe", description="Slow")
+    @function(name="slowprobe", description="Slow")
     async def slowprobe(cancel: asyncio.Event = None) -> str:
         """Long-running tool that polls cancel."""
         for _ in range(100):

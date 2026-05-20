@@ -341,10 +341,20 @@ async def _stream_assistant_response(
         sys_prompt = (sys_prompt or "") + "\n\n" + prefetch_block
 
     # Build LLM context
+    # Layer 6 (Claude Code shouldDefer): re-split the tools list per
+    # provider call so any deferred tools loaded earlier in this loop
+    # (via ``tool_search``) appear with full schema on the very next
+    # call. ``split_tools_for_dispatch`` is cheap (single pass); the
+    # dispatcher seeded the loaded set via ``install_loaded_deferred``
+    # at session start.
+    from openprogram.functions import split_tools_for_dispatch
+    _provider_tools, _ = split_tools_for_dispatch(
+        list(context.tools or [])
+    )
     llm_context = Context(
         system_prompt=sys_prompt,
         messages=llm_messages,
-        tools=[t for t in (context.tools or [])],
+        tools=_provider_tools,
     )
 
     fn = stream_fn or _default_stream_simple

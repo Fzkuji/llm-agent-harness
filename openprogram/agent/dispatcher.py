@@ -328,6 +328,11 @@ def process_user_turn(
     _dag_runtime = None
     _runtime_token = None
     _store_token = None
+    # Layer 6 (Claude Code's shouldDefer / ToolSearch): install a
+    # session-scoped "loaded deferred tools" set so tool_search can
+    # mutate it and subsequent turns see the updated set.
+    from openprogram.functions import install_loaded_deferred
+    install_loaded_deferred()
     try:
         from openprogram.providers.registry import create_runtime as _create_rt
         _dag_runtime = _create_rt()
@@ -701,10 +706,32 @@ def _run_loop_blocking(
     _log_resolved_tools(req, tools)
     if tools:
         tools = [_wrap_with_approval(t, req, on_event) for t in tools]
+    # Layer 6 catalog text in the system prompt. We do NOT split
+    # ``tools`` here — the agent_loop re-splits before every provider
+    # call so newly-loaded deferred tools show up on the next turn
+    # automatically. We only peek at the *initial* catalog so the LLM
+    # sees the deferred names from turn 1. After tool_search loads
+    # a name, that name still appears in this catalog block (the
+    # prompt is fixed for the dispatcher turn), but its full schema
+    # arrives via the agent_loop's per-call split — so the LLM has
+    # both the listing for discoverability and the schema for use.
+    deferred_catalog: list[tuple[str, str]] = []
+    if tools:
+        from openprogram.functions import (
+            deferred_catalog_text,
+            split_tools_for_dispatch,
+        )
+        _, deferred_catalog = split_tools_for_dispatch(tools)
     system_prompt = _with_tool_runtime_prompt(
         agent_profile.get("system_prompt") or "",
         tools,
     )
+    if deferred_catalog:
+        block = deferred_catalog_text(deferred_catalog)
+        if block:
+            system_prompt = (
+                f"{system_prompt.rstrip()}\n\n{block}".strip()
+            )
     model = _resolve_model(agent_profile, req.model_override)
 
     # Route history through the context engine: applies tool-result
@@ -924,7 +951,7 @@ def _wrap_with_approval(
     """
     from openprogram.agent.types import AgentTool, AgentToolResult
     from openprogram.providers.types import TextContent
-    from openprogram.tools._runtime import tool_requires_approval
+    from openprogram.functions._runtime import tool_requires_approval
 
     orig_execute = agent_tool.execute
 
@@ -1331,14 +1358,14 @@ def _resolve_tools(
         # Read/Write/Edit. Set `tools: []` in agent.json to opt out
         # explicitly.
         try:
-            from openprogram.tools import agent_tools as _agent_tools
+            from openprogram.functions import agent_tools as _agent_tools
             return _agent_tools(source=source, only_available=True)
         except Exception:
             return None
     if wanted == []:
         return []
     try:
-        from openprogram.tools import DEFAULT_TOOLS, agent_tools
+        from openprogram.functions import DEFAULT_TOOLS, agent_tools
         if isinstance(wanted, dict):
             enabled = wanted.get("enabled")
             if isinstance(enabled, list):

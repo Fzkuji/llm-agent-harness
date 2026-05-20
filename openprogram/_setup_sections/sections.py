@@ -73,11 +73,11 @@ def run_model_section() -> int:
 def run_tools_section() -> int:
     """Pick which tools the default agent can use."""
     from openprogram.setup import _checkbox
-    from openprogram.tools import ALL_TOOLS
+    from openprogram.functions import list_registered_agent_tools
     from openprogram.agents import manager as _agents
     agent = _ensure_default_agent()
     disabled = set((agent.tools or {}).get("disabled") or [])
-    names = sorted(ALL_TOOLS.keys())
+    names = sorted(list_registered_agent_tools())
     items = [(n, n not in disabled) for n in names]
 
     picked = _checkbox(f"Tools for agent `{agent.id}`:", items)
@@ -227,8 +227,8 @@ def run_search_section() -> int:
     )
     # Import the registry the same way the tool does — populates the
     # builtin provider list as a side effect of importing `providers`.
-    from openprogram.tools.web_search.registry import registry as _wsr
-    import openprogram.tools.web_search.providers  # noqa: F401
+    from openprogram.functions.tools.web_search.registry import registry as _wsr
+    import openprogram.functions.tools.web_search.providers  # noqa: F401
 
     providers = list(_wsr.all())
     if not providers:
@@ -298,7 +298,7 @@ def run_search_section() -> int:
         except Exception:
             picked_available = False
         if picked_provider and not picked_available:
-            from openprogram.tools.web_search import catalog as _wsc
+            from openprogram.functions.tools.web_search import catalog as _wsc
             info = _wsc.get(name)
             if info and (info.signup_url or info.setup_steps):
                 print()

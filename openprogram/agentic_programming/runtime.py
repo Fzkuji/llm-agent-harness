@@ -11,7 +11,8 @@ exec() automatically:
     3. Appends a ModelCall node recording the reply into the DAG
 
 Usage:
-    from openprogram import Runtime, agentic_function
+    from openprogram import agentic_function
+    from openprogram.agentic_programming.runtime import Runtime
 
     rt = Runtime(call=my_llm_func)
     # or: subclass Runtime and override _call()
@@ -690,7 +691,7 @@ class Runtime:
                 # Nothing requested — reasoning-only call, no tools.
                 agent_tools = None
             else:
-                from openprogram.tools import (
+                from openprogram.functions import (
                     agent_tools as _resolve_agent_tools,
                 )
                 tools_for_session = _resolve_agent_tools(
@@ -701,7 +702,7 @@ class Runtime:
                 )
                 agent_tools = tools_for_session or None
         elif raw_tools:
-            from openprogram.tools import apply_tool_policy as _apply_policy
+            from openprogram.functions import apply_tool_policy as _apply_policy
             adapted = _adapt_tools(raw_tools) or []
             adapted = _apply_policy(
                 adapted,

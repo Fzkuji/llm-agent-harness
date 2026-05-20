@@ -13,7 +13,7 @@ def _cmd_cli_chat(oneshot: str | None = None,
 def _cmd_deep_work(task, level, provider, model,
                    max_steps, max_revisions, interactive):
     """Run a deep_work session and stream the per-phase callback to stdout."""
-    from openprogram.programs.functions.buildin.deep_work import deep_work
+    from openprogram.functions.agentics.deep_work import deep_work
     from openprogram._cli_cmds.programs import _get_runtime
 
     runtime = _get_runtime(provider, model)

@@ -86,7 +86,7 @@ def tools_override_from_config(cfg: SessionRunConfig) -> Optional[list[str]]:
         return list(cfg.tools_override)
     if cfg.tools_enabled is True:
         try:
-            from openprogram.tools import DEFAULT_TOOLS
+            from openprogram.functions import DEFAULT_TOOLS
             return list(DEFAULT_TOOLS)
         except Exception:
             return []

@@ -14,8 +14,8 @@ from typing import Optional
 
 import pytest
 
-from openprogram.tools import _runtime as R
-from openprogram.tools._runtime import (
+from openprogram.functions import _runtime as R
+from openprogram.functions._runtime import (
     DEFAULT_HEAD_RATIO,
     DEFAULT_MAX_RESULT_CHARS,
     MIN_KEEP_CHARS,
@@ -29,10 +29,8 @@ from openprogram.tools._runtime import (
     get,
     register,
     reset_registry,
-    to_dict_tool,
-    tool,
+    function,
     tool_requires_approval,
-    wrap_legacy_tool,
 )
 
 
@@ -152,7 +150,7 @@ def test_cap_respects_min_floor() -> None:
 # ---------------------------------------------------------------------------
 
 def test_decorator_extracts_name_description_schema() -> None:
-    @tool
+    @function
     def echo(message: str, repeat: int = 1) -> str:
         """Repeat `message` `repeat` times.
 
@@ -170,7 +168,7 @@ def test_decorator_extracts_name_description_schema() -> None:
 
 
 def test_decorator_with_overrides() -> None:
-    @tool(name="custom", description="overridden", toolset=["core"])
+    @function(name="custom", description="overridden", toolset=["core"])
     def fn(x: int) -> str:
         return str(x)
     assert fn.name == "custom"
@@ -184,7 +182,7 @@ def test_decorator_with_overrides() -> None:
 # ---------------------------------------------------------------------------
 
 def test_sync_function_invoked_correctly() -> None:
-    @tool
+    @function
     def add(a: int, b: int) -> str:
         """Add two ints."""
         return str(a + b)
@@ -194,7 +192,7 @@ def test_sync_function_invoked_correctly() -> None:
 
 
 def test_async_function_invoked_correctly() -> None:
-    @tool
+    @function
     async def slow_add(a: int, b: int) -> str:
         """Add two ints, async."""
         await asyncio.sleep(0)
@@ -205,7 +203,7 @@ def test_async_function_invoked_correctly() -> None:
 
 
 def test_exception_caught_and_wrapped() -> None:
-    @tool
+    @function
     def bad(x: int) -> str:
         """Fails."""
         raise RuntimeError("boom")
@@ -222,7 +220,7 @@ def test_exception_caught_and_wrapped() -> None:
 def test_long_result_truncates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(R, "_tool_results_dir", lambda: tmp_path)
 
-    @tool(max_result_chars=200, persist_full=False)
+    @function(max_result_chars=200, persist_full=False)
     def big() -> str:
         """Huge."""
         return "Z" * 50_000
@@ -236,7 +234,7 @@ def test_long_result_truncates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
 def test_persist_full_writes_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(R, "_tool_results_dir", lambda: tmp_path)
 
-    @tool(max_result_chars=100, persist_full=True)
+    @function(max_result_chars=100, persist_full=True)
     def big() -> str:
         """Persist everything."""
         return "Q" * 50_000
@@ -254,7 +252,7 @@ def test_persist_full_writes_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
 # ---------------------------------------------------------------------------
 
 def test_tool_return_struct() -> None:
-    @tool
+    @function
     def info() -> ToolReturn:
         """Returns mixed content."""
         return ToolReturn(text="hello", json_data={"x": 1})
@@ -265,7 +263,7 @@ def test_tool_return_struct() -> None:
 
 
 def test_tool_return_error_flag() -> None:
-    @tool
+    @function
     def failing() -> ToolReturn:
         """Marks itself as error without raising."""
         return ToolReturn(text="oops", is_error=True)
@@ -279,7 +277,7 @@ def test_tool_return_error_flag() -> None:
 # ---------------------------------------------------------------------------
 
 def test_approval_static_true() -> None:
-    @tool(requires_approval=True)
+    @function(requires_approval=True)
     def dangerous() -> str:
         """Always asks."""
         return "ok"
@@ -295,7 +293,7 @@ def test_approval_callable_returns_string_reason() -> None:
             return f"Destructive: {command}"
         return None
 
-    @tool(requires_approval=gate)
+    @function(requires_approval=gate)
     def shell(command: str) -> str:
         """Run cmd."""
         return ""
@@ -311,7 +309,7 @@ def test_approval_callable_exception_defaults_to_require() -> None:
     def angry_gate(**_):
         raise ValueError("oops")
 
-    @tool(requires_approval=angry_gate)
+    @function(requires_approval=angry_gate)
     def stuff() -> str:
         return ""
 
@@ -326,7 +324,7 @@ def test_approval_callable_exception_defaults_to_require() -> None:
 def test_cache_hits() -> None:
     counter = {"n": 0}
 
-    @tool(cache=True, cache_ttl=60)
+    @function(cache=True, cache_ttl=60)
     def expensive(x: int) -> str:
         """Counts calls."""
         counter["n"] += 1
@@ -342,7 +340,7 @@ def test_cache_hits() -> None:
 def test_cache_skips_errors() -> None:
     counter = {"n": 0}
 
-    @tool(cache=True, cache_ttl=60)
+    @function(cache=True, cache_ttl=60)
     def maybe_fails(x: int) -> str:
         """Fails on x=1."""
         counter["n"] += 1
@@ -363,7 +361,7 @@ def test_cache_skips_errors() -> None:
 def test_on_update_callback_received() -> None:
     seen = []
 
-    @tool
+    @function
     def chatty(msg: str, *, on_update=None) -> str:
         """Emits progress."""
         on_update(f"working on {msg}")
@@ -375,7 +373,7 @@ def test_on_update_callback_received() -> None:
 
 
 def test_cancel_event_threaded_in() -> None:
-    @tool
+    @function
     def watcher(*, cancel=None) -> str:
         """Reads cancel flag."""
         return f"set={cancel.is_set()}" if cancel else "no_cancel"
@@ -391,7 +389,7 @@ def test_cancel_event_threaded_in() -> None:
 # ---------------------------------------------------------------------------
 
 def test_timeout_kills_long_tool() -> None:
-    @tool(timeout=0.05)
+    @function(timeout=0.05)
     async def slow() -> str:
         """Hangs."""
         await asyncio.sleep(5)
@@ -406,12 +404,12 @@ def test_timeout_kills_long_tool() -> None:
 # ---------------------------------------------------------------------------
 
 def test_registry_filter_by_toolset_and_source() -> None:
-    @tool(toolset=["core"])
+    @function(toolset=["core"])
     def safe() -> str:
         """OK in any channel."""
         return ""
 
-    @tool(toolset=["core"], unsafe_in=["wechat"])
+    @function(toolset=["core"], unsafe_in=["wechat"])
     def bash_like() -> str:
         """Hidden in wechat."""
         return ""
@@ -424,15 +422,15 @@ def test_registry_filter_by_toolset_and_source() -> None:
 
 
 def test_registry_filter_by_explicit_names() -> None:
-    @tool
+    @function
     def a() -> str:
         return ""
 
-    @tool
+    @function
     def b() -> str:
         return ""
 
-    @tool
+    @function
     def c() -> str:
         return ""
 
@@ -440,114 +438,255 @@ def test_registry_filter_by_explicit_names() -> None:
     assert {t.name for t in picked} == {"a", "c"}
 
 
-# ---------------------------------------------------------------------------
-# Backward-compat: to_dict_tool
-# ---------------------------------------------------------------------------
-
-def test_to_dict_tool_round_trip() -> None:
-    @tool
-    def shout(text: str) -> str:
-        """Uppercase."""
-        return text.upper()
-
-    legacy = to_dict_tool(shout)
-    assert legacy["spec"]["name"] == "shout"
-    assert legacy["spec"]["parameters"]["properties"]["text"]["type"] == "string"
-    # execute is a sync callable returning a plain string
-    assert legacy["execute"](text="hi") == "HI"
 
 
 # ---------------------------------------------------------------------------
-# wrap_legacy_tool — adapter for non-migrated dict tools
+# Layer 1 — available_if (Claude Code "conditional import" equivalent)
 # ---------------------------------------------------------------------------
 
-def test_wrap_legacy_tool_sync() -> None:
-    record = {
-        "spec": {
-            "name": "echo",
-            "description": "Echo input",
-            "parameters": {
-                "type": "object",
-                "properties": {"text": {"type": "string"}},
-                "required": ["text"],
-            },
-        },
-        "execute": lambda text: f">> {text}",
-    }
-    t = wrap_legacy_tool(record, toolsets=["core"])
-    assert get("echo") is t
-    assert t.description == "Echo input"
-    out = _run(t.execute("call-1", {"text": "hi"}, None, None))
-    assert out.content[0].text == ">> hi"
+def test_available_if_false_skips_registration() -> None:
+    """A function decorated with ``available_if=lambda: False`` is
+    never registered. ``get(name)`` returns None for the rest of the
+    process, mirroring Claude Code's ``feature(...) ? require(...) : []``
+    pattern."""
+    @function(name="ant_only", available_if=lambda: False)
+    def ant_only() -> str:
+        return "x"
+    assert get("ant_only") is None
 
 
-def test_wrap_legacy_tool_async() -> None:
-    async def runner(text: str) -> str:
-        await asyncio.sleep(0)
-        return text[::-1]
-
-    record = {
-        "spec": {
-            "name": "rev",
-            "description": "Reverse",
-            "parameters": {"type": "object", "properties": {}},
-        },
-        "execute": runner,
-    }
-    t = wrap_legacy_tool(record)
-    out = _run(t.execute("c", {"text": "abc"}, None, None))
-    assert out.content[0].text == "cba"
+def test_available_if_true_registers_normally() -> None:
+    @function(name="generally_available", available_if=lambda: True)
+    def fn() -> str:
+        """Always on."""
+        return "x"
+    assert get("generally_available") is not None
 
 
-def test_wrap_legacy_tool_error_wraps() -> None:
-    def boom(**_):
-        raise RuntimeError("kaboom")
-
-    record = {
-        "spec": {"name": "boom", "description": "x", "parameters": {}},
-        "execute": boom,
-    }
-    t = wrap_legacy_tool(record)
-    out = _run(t.execute("c", {}, None, None))
-    assert out.details and out.details.get("is_error") is True
-    assert "kaboom" in out.content[0].text
+def test_available_if_exception_treats_as_false() -> None:
+    """If the predicate raises, we fail closed — skip registration so
+    a misconfigured feature doesn't expose its tool by accident."""
+    @function(name="broken_gate", available_if=lambda: 1 / 0)
+    def fn() -> str:
+        return "x"
+    assert get("broken_gate") is None
 
 
-def test_wrap_legacy_tool_idempotent() -> None:
-    record = {
-        "spec": {"name": "dup", "description": "x", "parameters": {}},
-        "execute": lambda **_: "ok",
-    }
-    a = wrap_legacy_tool(record)
-    b = wrap_legacy_tool(record)
-    assert a is b      # second call short-circuits when already registered
+# ---------------------------------------------------------------------------
+# Layer 6 — defer + tool_search (Claude Code "shouldDefer" equivalent)
+# ---------------------------------------------------------------------------
+
+def test_defer_sidecar_set() -> None:
+    @function(name="rare", defer=True)
+    def rare() -> str:
+        """A deferred tool."""
+        return "x"
+    t = get("rare")
+    assert t is not None
+    assert getattr(t, "_defer") is True
 
 
-def test_wrap_legacy_tool_rejects_bad_record() -> None:
-    with pytest.raises(ValueError):
-        wrap_legacy_tool({"spec": {}, "execute": lambda: None})
-    with pytest.raises(ValueError):
-        wrap_legacy_tool({"spec": {"name": "x"}, "execute": "not callable"})
+def test_split_partitions_provider_vs_catalog() -> None:
+    from openprogram.functions._runtime import (
+        split_tools_for_dispatch, install_loaded_deferred,
+    )
+
+    @function(name="common")
+    def common() -> str:
+        """Always shipped with full schema."""
+        return "x"
+
+    @function(name="rare2", defer=True)
+    def rare() -> str:
+        """Only loaded on demand."""
+        return "x"
+
+    install_loaded_deferred()
+    provider, catalog = split_tools_for_dispatch([get("common"), get("rare2")])
+    assert [t.name for t in provider] == ["common"]
+    assert catalog == [("rare2", "Only loaded on demand.")]
 
 
-def test_wrap_legacy_tool_unsafe_in_filters() -> None:
-    record = {
-        "spec": {"name": "unsafe", "description": "x", "parameters": {}},
-        "execute": lambda **_: "ok",
-    }
-    wrap_legacy_tool(record, toolsets=["core"], unsafe_in=["wechat"])
-    assert "unsafe" in [t.name for t in filter_for(toolset="core")]
-    assert "unsafe" not in [t.name for t in filter_for(toolset="core", source="wechat")]
+def test_tool_search_promotes_deferred_into_provider_list() -> None:
+    from openprogram.functions._runtime import (
+        split_tools_for_dispatch, install_loaded_deferred,
+        tool_search,
+    )
+
+    @function(name="lazy_tool", defer=True)
+    def lazy() -> str:
+        """Loaded only when asked."""
+        return "x"
+
+    install_loaded_deferred()
+    result = _run(tool_search.execute(
+        "c1", {"select": "select:lazy_tool"}, None, None
+    ))
+    assert "Loaded 1 deferred tool" in result.content[0].text
+
+    provider, catalog = split_tools_for_dispatch([get("lazy_tool")])
+    assert [t.name for t in provider] == ["lazy_tool"]
+    assert catalog == []
 
 
-def test_registry_mirror_covers_every_legacy_tool() -> None:
-    """After importing openprogram.tools, every name in ALL_TOOLS must
-    have a mirror in the AgentTool registry. This is the migration
-    contract — break it and dispatcher silently loses tools."""
-    # Re-import so the autoload runs against a fresh registry
-    reset_registry()
-    import importlib
-    import openprogram.tools as t_mod
-    importlib.reload(t_mod)
-    missing = [n for n in t_mod.ALL_TOOLS if t_mod.get_agent_tool(n) is None]
-    assert missing == [], f"AgentTool registry missing: {missing}"
+def test_tool_search_handles_unknown_names() -> None:
+    from openprogram.functions._runtime import (
+        install_loaded_deferred, tool_search,
+    )
+    install_loaded_deferred()
+    result = _run(tool_search.execute(
+        "c1", {"select": "select:no_such_tool"}, None, None
+    ))
+    text = result.content[0].text
+    assert "Loaded 0" in text
+    assert "no_such_tool" in text
+
+
+def test_deferred_catalog_text_format() -> None:
+    """The catalog text must match the format the LLM has seen in
+    training (Claude Code's wording) so it recognises the pattern."""
+    from openprogram.functions._runtime import deferred_catalog_text
+    block = deferred_catalog_text([("CronCreate", "Create a cron job"),
+                                    ("WebFetch",   "Fetch a URL")])
+    assert "deferred tools" in block
+    assert "ToolSearch" in block
+    assert "select:" in block
+    assert "CronCreate" in block
+    assert "WebFetch" in block
+
+    # Empty input → empty string (so callers can unconditionally concat).
+    assert deferred_catalog_text([]) == ""
+
+
+# ---------------------------------------------------------------------------
+# @agentic_function bridge — shared registry
+# ---------------------------------------------------------------------------
+
+def test_agentic_function_registers_into_shared_registry() -> None:
+    """An @agentic_function should produce an AgentTool entry in
+    ``openprogram.functions._runtime._registry`` so the dispatcher
+    treats it identically to @function-decorated tools (toolset
+    membership, 6 gating layers, deferred loading)."""
+    from openprogram.agentic_programming.function import agentic_function
+
+    @agentic_function(
+        as_tool=True,
+        toolset=["core"],
+        description="Test agentic function registered as a tool.",
+    )
+    def my_agentic_tool(question: str) -> str:
+        """One-line description for the LLM."""
+        return f"answered: {question}"
+
+    t = get("my_agentic_tool")
+    assert t is not None, "agentic_function should appear in _registry"
+    assert t.description.startswith("Test agentic"), \
+        "description override should win over docstring"
+    # Sidecar attrs forwarded from agentic kwargs
+    assert getattr(t, "_check_fn", None) is None
+    assert getattr(t, "_defer", False) is False
+    # Toolset membership picked up by Hermes-style filter
+    assert t in filter_for(toolset="core")
+
+
+def test_agentic_function_as_tool_false_skips_registration() -> None:
+    """``as_tool=False`` keeps the agentic semantics (DAG, inner agent
+    loop) but does NOT expose the function to the LLM."""
+    from openprogram.agentic_programming.function import agentic_function
+
+    @agentic_function(as_tool=False, name="private_helper")
+    def private_helper(x: str) -> str:
+        """Should NOT appear in tool registry."""
+        return x
+
+    assert get("private_helper") is None
+
+
+def test_agentic_function_register_globally_false() -> None:
+    """``register_globally=False`` skips the shared AgentTool registry
+    but still attaches the wrapper to the instance (so Python-direct
+    invoke still works). Mirror of @function's ``register_globally`` kwarg."""
+    from openprogram.agentic_programming.function import agentic_function
+
+    @agentic_function(register_globally=False, name="off_grid")
+    def off_grid(x: str) -> str:
+        """Should not appear in shared _registry."""
+        return f"local-{x}"
+
+    # Not in the shared registry — dispatcher can't find it
+    assert get("off_grid") is None
+    # …but still callable as Python and the sidecar AgentTool exists
+    # (in case some local caller wants to drive it manually)
+    assert off_grid._agent_tool is not None
+    assert off_grid._agent_tool.name == "off_grid"
+
+
+def test_agentic_function_available_if_false_returns_raw_fn() -> None:
+    """Layer 1 gating on the with-parens form: when ``available_if``
+    returns False, the decorator returns the raw fn unchanged so
+    module-level callers don't end up with a half-built agentic
+    instance. Confirms ``__call__`` honors the Layer 1 early-exit."""
+    from openprogram.agentic_programming.function import agentic_function
+
+    @agentic_function(available_if=lambda: False, name="gated_agentic")
+    def gated(x: str) -> str:
+        return x
+
+    # Returned object should be the raw fn, not an agentic_function instance
+    assert not hasattr(gated, "_wrapper")
+    assert get("gated_agentic") is None
+
+
+# ---------------------------------------------------------------------------
+# Layer 2 — exposure whitelist (TOOLSETS["full"]["tools"])
+# ---------------------------------------------------------------------------
+
+def test_exposure_whitelist_filters_agent_tools() -> None:
+    """The Layer 2 filter intersects every LLM-facing query with
+    ``TOOLSETS["full"]["tools"]``. A registered tool whose name is not
+    on the list never appears in ``agent_tools(names=...)``,
+    ``get_agent_tool``, ``list_registered_agent_tools``."""
+    import openprogram.functions as F
+
+    @function(name="exposed_probe")
+    def p1() -> str:
+        return "x"
+
+    @function(name="hidden_probe")
+    def p2() -> str:
+        return "x"
+
+    saved_full = list(F.TOOLSETS["full"]["tools"])
+    try:
+        F.TOOLSETS["full"]["tools"][:] = ["exposed_probe"]
+        # agent_tools honors the whitelist
+        names = [t.name for t in F.agent_tools(names=["exposed_probe", "hidden_probe"])]
+        assert names == ["exposed_probe"]
+        # get_agent_tool honors it
+        assert F.get_agent_tool("exposed_probe") is not None
+        assert F.get_agent_tool("hidden_probe") is None
+        # list_registered_agent_tools honors it
+        listed = F.list_registered_agent_tools()
+        assert "exposed_probe" in listed
+        assert "hidden_probe" not in listed
+    finally:
+        F.TOOLSETS["full"]["tools"][:] = saved_full
+
+
+def test_exposure_whitelist_disabled_via_monkeypatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Setting ``_exposed_set`` to return ``None`` disables the filter —
+    test harness uses this in the ``fresh_registry`` fixture so ad-hoc
+    probe tools don't need to be added to the global whitelist."""
+    import openprogram.functions as F
+
+    @function(name="probe_unfiltered")
+    def p() -> str:
+        return "x"
+
+    # Default state: probe_unfiltered not in TOOLSETS["full"]["tools"],
+    # so it's filtered out
+    assert F.get_agent_tool("probe_unfiltered") is None
+
+    monkeypatch.setattr(F, "_exposed_set", lambda: None)
+    # Now the filter is disabled, so the probe is visible
+    assert F.get_agent_tool("probe_unfiltered") is not None

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from openprogram.tools.todo import todo
+from openprogram.functions.tools.todo import todo
 
 
 @pytest.fixture(autouse=True)

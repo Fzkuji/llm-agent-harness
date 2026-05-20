@@ -1,6 +1,6 @@
 import json
 
-from openprogram.programs.functions.third_party.test_framework import test_framework
+from openprogram.functions.agentics.test_framework import test_framework
 
 
 def test_framework_flags_vague_instruction_even_with_code_context():

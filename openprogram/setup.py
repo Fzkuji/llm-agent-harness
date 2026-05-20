@@ -67,7 +67,7 @@ def _write_config(cfg: dict[str, Any]) -> None:
 
 
 def read_disabled_tools() -> set[str]:
-    """Public helper consumed by openprogram.tools to filter list_available.
+    """Public helper consumed by openprogram.functions to filter list_available.
 
     Kept in this module so the tools package doesn't import config from
     deeper webui modules and drag in FastAPI at tool-registry import time.
