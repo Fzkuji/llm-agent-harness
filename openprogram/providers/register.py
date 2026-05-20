@@ -41,22 +41,43 @@ def register_builtins() -> None:
     _registered = True
 
     # Lazy imports so register.py module load doesn't pull these
-    # submodules into the still-loading providers package.
-    from openprogram.providers import anthropic, google, openai_completions
+    # submodules into the still-loading providers package. Each one
+    # is also wrapped in try/except: a user who only wants e.g.
+    # openai-codex shouldn't have to ``pip install anthropic`` just
+    # to make ``import openprogram`` work. Missing-SDK providers
+    # simply don't get registered; using them later raises a clean
+    # error rather than crashing the whole package init.
 
     # Anthropic Messages API
-    register_api_provider(
-        "anthropic-messages",
-        _StreamFnProvider(anthropic.stream_simple, anthropic.stream_simple),
-        source_id="builtin",
-    )
+    try:
+        from openprogram.providers import anthropic
+        register_api_provider(
+            "anthropic-messages",
+            _StreamFnProvider(anthropic.stream_simple, anthropic.stream_simple),
+            source_id="builtin",
+        )
+    except ImportError:
+        pass
 
     # OpenAI Chat Completions API
-    register_api_provider(
-        "openai-completions",
-        _StreamFnProvider(openai_completions.stream_simple, openai_completions.stream_simple),
-        source_id="builtin",
-    )
+    try:
+        from openprogram.providers import openai_completions
+        register_api_provider(
+            "openai-completions",
+            _StreamFnProvider(openai_completions.stream_simple, openai_completions.stream_simple),
+            source_id="builtin",
+        )
+    except ImportError:
+        pass
+
+    # Google Generative AI (referenced by subsequent registrations
+    # below; previously eagerly imported at the top alongside
+    # anthropic and openai_completions, which made google-genai a
+    # hidden hard-required install of openprogram).
+    try:
+        from openprogram.providers import google  # noqa: F401
+    except ImportError:
+        pass
 
     # OpenAI Responses API
     try:
