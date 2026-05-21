@@ -202,7 +202,7 @@ fn.input_meta[name]["placeholder"]（前缀 "e.g."）
 
 ## 8. WebUI 渲染行为
 
-WebUI 表单按以下规则渲染每个参数（在 `openprogram/webui/static/js/sidebar.js` 实现）。函数作者写 `@agentic_function(input={...})` 时应据此判断会得到什么样的输入控件：
+WebUI 表单按以下规则渲染每个参数（在 `web/components/programs/program-run-dialog.tsx` 实现）。函数作者写 `@agentic_function(input={...})` 时应据此判断会得到什么样的输入控件：
 
 | 参数特征 | WebUI 控件 |
 |---|---|

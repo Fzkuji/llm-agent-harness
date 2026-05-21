@@ -200,7 +200,7 @@ To add a new auto-injected name, edit `_AUTO_PARAMS` in `agentic_programming/fun
 
 ## 8. WebUI rendering behavior
 
-The WebUI form renders each parameter by the following rules (implemented in `openprogram/webui/static/js/sidebar.js`). When authoring `@agentic_function(input={...})`, use this table to predict what kind of input control your function will produce:
+The WebUI form renders each parameter by the following rules (implemented in `web/components/programs/program-run-dialog.tsx`). When authoring `@agentic_function(input={...})`, use this table to predict what kind of input control your function will produce:
 
 | Parameter trait | WebUI control |
 |---|---|
