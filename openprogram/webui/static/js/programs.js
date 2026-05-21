@@ -8,9 +8,15 @@ var pgCurrentFolder = '__all__';
 var pgViewMode = 'grid';
 var pgDraggedProgram = null;
 
-var pgCatIcons = { app: '\u{1F4E6}', meta: '\u{1F6E0}', builtin: '\u2699', generated: '\u2699', user: '\u270E' };
-var pgCatLabels = { app: 'Applications', meta: 'Meta Functions', builtin: 'Built-in', generated: 'Generated', user: 'User' };
-var pgCatOrder = { app: 0, generated: 1, user: 2, meta: 3, builtin: 4 };
+// After the function-calling unification the backend collapses to two
+// categories: `app` (harness entry points: gui_agent / research_agent /
+// wiki_agent) and `agentic` (everything else with @agentic_function).
+// The old builtin/generated/meta/user split came from
+// programs/functions/{buildin,third_party} + the deleted meta module,
+// none of which exist any more.
+var pgCatIcons = { app: '\u{1F4E6}', agentic: '\u2699' };
+var pgCatLabels = { app: 'Applications', agentic: 'Agentic Functions' };
+var pgCatOrder = { app: 0, agentic: 1 };
 
 /* ---------- Data ---------- */
 
@@ -165,11 +171,11 @@ function pgRenderContent() {
   if (sort === 'category') {
     var groups = {};
     for (var i = 0; i < programs.length; i++) {
-      var c = programs[i].category || 'user';
+      var c = programs[i].category || 'agentic';
       if (!groups[c]) groups[c] = [];
       groups[c].push(programs[i]);
     }
-    var cats = ['app', 'generated', 'user', 'meta', 'builtin'];
+    var cats = ['app', 'agentic'];
     for (var k = 0; k < cats.length; k++) {
       if (!groups[cats[k]]) continue;
       html += '<div class="pg-cat-section"><div class="pg-cat-header">' +
@@ -187,7 +193,7 @@ function pgRenderContent() {
 }
 
 function pgRenderCard(p) {
-  var cat = p.category || 'user';
+  var cat = p.category || 'agentic';
   var fav = pgIsFavorite(p.name);
   var desc = p.description ? p.description.split('.')[0] : '';
   var folder = pgGetFolderForProgram(p.name);

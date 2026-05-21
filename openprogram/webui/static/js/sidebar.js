@@ -473,11 +473,14 @@ function renderFunctions() {
 
   var favSet = new Set(programsMeta.favorites || []);
   var favFiltered = availableFunctions.filter(function(f) { return favSet.has(f.name); });
-  var catOrder = ['app', 'generated', 'user', 'meta', 'builtin'];
+  // Two categories now: 'app' (harness apps) and 'agentic'
+  // (everything else). Old builtin/generated/meta/user buckets
+  // are dead \u2014 see openprogram/functions/_registry.py.
+  var catOrder = ['app', 'agentic'];
   var favFns = [];
   for (var ci = 0; ci < catOrder.length; ci++) {
     for (var fi = 0; fi < favFiltered.length; fi++) {
-      if ((favFiltered[fi].category || 'user') === catOrder[ci]) favFns.push(favFiltered[fi]);
+      if ((favFiltered[fi].category || 'agentic') === catOrder[ci]) favFns.push(favFiltered[fi]);
     }
   }
 
@@ -488,12 +491,12 @@ function renderFunctions() {
   }
 
   section.classList.remove('empty');
-  var catIcons = { app: '\u{1F4E6}', meta: '\u{1F6E0}', builtin: '\u2699', generated: '\u2699', user: '\u270E' };
+  var catIcons = { app: '\u{1F4E6}', agentic: '\u2699' };
   var maxShow = 4;
   var html = '';
   for (var i = 0; i < Math.min(favFns.length, maxShow); i++) {
     var f = favFns[i];
-    var cat = f.category || 'user';
+    var cat = f.category || 'agentic';
     var icon = catIcons[cat] || '\u270E';
     html += '<div class="fav-item" onclick="clickFunction(\'' + escAttr(f.name) + '\', \'' + escAttr(cat) + '\')" title="' + escAttr(f.description || '') + '">' +
       '<span class="fav-icon">' + icon + '</span>' +
@@ -597,8 +600,11 @@ function _buildFieldsHtml(fn) {
         '</div>';
     } else if (p.options_from === 'functions') {
       var fnOpts = availableFunctions.filter(function(f) {
-        var cat = f.category || 'user';
-        return cat !== 'meta' && cat !== 'builtin';
+        // After unification only 'app' + 'agentic' categories exist
+        // (old 'meta' / 'builtin' were filtered out here historically;
+        // both buckets are gone, so the filter is just a passthrough).
+        var cat = f.category || 'agentic';
+        return cat === 'app' || cat === 'agentic';
       });
       var selectHtml = '<option value="">-- select --</option>';
       for (var j = 0; j < fnOpts.length; j++) {

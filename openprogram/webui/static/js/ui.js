@@ -314,11 +314,13 @@ function showCodeModal(name, source, category) {
   document.getElementById('codeModalTitle').textContent = name;
   document.getElementById('codeModalPre').innerHTML = highlightPython(source);
 
-  var actions = '<button class="code-modal-btn" onclick="closeCodeModal()">Close</button>';
-  if (category !== 'meta') {
-    actions += '<button class="code-modal-btn" onclick="editInModal(\'' + escAttr(name) + '\')">Edit</button>';
-    actions += '<button class="code-modal-btn" onclick="fixFromModal(\'' + escAttr(name) + '\')">Fix with LLM</button>';
-  }
+  // Every category in the unified function-calling world is
+  // user-editable (the read-only 'meta' bucket got removed when the
+  // meta module went away — agents now edit .py files directly via
+  // the agentic-programming skill).
+  var actions = '<button class="code-modal-btn" onclick="closeCodeModal()">Close</button>' +
+    '<button class="code-modal-btn" onclick="editInModal(\'' + escAttr(name) + '\')">Edit</button>' +
+    '<button class="code-modal-btn" onclick="fixFromModal(\'' + escAttr(name) + '\')">Fix with LLM</button>';
   document.getElementById('codeModalActions').innerHTML = actions;
 
   requestAnimationFrame(function() { modal.classList.add('active'); });

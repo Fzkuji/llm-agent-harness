@@ -277,13 +277,33 @@ def _extract_function_info(filepath: str, name: Optional[str], category: str) ->
 
 
 def _extract_all_functions(filepath: str, category: str) -> list[dict]:
-    """Extract ALL @agentic_function decorated functions from a .py file."""
+    """Extract ALL @agentic_function-decorated functions from a .py file.
+
+    Decorator may span multiple lines (e.g. ``@agentic_function(input={...})``
+    with a multi-line dict literal), so the regex uses ``[\\s\\S]*?`` and
+    ``re.DOTALL`` to span linebreaks between ``@agentic_function`` and
+    ``def``. Falls back to the parent-directory name when the discovered
+    file is an ``__init__.py`` (the new agentics layout puts each
+    function in its own dir with code in ``__init__.py``, so the bare
+    file basename is always "__init__" and useless as a name).
+    """
     results: list[dict] = []
     try:
         with open(filepath) as f:
             content = f.read()
 
-        for match in re.finditer(r"@agentic_function[^\n]*\s*def\s+(\w+)\s*\(", content):
+        # Anchor ``@agentic_function`` to start-of-line (with only
+        # leading whitespace). Otherwise the regex also matches
+        # mentions inside docstrings / comments like "in an
+        # @agentic_function body" and then picks up the next def below
+        # — yielding bogus entries (e.g. ``set_ask_user`` from
+        # ``ask_user/__init__.py``, whose module docstring mentions
+        # the decorator).
+        for match in re.finditer(
+            r"^[ \t]*@agentic_function[\s\S]*?def\s+(\w+)\s*\(",
+            content,
+            re.MULTILINE,
+        ):
             name = match.group(1)
             if name.startswith("_"):
                 continue
@@ -293,6 +313,10 @@ def _extract_all_functions(filepath: str, category: str) -> list[dict]:
 
         if not results:
             basename = os.path.splitext(os.path.basename(filepath))[0]
+            if basename == "__init__":
+                # Fall back to the containing directory name —
+                # agentics/<name>/__init__.py convention.
+                basename = os.path.basename(os.path.dirname(filepath))
             info = _extract_function_info(filepath, basename, category)
             if info:
                 results.append(info)
